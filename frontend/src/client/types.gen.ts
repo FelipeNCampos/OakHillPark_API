@@ -68,6 +68,7 @@ export type UserCreate = {
     is_superuser?: boolean;
     full_name?: (string | null);
     password: string;
+    cargo?: number;
 };
 
 export type UserPublic = {
@@ -77,12 +78,14 @@ export type UserPublic = {
     full_name?: (string | null);
     id: string;
     created_at?: (string | null);
+    cargo?: number;
 };
 
 export type UserRegister = {
     email: string;
     password: string;
     full_name?: (string | null);
+    cargo?: number;
 };
 
 export type UsersPublic = {
@@ -96,6 +99,7 @@ export type UserUpdate = {
     is_superuser?: boolean;
     full_name?: (string | null);
     password?: (string | null);
+    cargo?: number;
 };
 
 export type UserUpdateMe = {

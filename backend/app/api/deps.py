@@ -55,3 +55,12 @@ def get_current_active_superuser(current_user: CurrentUser) -> User:
             status_code=403, detail="The user doesn't have enough privileges"
         )
     return current_user
+
+
+def require_cargo(max_cargo: int):
+    def _require_cargo(current_user: CurrentUser) -> User:
+        if current_user.cargo > max_cargo:
+            raise HTTPException(status_code=403, detail="Not enough permissions")
+        return current_user
+
+    return _require_cargo

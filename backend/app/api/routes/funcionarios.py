@@ -1,0 +1,70 @@
+import uuid
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlmodel import func, select
+
+from app.api.deps import SessionDep, require_cargo
+from app.models import (
+    Funcionario,
+    FuncionarioCreate,
+    FuncionarioPublic,
+    FuncionarioUpdate,
+    FuncionariosPublic,
+    Message,
+)
+
+router = APIRouter(prefix="/funcionarios", tags=["funcionarios"])
+
+
+@router.get("/", response_model=FuncionariosPublic, dependencies=[Depends(require_cargo(2))])
+def read_funcionarios(session: SessionDep, skip: int = 0, limit: int = 100) -> Any:
+    count_statement = select(func.count()).select_from(Funcionario)
+    count = session.exec(count_statement).one()
+    statement = select(Funcionario).offset(skip).limit(limit)
+    funcionarios = session.exec(statement).all()
+    return FuncionariosPublic(data=funcionarios, count=count)
+
+
+@router.get("/{id}", response_model=FuncionarioPublic, dependencies=[Depends(require_cargo(2))])
+def read_funcionario(session: SessionDep, id: uuid.UUID) -> Any:
+    funcionario = session.get(Funcionario, id)
+    if not funcionario:
+        raise HTTPException(status_code=404, detail="Funcionario not found")
+    return funcionario
+
+
+@router.post("/", response_model=FuncionarioPublic, dependencies=[Depends(require_cargo(2))])
+def create_funcionario(
+    *, session: SessionDep, funcionario_in: FuncionarioCreate
+) -> Any:
+    funcionario = Funcionario.model_validate(funcionario_in)
+    session.add(funcionario)
+    session.commit()
+    session.refresh(funcionario)
+    return funcionario
+
+
+@router.patch("/{id}", response_model=FuncionarioPublic, dependencies=[Depends(require_cargo(2))])
+def update_funcionario(
+    *, session: SessionDep, id: uuid.UUID, funcionario_in: FuncionarioUpdate
+) -> Any:
+    funcionario = session.get(Funcionario, id)
+    if not funcionario:
+        raise HTTPException(status_code=404, detail="Funcionario not found")
+    update_dict = funcionario_in.model_dump(exclude_unset=True)
+    funcionario.sqlmodel_update(update_dict)
+    session.add(funcionario)
+    session.commit()
+    session.refresh(funcionario)
+    return funcionario
+
+
+@router.delete("/{id}", response_model=Message, dependencies=[Depends(require_cargo(2))])
+def delete_funcionario(session: SessionDep, id: uuid.UUID) -> Message:
+    funcionario = session.get(Funcionario, id)
+    if not funcionario:
+        raise HTTPException(status_code=404, detail="Funcionario not found")
+    session.delete(funcionario)
+    session.commit()
+    return Message(message="Funcionario deleted successfully")

@@ -9,6 +9,13 @@ export type UserTableData = UserPublic & {
   isCurrentUser: boolean
 }
 
+const cargoLabels: Record<number, string> = {
+  0: "Morador",
+  1: "Funcionario",
+  2: "Gerente",
+  3: "Administrador",
+}
+
 export const columns: ColumnDef<UserTableData>[] = [
   {
     accessorKey: "full_name",
@@ -36,6 +43,15 @@ export const columns: ColumnDef<UserTableData>[] = [
     header: "Email",
     cell: ({ row }) => (
       <span className="text-muted-foreground">{row.original.email}</span>
+    ),
+  },
+  {
+    accessorKey: "cargo",
+    header: "Cargo",
+    cell: ({ row }) => (
+      <Badge variant="outline">
+        {cargoLabels[row.original.cargo ?? 0] ?? "Morador"}
+      </Badge>
     ),
   },
   {

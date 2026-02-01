@@ -116,7 +116,7 @@ function ClientDashboard() {
       case "buildings":
         return <BuildingsReadingsContent />
       case "flats":
-        return <TabContent title="Flats" />
+        return <FlatsReadingsContent />
       case "qr-cleaner":
         return <TabContent title="QR Code - Cleaner" />
       case "qr-contractor":
@@ -1125,6 +1125,717 @@ function AddReadingsForm({ buildings, onBack }: { buildings: any[]; onBack: () =
           </div>
         </form>
       </div>
+    </div>
+  )
+}
+
+function AddFlatReadingsForm({ buildings, onBack }: { buildings: any[]; onBack: () => void }) {
+  const [formData, setFormData] = useState<Record<string, Record<string, string>>>({})
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  // Initialize form data with flat IDs - only include flats with reading_types != 0
+  useEffect(() => {
+    const initialData: Record<string, Record<string, string>> = {}
+    buildings.forEach((building: any) => {
+      building.flats?.forEach((flat: any) => {
+        // Skip flats without readings
+        if (flat.reading_types === 0) return
+
+        initialData[flat.id] = {}
+        const hasLow = (flat.reading_types & 1) !== 0
+        const hasNormal = (flat.reading_types & 2) !== 0
+        const hasGas = (flat.reading_types & 4) !== 0
+
+        if (hasLow) initialData[flat.id].low = ""
+        if (hasNormal) initialData[flat.id].normal = ""
+        if (hasGas) initialData[flat.id].gas = ""
+      })
+    })
+    setFormData(initialData)
+  }, [buildings])
+
+  const handleInputChange = (flatId: string, type: string, value: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      [flatId]: {
+        ...prev[flatId],
+        [type]: value,
+      },
+    }))
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setIsSubmitting(true)
+
+    try {
+      const readings: any[] = []
+      
+      // Convert form data to API format
+      Object.entries(formData).forEach(([flatId, types]) => {
+        Object.entries(types).forEach(([type, value]) => {
+          if (value && value.trim() !== "") {
+            let tipoValue = 0
+            if (type === "low") tipoValue = 1
+            else if (type === "normal") tipoValue = 2
+            else if (type === "gas") tipoValue = 4
+
+            readings.push({
+              flat_id: flatId,
+              tipo: tipoValue,
+              valor: parseInt(value, 10),
+            })
+          }
+        })
+      })
+
+      // Submit all readings
+      for (const reading of readings) {
+        await fetch(`${OpenAPI.BASE || "http://localhost:8000"}/api/v1/flat_readings/`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${localStorage.getItem("access_token")}`,
+          },
+          body: JSON.stringify(reading),
+        })
+      }
+
+      alert("Readings cadastradas com sucesso!")
+      onBack()
+    } catch (error) {
+      console.error("Error submitting readings:", error)
+      alert("Erro ao cadastrar readings")
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  // Get flats grouped by building
+  const buildingsWithFlats = buildings.map((building: any) => ({
+    ...building,
+    flats: building.flats?.filter((flat: any) => flat.reading_types !== 0) || [],
+  })).filter((building: any) => building.flats.length > 0)
+
+  if (buildingsWithFlats.length === 0) {
+    return (
+      <div className="mx-auto max-w-7xl">
+        <div className="rounded-lg bg-white p-8 shadow-md">
+          <div className="mb-6 flex items-center justify-between">
+            <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
+              Adicionar Flat Readings
+            </h2>
+            <button
+              onClick={onBack}
+              className="rounded-lg bg-gray-500 px-4 py-2 font-['Nunito',sans-serif] text-sm font-semibold text-white transition-all duration-300 hover:bg-gray-600"
+              type="button"
+            >
+              Voltar
+            </button>
+          </div>
+          <p className="text-[#55311c] font-['Nunito',sans-serif]">
+            Nenhum flat com readings configurados encontrado
+          </p>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="mx-auto max-w-7xl">
+      <div className="rounded-lg bg-white p-8 shadow-md">
+        <div className="mb-6 flex items-center justify-between">
+          <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
+            Adicionar Flat Readings
+          </h2>
+          <button
+            onClick={onBack}
+            className="rounded-lg bg-gray-500 px-4 py-2 font-['Nunito',sans-serif] text-sm font-semibold text-white transition-all duration-300 hover:bg-gray-600"
+            type="button"
+          >
+            Voltar
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit}>
+          <div className="space-y-6">
+            {buildingsWithFlats.map((building: any) => (
+              <div key={building.id} className="rounded-lg border-2 border-[#8c7569] p-4">
+                <h3 className="mb-4 font-['Nunito',sans-serif] text-xl font-bold text-[#8c7569]">
+                  {building.nome}
+                </h3>
+                
+                <div className="space-y-4">
+                  {building.flats.map((flat: any) => {
+                    const hasLow = (flat.reading_types & 1) !== 0
+                    const hasNormal = (flat.reading_types & 2) !== 0
+                    const hasGas = (flat.reading_types & 4) !== 0
+
+                    return (
+                      <div
+                        key={flat.id}
+                        className="rounded-lg border-2 border-[#ddd] p-4"
+                      >
+                        <h4 className="mb-3 font-['Nunito',sans-serif] text-lg font-semibold text-[#55311c]">
+                          Flat {flat.numero}
+                        </h4>
+
+                        <div className="grid gap-4 md:grid-cols-3">
+                          {hasLow && (
+                            <div>
+                              <label className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]">
+                                Low
+                              </label>
+                              <input
+                                type="number"
+                                value={formData[flat.id]?.low || ""}
+                                onChange={(e) =>
+                                  handleInputChange(flat.id, "low", e.target.value)
+                                }
+                                className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+                                placeholder="Valor Low"
+                              />
+                            </div>
+                          )}
+
+                          {hasNormal && (
+                            <div>
+                              <label className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]">
+                                Normal
+                              </label>
+                              <input
+                                type="number"
+                                value={formData[flat.id]?.normal || ""}
+                                onChange={(e) =>
+                                  handleInputChange(flat.id, "normal", e.target.value)
+                                }
+                                className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+                                placeholder="Valor Normal"
+                              />
+                            </div>
+                          )}
+
+                          {hasGas && (
+                            <div>
+                              <label className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]">
+                                Gas
+                              </label>
+                              <input
+                                type="number"
+                                value={formData[flat.id]?.gas || ""}
+                                onChange={(e) =>
+                                  handleInputChange(flat.id, "gas", e.target.value)
+                                }
+                                className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+                                placeholder="Valor Gas"
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-8 flex justify-end gap-4">
+            <button
+              type="button"
+              onClick={onBack}
+              className="rounded-lg bg-gray-500 px-6 py-3 font-['Nunito',sans-serif] text-white transition-all duration-300 hover:bg-gray-600"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="rounded-lg bg-[#8c7569] px-6 py-3 font-['Nunito',sans-serif] text-white transition-all duration-300 hover:bg-[#55311c] disabled:opacity-50"
+            >
+              {isSubmitting ? "Salvando..." : "Salvar Readings"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+function FlatsReadingsContent() {
+  const [selectedBuildingId, setSelectedBuildingId] = useState<string | null>(null)
+  const [selectedFlatId, setSelectedFlatId] = useState<string | null>(null)
+  const [showForm, setShowForm] = useState(false)
+
+  const {
+    data: buildingsData,
+    isLoading: buildingsLoading,
+  } = useQuery({
+    queryKey: ["buildings"],
+    queryFn: () => apiCall("/api/v1/buildings/"),
+  })
+
+  const buildings = buildingsData?.data || []
+  const selectedBuilding = buildings.find((b: any) => b.id === selectedBuildingId)
+  const allFlats = selectedBuilding?.flats || []
+  // Filter flats by reading_types != 0
+  const flats = allFlats.filter((f: any) => f.reading_types !== 0)
+
+  // Reset flat selection when building changes
+  useEffect(() => {
+    setSelectedFlatId(null)
+  }, [selectedBuildingId])
+
+  if (buildingsLoading) {
+    return (
+      <div className="mx-auto max-w-7xl">
+        <div className="rounded-lg bg-white p-8 shadow-md text-center">
+          <p className="text-[#55311c]">Carregando buildings...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!buildings.length) {
+    return (
+      <div className="mx-auto max-w-7xl">
+        <div className="rounded-lg bg-white p-8 shadow-md text-center">
+          <p className="text-[#55311c]">Nenhum building encontrado</p>
+        </div>
+      </div>
+    )
+  }
+
+  const selectedFlat = flats.find((f: any) => f.id === selectedFlatId)
+
+  if (showForm) {
+    return (
+      <AddFlatReadingsForm 
+        buildings={buildings} 
+        onBack={() => setShowForm(false)} 
+      />
+    )
+  }
+
+  return (
+    <div className="mx-auto max-w-7xl">
+      <div className="rounded-lg bg-white p-8 shadow-md">
+        <div className="mb-6 flex items-center justify-between">
+          <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
+            Flats - Readings
+          </h2>
+          <button
+            onClick={() => setShowForm(true)}
+            className="flex items-center gap-2 rounded-lg bg-[#8c7569] px-4 py-2 font-['Nunito',sans-serif] text-sm font-semibold text-white transition-all duration-300 hover:bg-[#55311c]"
+            type="button"
+          >
+            <svg
+              className="h-5 w-5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 4v16m8-8H4"
+              />
+            </svg>
+            Reading
+          </button>
+        </div>
+
+        {/* Building Selection */}
+        <div className="mb-6">
+          <label className="block font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c] mb-3">
+            Selecione um Building:
+          </label>
+          <div className="flex gap-3 w-full">
+            {buildings.map((building: any) => (
+              <button
+                key={building.id}
+                onClick={() => setSelectedBuildingId(building.id)}
+                className={`flex-1 px-6 py-3 rounded-lg font-['Nunito',sans-serif] font-semibold transition-all duration-200 ${
+                  selectedBuildingId === building.id
+                    ? 'bg-[#55311c] text-white shadow-lg'
+                    : 'bg-[#e8e4e1] text-[#55311c] hover:bg-[#ddd8d5]'
+                }`}
+                type="button"
+              >
+                {building.nome}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Flat Selection */}
+        {selectedBuildingId && (
+          <div className="mb-6">
+            <label className="block font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c] mb-3">
+              Selecione um Flat:
+            </label>
+            {flats.length > 0 ? (
+              <div className="flex gap-3 w-full flex-wrap">
+                {flats.map((flat: any) => (
+                  <button
+                    key={flat.id}
+                    onClick={() => setSelectedFlatId(flat.id)}
+                    className={`px-6 py-3 rounded-lg font-['Nunito',sans-serif] font-semibold transition-all duration-200 ${
+                      selectedFlatId === flat.id
+                        ? 'bg-[#55311c] text-white shadow-lg'
+                        : 'bg-[#e8e4e1] text-[#55311c] hover:bg-[#ddd8d5]'
+                    }`}
+                    type="button"
+                  >
+                    Flat {flat.numero}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-lg bg-[#f5f1ee] p-4">
+                <p className="text-[#55311c] font-['Nunito',sans-serif]">
+                  Nenhum flat com readings configurados neste building
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {selectedFlat && (
+          <FlatReadingsTable
+            flat={selectedFlat}
+            onPrevious={() => {
+              const currentIndex = flats.findIndex((f: any) => f.id === selectedFlatId)
+              if (currentIndex > 0) {
+                setSelectedFlatId(flats[currentIndex - 1].id)
+              }
+            }}
+            onNext={() => {
+              const currentIndex = flats.findIndex((f: any) => f.id === selectedFlatId)
+              if (currentIndex < flats.length - 1) {
+                setSelectedFlatId(flats[currentIndex + 1].id)
+              }
+            }}
+            hasPrevious={flats.findIndex((f: any) => f.id === selectedFlatId) > 0}
+            hasNext={flats.findIndex((f: any) => f.id === selectedFlatId) < flats.length - 1}
+          />
+        )}
+      </div>
+    </div>
+  )
+}
+
+function FlatReadingsTable({
+  flat,
+  onPrevious,
+  onNext,
+  hasPrevious,
+  hasNext,
+}: {
+  flat: any
+  onPrevious: () => void
+  onNext: () => void
+  hasPrevious: boolean
+  hasNext: boolean
+}) {
+  const {
+    data: readingsData,
+    isLoading,
+    error,
+  } = useQuery({
+    queryKey: ["flat_readings", flat.id],
+    queryFn: () =>
+      apiCall("/api/v1/flat_readings/", {
+        skip: 0,
+        limit: 1000,
+        flat_id: flat.id,
+      }),
+  })
+
+  const readings = (readingsData?.data || []) as any[]
+
+  // Determine which types this flat has (bitmask: 1=Low, 2=Normal, 4=Gas)
+  const hasLow = (flat.reading_types & 1) !== 0
+  const hasNormal = (flat.reading_types & 2) !== 0
+  const hasGas = (flat.reading_types & 4) !== 0
+
+  if (isLoading) {
+    return <p className="text-center text-[#55311c]">Carregando readings...</p>
+  }
+
+  if (error || !readings.length) {
+    return (
+      <p className="text-center text-[#55311c]">
+        Nenhuma leitura encontrada para este flat
+      </p>
+    )
+  }
+
+  // Define interface for grouped readings
+  interface ReadingByDate {
+    date: string
+    low?: number
+    normal?: number
+    gas?: number
+  }
+
+  // Group readings by date
+  const readingsByDate: Record<string, ReadingByDate> = {}
+  for (const reading of readings) {
+    const date = new Date(reading.data).toISOString().split("T")[0]
+    if (!readingsByDate[date]) {
+      readingsByDate[date] = { date: reading.data, low: undefined, normal: undefined, gas: undefined }
+    }
+    if (reading.tipo === 1) readingsByDate[date].low = reading.valor
+    if (reading.tipo === 2) readingsByDate[date].normal = reading.valor
+    if (reading.tipo === 4) readingsByDate[date].gas = reading.valor
+  }
+
+  // Convert to array and sort by date (newest first)
+  const sortedReadings: ReadingByDate[] = Object.values(readingsByDate).sort(
+    (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+  )
+
+  // Calculate days, used values, and percentages
+  interface ProcessedReading extends ReadingByDate {
+    days: number
+    lowUsed?: number
+    lowPercent?: string
+    normalUsed?: number
+    normalPercent?: string
+    gasUsed?: number
+    gasPercent?: string
+  }
+
+  const processedData: ProcessedReading[] = sortedReadings.map((current, index) => {
+    const previous: ReadingByDate | undefined = sortedReadings[index + 1]
+    const currentDate = new Date(current.date)
+
+    let days = 0
+    if (previous) {
+      const prevDate = new Date(previous.date)
+      days = Math.round((currentDate.getTime() - prevDate.getTime()) / (1000 * 60 * 60 * 24))
+    }
+
+    const result: ProcessedReading = {
+      ...current,
+      days,
+    }
+
+    // Calculate Low values
+    if (hasLow && current.low !== undefined) {
+      result.low = current.low
+      if (previous && previous.low !== undefined) {
+        result.lowUsed = current.low - previous.low
+        result.lowPercent = previous.low !== 0 
+          ? ((result.lowUsed / previous.low) * 100).toFixed(2)
+          : "0.00"
+      }
+    }
+
+    // Calculate Normal values
+    if (hasNormal && current.normal !== undefined) {
+      result.normal = current.normal
+      if (previous && previous.normal !== undefined) {
+        result.normalUsed = current.normal - previous.normal
+        result.normalPercent = previous.normal !== 0
+          ? ((result.normalUsed / previous.normal) * 100).toFixed(2)
+          : "0.00"
+      }
+    }
+
+    // Calculate Gas values
+    if (hasGas && current.gas !== undefined) {
+      result.gas = current.gas
+      if (previous && previous.gas !== undefined) {
+        result.gasUsed = current.gas - previous.gas
+        result.gasPercent = previous.gas !== 0
+          ? ((result.gasUsed / previous.gas) * 100).toFixed(2)
+          : "0.00"
+      }
+    }
+
+    return result
+  })
+
+  // Get color class based on percentage value
+  const getPercentColor = (percent: string | undefined) => {
+    if (!percent) return ""
+    const value = parseFloat(percent)
+    if (value < 0) return "bg-green-200" // Economy
+    if (value > 20) return "bg-red-200" // High consumption
+    if (value > 10) return "bg-orange-100" // Medium-high consumption
+    return "bg-yellow-50" // Normal consumption
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      {/* Flat Header */}
+      <div className="mb-4 rounded-t-lg bg-[#2d8659] p-4 text-white relative">
+        {/* Previous Button */}
+        <button
+          onClick={onPrevious}
+          disabled={!hasPrevious}
+          className={`absolute left-4 top-1/2 -translate-y-1/2 p-2 rounded-full transition-all duration-200 ${
+            hasPrevious 
+              ? 'bg-white/20 hover:bg-white/30 cursor-pointer' 
+              : 'bg-white/10 cursor-not-allowed opacity-50'
+          }`}
+          type="button"
+        >
+          <svg
+            className="h-6 w-6 text-white"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M15 19l-7-7 7-7"
+            />
+          </svg>
+        </button>
+
+        {/* Flat Info */}
+        <div className="text-center">
+          <h3 className="text-2xl font-bold font-['Nunito',sans-serif]">
+            Flat {flat.numero}
+          </h3>
+          <p className="text-sm mt-1">Building: {flat.building?.nome || "N/A"}</p>
+        </div>
+
+        {/* Next Button */}
+        <button
+          onClick={onNext}
+          disabled={!hasNext}
+          className={`absolute right-4 top-1/2 -translate-y-1/2 p-2 rounded-full transition-all duration-200 ${
+            hasNext 
+              ? 'bg-white/20 hover:bg-white/30 cursor-pointer' 
+              : 'bg-white/10 cursor-not-allowed opacity-50'
+          }`}
+          type="button"
+        >
+          <svg
+            className="h-6 w-6 text-white"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M9 5l7 7-7 7"
+            />
+          </svg>
+        </button>
+      </div>
+
+      <table className="w-full border-collapse">
+        <thead>
+          <tr className="bg-gray-200">
+            <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700">
+              Days
+            </th>
+            <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700">
+              Date
+            </th>
+            {hasLow && (
+              <>
+                <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700">
+                  Low
+                </th>
+                <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700 italic">
+                  used
+                </th>
+                <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700">
+                  %
+                </th>
+              </>
+            )}
+            {hasNormal && (
+              <>
+                <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700">
+                  Normal
+                </th>
+                <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700 italic">
+                  used
+                </th>
+                <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700">
+                  %
+                </th>
+              </>
+            )}
+            {hasGas && (
+              <>
+                <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700">
+                  Gas
+                </th>
+                <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700 italic">
+                  used
+                </th>
+                <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700">
+                  %
+                </th>
+              </>
+            )}
+          </tr>
+        </thead>
+        <tbody>
+          {processedData.map((row, index) => (
+            <tr key={index} className="hover:bg-gray-50">
+              <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-700">
+                {index === 0 ? "All" : row.days}
+              </td>
+              <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-700">
+                {new Date(row.date).toLocaleDateString("pt-BR")}
+              </td>
+              {hasLow && (
+                <>
+                  <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-700">
+                    {row.low ?? "-"}
+                  </td>
+                  <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-700">
+                    {index === 0 ? "All" : row.lowUsed ?? "-"}
+                  </td>
+                  <td className={`border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-700 ${getPercentColor(row.lowPercent)}`}>
+                    {index === 0 ? "no data" : row.lowPercent ?? "-"}
+                  </td>
+                </>
+              )}
+              {hasNormal && (
+                <>
+                  <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-700">
+                    {row.normal ?? "-"}
+                  </td>
+                  <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-700">
+                    {index === 0 ? "All" : row.normalUsed ?? "-"}
+                  </td>
+                  <td className={`border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-700 ${getPercentColor(row.normalPercent)}`}>
+                    {index === 0 ? "no data" : row.normalPercent ?? "-"}
+                  </td>
+                </>
+              )}
+              {hasGas && (
+                <>
+                  <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-700">
+                    {row.gas ?? "-"}
+                  </td>
+                  <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-700">
+                    {index === 0 ? "All" : row.gasUsed ?? "-"}
+                  </td>
+                  <td className={`border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-700 ${getPercentColor(row.gasPercent)}`}>
+                    {index === 0 ? "no data" : row.gasPercent ?? "-"}
+                  </td>
+                </>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }

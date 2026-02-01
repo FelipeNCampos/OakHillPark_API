@@ -106,11 +106,16 @@ class Flat(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     numero: int = Field(default=0)
     status: bool = Field(default=False)
+    # Reading types this flat has (bitmask: 1=Low, 2=Normal, 4=Gas)
+    reading_types: int = Field(default=0)  # Default: 0 (no readings)
     building_id: uuid.UUID = Field(
         foreign_key="building.id", nullable=False, ondelete="CASCADE"
     )
     building: Building | None = Relationship(back_populates="flats")
     moradores: list["Morador"] = Relationship(
+        back_populates="flat", cascade_delete=True
+    )
+    readings: list["FlatReading"] = Relationship(
         back_populates="flat", cascade_delete=True
     )
 
@@ -176,6 +181,20 @@ class Readings(SQLModel, table=True):
         foreign_key="building.id", nullable=False, ondelete="CASCADE"
     )
     building: Building | None = Relationship(back_populates="readings")
+
+
+class FlatReading(SQLModel, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    data: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+    tipo: int = Field(default=0)  # 1=Low, 2=Normal, 4=Gas
+    valor: int
+    flat_id: uuid.UUID = Field(
+        foreign_key="flat.id", nullable=False, ondelete="CASCADE"
+    )
+    flat: Flat | None = Relationship(back_populates="readings")
 
 
 # Generic message
@@ -244,8 +263,21 @@ class BuildingPublic(BuildingBase):
     id: uuid.UUID
 
 
+class FlatPublicSimple(SQLModel):
+    id: uuid.UUID
+    numero: int
+    status: bool
+    building_id: uuid.UUID
+    reading_types: int
+
+
+class BuildingPublicWithFlats(BuildingBase):
+    id: uuid.UUID
+    flats: list[FlatPublicSimple] = []
+
+
 class BuildingsPublic(SQLModel):
-    data: list[BuildingPublic]
+    data: list[BuildingPublicWithFlats]
     count: int
 
 
@@ -253,6 +285,7 @@ class FlatBase(SQLModel):
     numero: int = Field(default=0)
     status: bool = Field(default=False)
     building_id: uuid.UUID
+    reading_types: int = Field(default=0, ge=0, le=7)  # Bitmask: 1=Low, 2=Normal, 4=Gas
 
 
 class FlatCreate(FlatBase):
@@ -263,6 +296,7 @@ class FlatUpdate(SQLModel):
     numero: int | None = None
     status: bool | None = None
     building_id: uuid.UUID | None = None
+    reading_types: int | None = Field(default=None, ge=0, le=7)
 
 
 class FlatPublic(FlatBase):
@@ -271,6 +305,33 @@ class FlatPublic(FlatBase):
 
 class FlatsPublic(SQLModel):
     data: list[FlatPublic]
+    count: int
+
+
+class FlatReadingBase(SQLModel):
+    data: datetime
+    tipo: int = Field(default=0)  # 1=Low, 2=Normal, 4=Gas
+    valor: int
+    flat_id: uuid.UUID
+
+
+class FlatReadingCreate(FlatReadingBase):
+    pass
+
+
+class FlatReadingUpdate(SQLModel):
+    data: datetime | None = None
+    tipo: int | None = None
+    valor: int | None = None
+    flat_id: uuid.UUID | None = None
+
+
+class FlatReadingPublic(FlatReadingBase):
+    id: uuid.UUID
+
+
+class FlatReadingsPublic(SQLModel):
+    data: list[FlatReadingPublic]
     count: int
 
 

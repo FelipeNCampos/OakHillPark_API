@@ -4,6 +4,7 @@ from app.api.routes import (
     acess,
     buildings,
     condominios,
+    flat_readings,
     funcionarios,
     flats,
     login,
@@ -26,6 +27,7 @@ api_router.include_router(moradores.router)
 api_router.include_router(funcionarios.router)
 api_router.include_router(acess.router)
 api_router.include_router(readings.router)
+api_router.include_router(flat_readings.router)
 
 
 if settings.ENVIRONMENT == "local":

@@ -2,6 +2,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import selectinload
 from sqlmodel import func, select
 
 from app.api.deps import SessionDep, require_cargo
@@ -21,7 +22,7 @@ router = APIRouter(prefix="/buildings", tags=["buildings"])
 def read_buildings(session: SessionDep, skip: int = 0, limit: int = 100) -> Any:
     count_statement = select(func.count()).select_from(Building)
     count = session.exec(count_statement).one()
-    statement = select(Building).offset(skip).limit(limit)
+    statement = select(Building).options(selectinload(Building.flats)).offset(skip).limit(limit)
     buildings = session.exec(statement).all()
     return BuildingsPublic(data=buildings, count=count)
 

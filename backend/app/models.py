@@ -87,6 +87,11 @@ class Building(SQLModel, table=True):
     condominio_id: uuid.UUID = Field(
         foreign_key="condominio.id", nullable=False, ondelete="CASCADE"
     )
+    # Reading types this building has (bitmask: 1=Low, 2=Normal, 4=Gas)
+    reading_types: int = Field(default=3)  # Default: Low (1) + Normal (2)
+    # Serial numbers for meters
+    electricity_sn: str | None = Field(default=None, max_length=255)
+    gas_sn: str | None = Field(default=None, max_length=255)
     condominio: Condominio | None = Relationship(back_populates="buildings")
     flats: list["Flat"] = Relationship(back_populates="building", cascade_delete=True)
     acessos: list["Acess"] = Relationship(
@@ -218,6 +223,9 @@ class CondominiosPublic(SQLModel):
 class BuildingBase(SQLModel):
     nome: str = Field(default="OakHillPark", max_length=255)
     condominio_id: uuid.UUID
+    reading_types: int = Field(default=3, ge=0, le=7)  # Bitmask: 1=Low, 2=Normal, 4=Gas
+    electricity_sn: str | None = Field(default=None, max_length=255)
+    gas_sn: str | None = Field(default=None, max_length=255)
 
 
 class BuildingCreate(BuildingBase):
@@ -227,6 +235,9 @@ class BuildingCreate(BuildingBase):
 class BuildingUpdate(SQLModel):
     nome: str | None = Field(default=None, max_length=255)
     condominio_id: uuid.UUID | None = None
+    reading_types: int | None = Field(default=None, ge=0, le=7)
+    electricity_sn: str | None = Field(default=None, max_length=255)
+    gas_sn: str | None = Field(default=None, max_length=255)
 
 
 class BuildingPublic(BuildingBase):

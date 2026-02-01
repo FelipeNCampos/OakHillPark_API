@@ -136,6 +136,9 @@ class Funcionario(SQLModel, table=True):
         foreign_key="condominio.id", nullable=False, ondelete="CASCADE"
     )
     condominio: Condominio | None = Relationship(back_populates="funcionarios")
+    acessos: list["Acess"] = Relationship(
+        back_populates="funcionario", cascade_delete=True
+    )
 
 
 class Acess(SQLModel, table=True):
@@ -150,6 +153,10 @@ class Acess(SQLModel, table=True):
         foreign_key="building.id", nullable=False, ondelete="CASCADE"
     )
     building: Building | None = Relationship(back_populates="acessos")
+    funcionario_id: uuid.UUID = Field(
+        foreign_key="funcionario.id", nullable=False, ondelete="CASCADE"
+    )
+    funcionario: Funcionario | None = Relationship(back_populates="acessos")
 
 
 class Readings(SQLModel, table=True):

@@ -8,11 +8,26 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar"
 import { isLoggedIn } from "@/hooks/useAuth"
+import { UsersService } from "@/client"
 
 export const Route = createFileRoute("/_layout")({
   component: Layout,
   beforeLoad: async () => {
     if (!isLoggedIn()) {
+      throw redirect({
+        to: "/login",
+      })
+    }
+
+    // Verificar se o usuário tem cargo 3 (admin)
+    try {
+      const user = await UsersService.readUserMe()
+      if (user.cargo !== 3) {
+        throw redirect({
+          to: "/dashboard",
+        })
+      }
+    } catch (error) {
       throw redirect({
         to: "/login",
       })

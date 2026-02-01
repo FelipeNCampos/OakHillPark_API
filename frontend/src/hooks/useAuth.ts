@@ -47,8 +47,19 @@ const useAuth = () => {
 
   const loginMutation = useMutation({
     mutationFn: login,
-    onSuccess: () => {
-      navigate({ to: "/" })
+    onSuccess: async () => {
+      // Busca os dados do usuário após login
+      const userData = await queryClient.fetchQuery({
+        queryKey: ["currentUser"],
+        queryFn: UsersService.readUserMe,
+      })
+      
+      // Redireciona baseado no tipo de usuário
+      if (userData?.is_superuser) {
+        navigate({ to: "/" })
+      } else {
+        navigate({ to: "/dashboard" as const })
+      }
     },
     onError: handleError.bind(showErrorToast),
   })

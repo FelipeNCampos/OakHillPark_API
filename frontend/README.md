@@ -2,6 +2,20 @@
 
 The frontend is built with [Vite](https://vitejs.dev/), [React](https://reactjs.org/), [TypeScript](https://www.typescriptlang.org/), [TanStack Query](https://tanstack.com/query), [TanStack Router](https://tanstack.com/router) and [Tailwind CSS](https://tailwindcss.com/).
 
+## Authentication Routes
+
+This project has a unified login page with custom modal design:
+
+- **Client Login** (`/login`): Primary login page for all users (managers and developers) with custom modal design and animations
+- **Client Dashboard** (`/client/dashboard`): Dashboard for authenticated managers with themed UI
+- **Admin Dashboard** (`/`): Standard dashboard for superusers and developers
+
+After successful login, users are automatically redirected to their respective dashboards based on their `is_superuser` status:
+- Superusers → `/` (Admin Dashboard)
+- Managers → `/client/dashboard` (Client Dashboard)
+
+All protected routes automatically redirect unauthenticated users to `/login`.
+
 ## Requirements
 
 - [Bun](https://bun.sh/) (recommended) or [Node.js](https://nodejs.org/)

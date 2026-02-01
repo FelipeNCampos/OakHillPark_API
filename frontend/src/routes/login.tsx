@@ -8,7 +8,7 @@ import { useForm } from "react-hook-form"
 import { z } from "zod"
 
 import type { Body_login_login_access_token as AccessToken } from "@/client"
-import { AuthLayout } from "@/components/Common/AuthLayout"
+import { AuthLayoutModal } from "@/components/Common/AuthLayoutModal"
 import {
   Form,
   FormControl,
@@ -44,7 +44,7 @@ export const Route = createFileRoute("/login")({
   head: () => ({
     meta: [
       {
-        title: "Log In - FastAPI Cloud",
+        title: "Login - OakHill Park",
       },
     ],
   }),
@@ -68,75 +68,82 @@ function Login() {
   }
 
   return (
-    <AuthLayout>
+    <AuthLayoutModal 
+      title="Bem-vindo!" 
+      description="Acesso para Gerentes do Condomínio"
+    >
       <Form {...form}>
         <form
           onSubmit={form.handleSubmit(onSubmit)}
-          className="flex flex-col gap-6"
+          className="flex flex-col gap-4"
         >
-          <div className="flex flex-col items-center gap-2 text-center">
-            <h1 className="text-2xl font-bold">Login to your account</h1>
-          </div>
+          <FormField
+            control={form.control}
+            name="username"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel className="text-[11px] font-semibold uppercase tracking-[0.7px] text-[#8c7569]">
+                  Email
+                </FormLabel>
+                <FormControl>
+                  <Input
+                    data-testid="email-input"
+                    placeholder="seu@email.com"
+                    type="email"
+                    className="rounded border border-[#ddd] px-[10px] pb-2 pt-[10px] transition-all focus-within:border-[#8c7569] text-black"
+                    {...field}
+                  />
+                </FormControl>
+                <FormMessage className="text-xs" />
+              </FormItem>
+            )}
+          />
 
-          <div className="grid gap-4">
-            <FormField
-              control={form.control}
-              name="username"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Email</FormLabel>
-                  <FormControl>
-                    <Input
-                      data-testid="email-input"
-                      placeholder="user@example.com"
-                      type="email"
-                      {...field}
-                    />
-                  </FormControl>
-                  <FormMessage className="text-xs" />
-                </FormItem>
-              )}
-            />
+          <FormField
+            control={form.control}
+            name="password"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel className="text-[11px] font-semibold uppercase tracking-[0.7px] text-[#8c7569]">
+                  Password
+                </FormLabel>
+                <FormControl>
+                  <PasswordInput
+                    data-testid="password-input"
+                    placeholder="Password"
+                    className="rounded border border-[#ddd] px-[10px] pb-2 pt-[10px] transition-all focus-within:border-[#8c7569] text-black"
+                    {...field}
+                  />
+                </FormControl>
+                <FormMessage className="text-xs" />
+              </FormItem>
+            )}
+          />
 
-            <FormField
-              control={form.control}
-              name="password"
-              render={({ field }) => (
-                <FormItem>
-                  <div className="flex items-center">
-                    <FormLabel>Password</FormLabel>
-                    <RouterLink
-                      to="/recover-password"
-                      className="ml-auto text-sm underline-offset-4 hover:underline"
-                    >
-                      Forgot your password?
-                    </RouterLink>
-                  </div>
-                  <FormControl>
-                    <PasswordInput
-                      data-testid="password-input"
-                      placeholder="Password"
-                      {...field}
-                    />
-                  </FormControl>
-                  <FormMessage className="text-xs" />
-                </FormItem>
-              )}
-            />
-
-            <LoadingButton type="submit" loading={loginMutation.isPending}>
-              Log In
+          <div className="mt-2 flex items-center justify-between">
+            <RouterLink
+              to="/recover-password"
+              className="text-sm text-[rgba(51,51,51,0.6)] hover:underline"
+            >
+              Forgot your password?
+            </RouterLink>
+            <LoadingButton
+              type="submit"
+              loading={loginMutation.isPending}
+              className="cursor-pointer rounded border-0 bg-[#8c7569] px-3 py-2 font-['Nunito',sans-serif] text-white outline-none transition-all duration-300 hover:bg-[#55311c]"
+            >
+              Log in
             </LoadingButton>
           </div>
 
-          <div className="text-center text-sm">
-            Don't have an account yet?{" "}
-            <RouterLink to="/signup" className="underline underline-offset-4">
-              Sign up
+          <p className="invisible mt-[60px] text-center text-sm">
+            Don't have an account?{" "}
+            <RouterLink to="/signup" className="text-[#8c7569]">
+              Sign up now
             </RouterLink>
-          </div>
+          </p>
         </form>
       </Form>
-    </AuthLayout>
+    </AuthLayoutModal>
   )
 }

@@ -1,8 +1,8 @@
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlmodel import func, select
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlmodel import func, select, or_
 
 from app.api.deps import SessionDep, require_cargo
 from app.models import (
@@ -21,28 +21,64 @@ from app.models import (
 router = APIRouter(prefix="/moradores", tags=["moradores"])
 
 
-@router.get("/", response_model=MoradoresWithFlatPublic, dependencies=[Depends(require_cargo(2))])
-def read_moradores(session: SessionDep, skip: int = 0, limit: int = 100) -> Any:
-    count_statement = select(func.count()).select_from(Morador)
-    count = session.exec(count_statement).one()
+@router.get("/", response_model=MoradoresWithFlatPublic)
+def read_moradores(
+    session: SessionDep,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    building: str = Query(None),
+    search: str = Query(None),
+) -> Any:
     statement = (
         select(Morador, Flat, Building)
         .join(Flat, Morador.flat_id == Flat.id)
         .join(Building, Flat.building_id == Building.id)
-        .offset(skip)
-        .limit(limit)
     )
+
+    # Filter by building if provided
+    if building:
+        statement = statement.where(Building.nome == building)
+
+    # Search by flat number, name, mobile, or email
+    if search:
+        search_term = f"%{search}%"
+        statement = statement.where(
+            or_(
+                Flat.numero == int(search) if search.isdigit() else False,
+                Morador.nome.ilike(search_term),
+                Morador.mobile.ilike(search_term),
+                Morador.email.ilike(search_term) if search else False,
+            )
+        )
+
+    # Get total count with filters
+    count_statement = select(func.count()).select_from(Morador).join(Flat).join(Building)
+    if building:
+        count_statement = count_statement.where(Building.nome == building)
+    if search:
+        search_term = f"%{search}%"
+        count_statement = count_statement.where(
+            or_(
+                Flat.numero == int(search) if search.isdigit() else False,
+                Morador.nome.ilike(search_term),
+                Morador.mobile.ilike(search_term),
+                Morador.email.ilike(search_term) if search else False,
+            )
+        )
+    count = session.exec(count_statement).one()
+
+    statement = statement.offset(skip).limit(limit)
     results = session.exec(statement).all()
     moradores_with_flat = [
         MoradorWithFlatPublic(
             id=morador.id,
             cargo=morador.cargo,
             nome=morador.nome,
-            email=morador.email,
+            email=morador.email if morador.email and morador.email.strip() else None,
             mobile=morador.mobile,
-            car1=morador.car1,
-            car2=morador.car2,
-            car3=morador.car3,
+            car1=morador.car1 if morador.car1 and morador.car1.strip() else None,
+            car2=morador.car2 if morador.car2 and morador.car2.strip() else None,
+            car3=morador.car3 if morador.car3 and morador.car3.strip() else None,
             flat_id=morador.flat_id,
             flat_numero=flat.numero,
             building_nome=building.nome,
@@ -53,7 +89,7 @@ def read_moradores(session: SessionDep, skip: int = 0, limit: int = 100) -> Any:
     return MoradoresWithFlatPublic(data=moradores_with_flat, count=count)
 
 
-@router.get("/{id}", response_model=MoradorPublic, dependencies=[Depends(require_cargo(2))])
+@router.get("/{id}", response_model=MoradorPublic)
 def read_morador(session: SessionDep, id: uuid.UUID) -> Any:
     morador = session.get(Morador, id)
     if not morador:

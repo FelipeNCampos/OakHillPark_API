@@ -6,6 +6,7 @@ from tenacity import after_log, before_log, retry, stop_after_attempt, wait_fixe
 
 from app.core.db import engine
 from scripts.populate_readings import populate_readings
+from scripts.populate_moradores import populate_moradores
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -35,6 +36,8 @@ def main() -> None:
     init(engine)
     logger.info("Populating historical readings")
     populate_readings()
+    logger.info("Populating residents from contact list")
+    populate_moradores()
     logger.info("Service finished initializing")
 
 

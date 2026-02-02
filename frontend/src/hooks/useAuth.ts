@@ -43,22 +43,35 @@ const useAuth = () => {
       formData: data,
     })
     localStorage.setItem("access_token", response.access_token)
+    // Fetch user data immediately after login
+    const userData = await UsersService.readUserMe()
+    
+    // Verify user has permission to login (cargo >= 1 or is_superuser)
+    if ((userData.cargo ?? 0) < 1 && !userData.is_superuser) {
+      localStorage.removeItem("access_token")
+      throw new Error("Acesso negado. Apenas gerentes e administradores podem acessar.")
+    }
+    
+    return userData
   }
 
   const loginMutation = useMutation({
     mutationFn: login,
-    onSuccess: async () => {
-      // Busca os dados do usuário após login
-      const userData = await queryClient.fetchQuery({
-        queryKey: ["currentUser"],
-        queryFn: UsersService.readUserMe,
-      })
-      
+    onSuccess: async (userData) => {
+      // Invalida o cache de usuário atual para forçar refetch
+      await queryClient.invalidateQueries({ queryKey: ["currentUser"] })
       // Redireciona baseado no tipo de usuário
-      if (userData?.is_superuser) {
-        navigate({ to: "/" })
+      // is_superuser = admin -> vai para /admin
+      // cargo >= 1 = gerente -> vai para /dashboard
+      if (userData.is_superuser) {
+        // Admin - go to admin page
+        navigate({ to: "/admin" })
+      } else if ((userData.cargo ?? 0) >= 1) {
+        // Manager - go to dashboard
+        navigate({ to: "/dashboard" })
       } else {
-        navigate({ to: "/dashboard" as const })
+        // Should not happen due to validation above
+        navigate({ to: "/" })
       }
     },
     onError: handleError.bind(showErrorToast),

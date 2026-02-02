@@ -23,6 +23,7 @@ export type FlatPublic = {
   numero: number
   status: boolean
   building_id: string
+  reading_types?: number
 }
 
 export type MoradorPublic = {
@@ -35,6 +36,21 @@ export type MoradorPublic = {
   car2?: string | null
   car3?: string | null
   flat_id: string
+}
+
+export type MoradorWithFlatPublic = {
+  id: string
+  cargo: number
+  nome: string
+  email?: string | null
+  mobile: number
+  car1?: string | null
+  car2?: string | null
+  car3?: string | null
+  flat_id: string
+  flat_numero: number
+  building_nome: string
+  reading_types: number
 }
 
 export type FuncionarioPublic = {
@@ -154,7 +170,7 @@ export const FlatsService = {
 }
 
 export const MoradoresService = {
-  readMoradores: (data: { skip?: number; limit?: number } = {}): CancelablePromise<ListResponse<MoradorPublic>> =>
+  readMoradores: (data: { skip?: number; limit?: number } = {}): CancelablePromise<ListResponse<MoradorWithFlatPublic>> =>
     __request(OpenAPI, {
       method: "GET",
       url: "/api/v1/moradores/",
@@ -173,6 +189,14 @@ export const MoradoresService = {
       url: "/api/v1/moradores/{id}",
       path: { id: data.id },
       body: data.requestBody,
+      mediaType: "application/json",
+    }),
+  updateMoradorReadingTypes: (data: { id: string; reading_types: number }): CancelablePromise<MoradorWithFlatPublic> =>
+    __request(OpenAPI, {
+      method: "PATCH",
+      url: "/api/v1/moradores/{id}/reading-types",
+      path: { id: data.id },
+      body: data.reading_types,
       mediaType: "application/json",
     }),
   deleteMorador: (data: { id: string }): CancelablePromise<{ message: string }> =>

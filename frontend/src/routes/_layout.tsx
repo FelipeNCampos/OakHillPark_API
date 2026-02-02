@@ -19,14 +19,9 @@ export const Route = createFileRoute("/_layout")({
       })
     }
 
-    // Verificar se o usuário tem cargo 3 (admin)
+    // Verify user is authenticated
     try {
-      const user = await UsersService.readUserMe()
-      if (user.cargo !== 3) {
-        throw redirect({
-          to: "/dashboard",
-        })
-      }
+      await UsersService.readUserMe()
     } catch (error) {
       throw redirect({
         to: "/login",

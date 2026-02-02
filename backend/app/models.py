@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 
 from pydantic import EmailStr
-from sqlalchemy import DateTime
+from sqlalchemy import DateTime as SQLAlchemyDateTime
 from sqlmodel import Field, Relationship, SQLModel
 
 
@@ -33,7 +33,7 @@ class UserRegister(SQLModel):
 
 # Properties to receive via API on update, all are optional
 class UserUpdate(UserBase):
-    email: EmailStr | None = Field(default=None, max_length=255)  # type: ignore
+    email: EmailStr | None = Field(default=None, max_length=255)
     password: str | None = Field(default=None, min_length=8, max_length=128)
     cargo: int | None = Field(default=None, ge=0, le=3)
 
@@ -54,7 +54,7 @@ class User(UserBase, table=True):
     hashed_password: str
     created_at: datetime | None = Field(
         default_factory=get_datetime_utc,
-        sa_type=DateTime(timezone=True),  # type: ignore
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
     )
 
 
@@ -125,7 +125,7 @@ class Morador(SQLModel, table=True):
     cargo: int = Field(default=0)
     nome: str = Field(default="", max_length=255)
     email: EmailStr | None = Field(default=None, max_length=255)
-    mobile: int = Field(default=0)
+    mobile: str = Field(default="", max_length=20)  # Changed to str for phone numbers
     car1: str | None = Field(default=None, max_length=50)
     car2: str | None = Field(default=None, max_length=50)
     car3: str | None = Field(default=None, max_length=50)
@@ -156,7 +156,7 @@ class Acess(SQLModel, table=True):
     status: bool = Field(default=True)
     data: datetime = Field(
         default_factory=get_datetime_utc,
-        sa_type=DateTime(timezone=True),  # type: ignore
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
     )
     operacao: int = Field(default=0)
     building_id: uuid.UUID = Field(
@@ -173,7 +173,7 @@ class Readings(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     data: datetime = Field(
         default_factory=get_datetime_utc,
-        sa_type=DateTime(timezone=True),  # type: ignore
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
     )
     tipo: int = Field(default=0)
     valor: int
@@ -187,7 +187,7 @@ class FlatReading(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     data: datetime = Field(
         default_factory=get_datetime_utc,
-        sa_type=DateTime(timezone=True),  # type: ignore
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
     )
     tipo: int = Field(default=0)  # 1=Low, 2=Normal, 4=Gas
     valor: int
@@ -339,7 +339,7 @@ class MoradorBase(SQLModel):
     cargo: int = Field(default=0)
     nome: str = Field(default="", max_length=255)
     email: EmailStr | None = Field(default=None, max_length=255)
-    mobile: int = Field(default=0)
+    mobile: str = Field(default="", max_length=20)  # Changed to str for phone numbers
     car1: str | None = Field(default=None, max_length=50)
     car2: str | None = Field(default=None, max_length=50)
     car3: str | None = Field(default=None, max_length=50)
@@ -354,7 +354,7 @@ class MoradorUpdate(SQLModel):
     cargo: int | None = None
     nome: str | None = Field(default=None, max_length=255)
     email: EmailStr | None = Field(default=None, max_length=255)
-    mobile: int | None = None
+    mobile: str | None = Field(default=None, max_length=20)  # Changed to str
     car1: str | None = Field(default=None, max_length=50)
     car2: str | None = Field(default=None, max_length=50)
     car3: str | None = Field(default=None, max_length=50)
@@ -367,6 +367,19 @@ class MoradorPublic(MoradorBase):
 
 class MoradoresPublic(SQLModel):
     data: list[MoradorPublic]
+    count: int
+
+
+# MoradorPublic with Flat information
+class MoradorWithFlatPublic(MoradorBase):
+    id: uuid.UUID
+    flat_numero: int
+    building_nome: str
+    reading_types: int  # Bitmask for reading types: 1=Low, 2=Normal, 4=Gas
+
+
+class MoradoresWithFlatPublic(SQLModel):
+    data: list[MoradorWithFlatPublic]
     count: int
 
 
@@ -403,9 +416,9 @@ class FuncionariosPublic(SQLModel):
 
 class AcessBase(SQLModel):
     status: bool = Field(default=True)
-    data: datetime | None = Field(
+    data: datetime = Field(
         default_factory=get_datetime_utc,
-        sa_type=DateTime(timezone=True),  # type: ignore
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
     )
     operacao: int = Field(default=0)
     building_id: uuid.UUID
@@ -417,7 +430,7 @@ class AcessCreate(AcessBase):
 
 class AcessUpdate(SQLModel):
     status: bool | None = None
-    data: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
+    data: datetime | None = None
     operacao: int | None = None
     building_id: uuid.UUID | None = None
 
@@ -432,9 +445,9 @@ class AcessesPublic(SQLModel):
 
 
 class ReadingsBase(SQLModel):
-    data: datetime | None = Field(
+    data: datetime = Field(
         default_factory=get_datetime_utc,
-        sa_type=DateTime(timezone=True),  # type: ignore
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
     )
     tipo: int = Field(default=0)
     valor: int
@@ -446,7 +459,7 @@ class ReadingsCreate(ReadingsBase):
 
 
 class ReadingsUpdate(SQLModel):
-    data: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
+    data: datetime | None = None
     tipo: int | None = None
     valor: int | None = None
     building_id: uuid.UUID | None = None

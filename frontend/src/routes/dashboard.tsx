@@ -2,25 +2,36 @@ import { createFileRoute, redirect } from "@tanstack/react-router"
 import { useState, useEffect } from "react"
 import { isLoggedIn } from "@/hooks/useAuth"
 import useAuth from "@/hooks/useAuth"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { OpenAPI } from "@/client"
+import useCustomToast from "@/hooks/useCustomToast"
 
 // Wrapper para chamar a API diretamente enquanto o cliente não é regenerado
-const apiCall = async (endpoint: string, params?: Record<string, any>) => {
+const apiCall = async (endpoint: string, params?: Record<string, any> | { method?: string; body?: any }) => {
   const url = new URL(`${OpenAPI.BASE || "http://localhost:8000"}${endpoint}`)
-  if (params) {
+  const isRequestWithMethod = params && "method" in params
+  
+  if (!isRequestWithMethod && params) {
     Object.entries(params).forEach(([key, value]) => {
       if (value !== undefined) {
         url.searchParams.append(key, String(value))
       }
     })
   }
-  const response = await fetch(url.toString(), {
-    method: "GET",
+  
+  const options: RequestInit = {
+    method: isRequestWithMethod ? (params as any).method || "GET" : "GET",
     headers: {
       Authorization: `Bearer ${localStorage.getItem("access_token")}`,
+      "Content-Type": "application/json",
     },
-  })
+  }
+  
+  if (isRequestWithMethod && (params as any).body !== undefined) {
+    options.body = typeof (params as any).body === "string" ? (params as any).body : JSON.stringify((params as any).body)
+  }
+  
+  const response = await fetch(url.toString(), options)
   if (!response.ok) throw new Error("API call failed")
   return response.json()
 }
@@ -52,8 +63,8 @@ function ClientDashboard() {
     qrCodes: true,
   })
 
-  // Verifica se o usuário não é superuser
-  if (user?.is_superuser) {
+  // Verifica se o usuário é gerente ou superior (cargo >= 1)
+  if (!user || (user.cargo ?? 0) < 1) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#f5f1ee]">
         <div className="rounded-lg bg-white p-8 text-center shadow-lg">
@@ -124,7 +135,7 @@ function ClientDashboard() {
       case "qr-caretaker":
         return <TabContent title="QR Code - Caretaker" />
       case "residents":
-        return <TabContent title="Residents" />
+        return <ResidentsContent />
       case "cleaner":
         return <TabContent title="Cleaner" />
       case "caretaker":
@@ -1132,6 +1143,8 @@ function AddReadingsForm({ buildings, onBack }: { buildings: any[]; onBack: () =
 function AddFlatReadingsForm({ buildings, onBack }: { buildings: any[]; onBack: () => void }) {
   const [formData, setFormData] = useState<Record<string, Record<string, string>>>({})
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const queryClient = useQueryClient()
+  const { showSuccessToast, showErrorToast } = useCustomToast()
 
   // Initialize form data with flat IDs - only include flats with reading_types != 0
   useEffect(() => {
@@ -1184,6 +1197,7 @@ function AddFlatReadingsForm({ buildings, onBack }: { buildings: any[]; onBack: 
               flat_id: flatId,
               tipo: tipoValue,
               valor: parseInt(value, 10),
+              data: new Date().toISOString(), // Add current datetime in ISO format
             })
           }
         })
@@ -1201,11 +1215,14 @@ function AddFlatReadingsForm({ buildings, onBack }: { buildings: any[]; onBack: 
         })
       }
 
-      alert("Readings cadastradas com sucesso!")
+      // Invalidate cache so new readings show up
+      queryClient.invalidateQueries({ queryKey: ["flat_readings"] })
+      
+      showSuccessToast("Readings cadastradas com sucesso!")
       onBack()
     } catch (error) {
       console.error("Error submitting readings:", error)
-      alert("Erro ao cadastrar readings")
+      showErrorToast("Erro ao cadastrar readings")
     } finally {
       setIsSubmitting(false)
     }
@@ -1850,6 +1867,494 @@ function TabContent({ title }: { title: string }) {
         <p className="mt-2 text-[rgba(0,0,0,0.7)]">
           Conteúdo de {title} será exibido aqui.
         </p>
+      </div>
+    </div>
+  )
+}
+
+function ResidentsContent() {
+  const [showForm, setShowForm] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const queryClient = useQueryClient()
+  const { showSuccessToast, showErrorToast } = useCustomToast()
+
+  const { data: moradoresData, isLoading } = useQuery({
+    queryKey: ["moradores"],
+    queryFn: () => apiCall("/api/v1/moradores/"),
+  })
+
+  const moradores = moradoresData?.data || []
+
+  const updateReadingTypesMutation = useMutation({
+    mutationFn: async ({ id, readingTypes }: { id: string; readingTypes: number }) => {
+      const response = await apiCall(`/api/v1/moradores/${id}/reading-types`, {
+        method: "PATCH",
+        body: { reading_types: readingTypes },
+      })
+      return response
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["moradores"] })
+      showSuccessToast("Tipos de leitura atualizados com sucesso!")
+    },
+    onError: (error: any) => {
+      showErrorToast(error.message || "Erro ao atualizar tipos de leitura")
+    },
+  })
+
+  const handleCheckboxChange = (id: string, currentTypes: number, typeValue: number) => {
+    let newTypes = currentTypes
+    if (currentTypes & typeValue) {
+      // Remove this type
+      newTypes = currentTypes & ~typeValue
+    } else {
+      // Add this type
+      newTypes = currentTypes | typeValue
+    }
+    updateReadingTypesMutation.mutate({ id, readingTypes: newTypes })
+  }
+
+  if (isLoading) {
+    return (
+      <div className="mx-auto max-w-7xl">
+        <div className="rounded-lg bg-white p-8 shadow-md text-center">
+          <p className="text-[#55311c]">Carregando moradores...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (showForm) {
+    return (
+      <AddResidentForm
+        onBack={() => {
+          setShowForm(false)
+          setEditingId(null)
+        }}
+        editingId={editingId}
+      />
+    )
+  }
+
+  return (
+    <div className="mx-auto max-w-7xl">
+      <div className="rounded-lg bg-white p-8 shadow-md">
+        <div className="mb-6 flex items-center justify-between">
+          <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
+            Residents
+          </h2>
+          <button
+            onClick={() => {
+              setEditingId(null)
+              setShowForm(true)
+            }}
+            className="flex items-center gap-2 rounded-lg bg-[#8c7569] px-4 py-2 font-['Nunito',sans-serif] text-sm font-semibold text-white transition-all duration-300 hover:bg-[#55311c]"
+            type="button"
+          >
+            <svg
+              className="h-5 w-5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 4v16m8-8H4"
+              />
+            </svg>
+            Novo Morador
+          </button>
+        </div>
+
+        {moradores.length === 0 ? (
+          <div className="rounded-lg bg-[#f5f1ee] p-8 text-center">
+            <p className="text-[#55311c] font-['Nunito',sans-serif]">
+              Nenhum morador cadastrado
+            </p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse rounded-lg bg-white">
+              <thead>
+                <tr className="bg-[#8c7569]">
+                  <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
+                    Building
+                  </th>
+                  <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
+                    Número
+                  </th>
+                  <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
+                    Nome
+                  </th>
+                  <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
+                    Telefone
+                  </th>
+                  <th className="border border-gray-400 px-4 py-3 text-center font-['Nunito',sans-serif] font-semibold text-white">
+                    Normal
+                  </th>
+                  <th className="border border-gray-400 px-4 py-3 text-center font-['Nunito',sans-serif] font-semibold text-white">
+                    Low
+                  </th>
+                  <th className="border border-gray-400 px-4 py-3 text-center font-['Nunito',sans-serif] font-semibold text-white">
+                    Gas
+                  </th>
+                  <th className="border border-gray-400 px-4 py-3 text-center font-['Nunito',sans-serif] font-semibold text-white">
+                    Ações
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {moradores.map((morador: any) => (
+                  <tr key={morador.id} className="hover:bg-[#f5f1ee]">
+                    <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
+                      {morador.building_nome}
+                    </td>
+                    <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
+                      {morador.flat_numero}
+                    </td>
+                    <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
+                      {morador.nome}
+                    </td>
+                    <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
+                      {morador.mobile || "-"}
+                    </td>
+                    <td className="border border-gray-400 px-4 py-3 text-center">
+                      <input
+                        type="checkbox"
+                        checked={(morador.reading_types & 2) !== 0}
+                        onChange={() => handleCheckboxChange(morador.id, morador.reading_types, 2)}
+                        disabled={updateReadingTypesMutation.isPending}
+                        className="h-4 w-4 cursor-pointer"
+                      />
+                    </td>
+                    <td className="border border-gray-400 px-4 py-3 text-center">
+                      <input
+                        type="checkbox"
+                        checked={(morador.reading_types & 1) !== 0}
+                        onChange={() => handleCheckboxChange(morador.id, morador.reading_types, 1)}
+                        disabled={updateReadingTypesMutation.isPending}
+                        className="h-4 w-4 cursor-pointer"
+                      />
+                    </td>
+                    <td className="border border-gray-400 px-4 py-3 text-center">
+                      <input
+                        type="checkbox"
+                        checked={(morador.reading_types & 4) !== 0}
+                        onChange={() => handleCheckboxChange(morador.id, morador.reading_types, 4)}
+                        disabled={updateReadingTypesMutation.isPending}
+                        className="h-4 w-4 cursor-pointer"
+                      />
+                    </td>
+                    <td className="border border-gray-400 px-4 py-3 text-center">
+                      <button
+                        onClick={() => {
+                          setEditingId(morador.id)
+                          setShowForm(true)
+                        }}
+                        className="mr-2 rounded-lg bg-[#8c7569] px-3 py-1 font-['Nunito',sans-serif] text-xs font-semibold text-white transition-all duration-200 hover:bg-[#55311c]"
+                        type="button"
+                      >
+                        Editar
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function AddResidentForm({ onBack, editingId }: { onBack: () => void; editingId: string | null }) {
+  const [formData, setFormData] = useState({
+    nome: "",
+    email: "",
+    mobile: "",
+    cargo: 0,
+    car1: "",
+    car2: "",
+    car3: "",
+    flat_id: "",
+  })
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [flats, setFlats] = useState<any[]>([])
+
+  const { data: buildingsData } = useQuery({
+    queryKey: ["buildings"],
+    queryFn: () => apiCall("/api/v1/buildings/"),
+  })
+
+  // Load editing morador data if editingId is set
+  useEffect(() => {
+    if (editingId) {
+      const loadMorador = async () => {
+        try {
+          const response = await fetch(
+            `${OpenAPI.BASE || "http://localhost:8000"}/api/v1/moradores/${editingId}`,
+            {
+              headers: {
+                Authorization: `Bearer ${localStorage.getItem("access_token")}`,
+              },
+            }
+          )
+          const morador = await response.json()
+          setFormData({
+            nome: morador.nome,
+            email: morador.email || "",
+            mobile: morador.mobile.toString(),
+            cargo: morador.cargo,
+            car1: morador.car1 || "",
+            car2: morador.car2 || "",
+            car3: morador.car3 || "",
+            flat_id: morador.flat_id,
+          })
+        } catch (error) {
+          console.error("Error loading morador:", error)
+        }
+      }
+      loadMorador()
+    }
+  }, [editingId])
+
+  // Build flats list from buildings
+  useEffect(() => {
+    const allFlats: any[] = []
+    
+    // Sort buildings by nome and flats by numero
+    const sortedBuildings = [...(buildingsData?.data || [])].sort((a: any, b: any) => 
+      a.nome.localeCompare(b.nome)
+    )
+    
+    sortedBuildings.forEach((building: any) => {
+      const sortedFlats = [...(building.flats || [])].sort((a: any, b: any) => a.numero - b.numero)
+      
+      sortedFlats.forEach((flat: any) => {
+        allFlats.push({
+          id: flat.id,
+          label: `${building.nome} - Flat ${flat.numero}`,
+        })
+      })
+    })
+    setFlats(allFlats)
+  }, [buildingsData])
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name, value } = e.target
+    setFormData((prev) => ({
+      ...prev,
+      [name]: value,
+    }))
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setIsSubmitting(true)
+
+    try {
+      const url = editingId
+        ? `${OpenAPI.BASE || "http://localhost:8000"}/api/v1/moradores/${editingId}`
+        : `${OpenAPI.BASE || "http://localhost:8000"}/api/v1/moradores/`
+
+      const method = editingId ? "PATCH" : "POST"
+
+      const payload = {
+        nome: formData.nome,
+        email: formData.email || null,
+        mobile: formData.mobile || "",
+        cargo: formData.cargo,
+        car1: formData.car1 || null,
+        car2: formData.car2 || null,
+        car3: formData.car3 || null,
+        flat_id: formData.flat_id,
+      }
+
+      const response = await fetch(url, {
+        method,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${localStorage.getItem("access_token")}`,
+        },
+        body: JSON.stringify(payload),
+      })
+
+      if (!response.ok) {
+        throw new Error("Failed to save morador")
+      }
+
+      alert(editingId ? "Morador atualizado com sucesso!" : "Morador cadastrado com sucesso!")
+      onBack()
+      // Refetch moradores
+      window.location.reload()
+    } catch (error) {
+      console.error("Error submitting form:", error)
+      alert("Erro ao salvar morador")
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="mx-auto max-w-7xl">
+      <div className="rounded-lg bg-white p-8 shadow-md">
+        <div className="mb-6 flex items-center justify-between">
+          <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
+            {editingId ? "Editar Morador" : "Novo Morador"}
+          </h2>
+          <button
+            onClick={onBack}
+            className="rounded-lg bg-gray-500 px-4 py-2 font-['Nunito',sans-serif] text-sm font-semibold text-white transition-all duration-300 hover:bg-gray-600"
+            type="button"
+          >
+            Voltar
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit}>
+          <div className="grid gap-6 md:grid-cols-2">
+            <div>
+              <label className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]">
+                Nome *
+              </label>
+              <input
+                type="text"
+                name="nome"
+                value={formData.nome}
+                onChange={handleInputChange}
+                required
+                className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+                placeholder="Nome do morador"
+              />
+            </div>
+
+            <div>
+              <label className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]">
+                Email
+              </label>
+              <input
+                type="email"
+                name="email"
+                value={formData.email}
+                onChange={handleInputChange}
+                className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+                placeholder="email@example.com"
+              />
+            </div>
+
+            <div>
+              <label className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]">
+                Telefone
+              </label>
+              <input
+                type="tel"
+                name="mobile"
+                value={formData.mobile}
+                onChange={handleInputChange}
+                className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+                placeholder="Número de telefone"
+              />
+            </div>
+
+            <div>
+              <label className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]">
+                Flat *
+              </label>
+              <select
+                name="flat_id"
+                value={formData.flat_id}
+                onChange={handleInputChange}
+                required
+                className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+              >
+                <option value="">Selecione um flat</option>
+                {flats.map((flat) => (
+                  <option key={flat.id} value={flat.id}>
+                    {flat.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]">
+                Carro 1
+              </label>
+              <input
+                type="text"
+                name="car1"
+                value={formData.car1}
+                onChange={handleInputChange}
+                className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+                placeholder="Placa do carro"
+              />
+            </div>
+
+            <div>
+              <label className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]">
+                Carro 2
+              </label>
+              <input
+                type="text"
+                name="car2"
+                value={formData.car2}
+                onChange={handleInputChange}
+                className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+                placeholder="Placa do carro"
+              />
+            </div>
+
+            <div>
+              <label className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]">
+                Carro 3
+              </label>
+              <input
+                type="text"
+                name="car3"
+                value={formData.car3}
+                onChange={handleInputChange}
+                className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+                placeholder="Placa do carro"
+              />
+            </div>
+
+            <div>
+              <label className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]">
+                Cargo
+              </label>
+              <select
+                name="cargo"
+                value={formData.cargo}
+                onChange={handleInputChange}
+                className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+              >
+                <option value="0">Morador</option>
+                <option value="1">Proprietário</option>
+                <option value="2">Inquilino</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="mt-8 flex justify-end gap-4">
+            <button
+              type="button"
+              onClick={onBack}
+              className="rounded-lg bg-gray-500 px-6 py-3 font-['Nunito',sans-serif] text-white transition-all duration-300 hover:bg-gray-600"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="rounded-lg bg-[#8c7569] px-6 py-3 font-['Nunito',sans-serif] text-white transition-all duration-300 hover:bg-[#55311c] disabled:opacity-50"
+            >
+              {isSubmitting ? "Salvando..." : editingId ? "Atualizar Morador" : "Criar Morador"}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   )

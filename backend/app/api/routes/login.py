@@ -25,7 +25,8 @@ def login_access_token(
     session: SessionDep, form_data: Annotated[OAuth2PasswordRequestForm, Depends()]
 ) -> Token:
     """
-    OAuth2 compatible token login, get an access token for future requests
+    OAuth2 compatible token login, get an access token for future requests.
+    Only managers (cargo >= 1) and superusers can login.
     """
     user = crud.authenticate(
         session=session, email=form_data.username, password=form_data.password
@@ -34,6 +35,11 @@ def login_access_token(
         raise HTTPException(status_code=400, detail="Incorrect email or password")
     elif not user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
+    elif user.cargo < 1 and not user.is_superuser:
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied. Only managers and administrators can login."
+        )
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     return Token(
         access_token=security.create_access_token(

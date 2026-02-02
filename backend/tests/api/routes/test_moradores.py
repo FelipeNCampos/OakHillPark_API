@@ -51,7 +51,7 @@ def _create_test_morador(db: Session, flat_id: uuid.UUID) -> Morador:
         cargo=1,
         nome="Test Morador",
         email=random_email(),
-        mobile=1234567890,
+        mobile="1234567890",
         car1="ABC1234",
         flat_id=flat_id
     )
@@ -131,7 +131,7 @@ def test_create_morador(
         "cargo": 1,
         "nome": "New Morador",
         "email": email,
-        "mobile": 987654,
+        "mobile": "987654",
         "car1": "XYZ9999",
         "flat_id": str(flat.id)
     }
@@ -180,7 +180,7 @@ def test_update_morador(
         "cargo": 3,
         "nome": "Updated Morador",
         "email": new_email,
-        "mobile": 555555555,
+        "mobile": "555555555",
         "car1": "UPD1111",
         "flat_id": str(flat.id)
     }

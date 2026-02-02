@@ -44,7 +44,15 @@ def create_initial_data() -> None:
         buildings = {}
         # Create buildings
         for building_name, num_flats in buildings_data.items():
-            building = Building(nome=building_name, condominio_id=condominio.id)
+            # Set reading_types based on building
+            # Office has only Normal (2), others have Low + Normal (1 + 2 = 3)
+            reading_types = 2 if building_name == "Office" else 3
+            
+            building = Building(
+                nome=building_name, 
+                condominio_id=condominio.id,
+                reading_types=reading_types
+            )
             session.add(building)
             session.flush()
             buildings[building_name] = building

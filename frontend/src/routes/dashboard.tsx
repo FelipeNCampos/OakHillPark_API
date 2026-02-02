@@ -118,6 +118,7 @@ function ClientDashboard() {
     { label: "Cleaner", id: "cleaner" },
     { label: "Caretaker", id: "caretaker" },
     { label: "Bins", id: "bins" },
+    { label: "Twillio", id: "twillio" },
   ]
 
   const renderContent = () => {
@@ -142,6 +143,8 @@ function ClientDashboard() {
         return <TabContent title="Caretaker" />
       case "bins":
         return <TabContent title="Bins" />
+      case "twillio":
+        return <TabContent title="Twillio" />
       default:
         return <OverviewContent user={user} />
     }
@@ -617,18 +620,23 @@ function BuildingReadingsTable({
   // Group readings by date
   const readingsByDate: Record<string, ReadingByDate> = {}
   for (const reading of readings) {
-    const date = new Date(reading.data).toISOString().split("T")[0]
-    if (!readingsByDate[date]) {
-      readingsByDate[date] = { date: reading.data, low: undefined, normal: undefined, gas: undefined }
+    // Parse date string directly without timezone conversion
+    const dateStr = reading.data.split("T")[0]
+    if (!readingsByDate[dateStr]) {
+      readingsByDate[dateStr] = { date: reading.data, low: undefined, normal: undefined, gas: undefined }
     }
-    if (reading.tipo === 1) readingsByDate[date].low = reading.valor
-    if (reading.tipo === 2) readingsByDate[date].normal = reading.valor
-    if (reading.tipo === 4) readingsByDate[date].gas = reading.valor
+    if (reading.tipo === 1) readingsByDate[dateStr].low = reading.valor
+    if (reading.tipo === 2) readingsByDate[dateStr].normal = reading.valor
+    if (reading.tipo === 4) readingsByDate[dateStr].gas = reading.valor
   }
 
   // Convert to array and sort by date (newest first)
   const sortedReadings: ReadingByDate[] = Object.values(readingsByDate).sort(
-    (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+    (a, b) => {
+      const dateA = a.date.split("T")[0]
+      const dateB = b.date.split("T")[0]
+      return dateB.localeCompare(dateA) // Descending order
+    }
   )
 
   // Calculate days, used values, and percentages
@@ -644,12 +652,16 @@ function BuildingReadingsTable({
 
   const processedData: ProcessedReading[] = sortedReadings.map((current, index) => {
     const previous: ReadingByDate | undefined = sortedReadings[index + 1]
-    const currentDate = new Date(current.date)
+    const previousPrevious: ReadingByDate | undefined = sortedReadings[index + 2]
     
     let days = 0
     if (previous) {
-      const prevDate = new Date(previous.date)
-      days = Math.round((currentDate.getTime() - prevDate.getTime()) / (1000 * 60 * 60 * 24))
+      // Parse dates as strings to avoid timezone issues
+      const [currY, currM, currD] = current.date.split("T")[0].split("-").map(Number)
+      const [prevY, prevM, prevD] = previous.date.split("T")[0].split("-").map(Number)
+      const currDate = new Date(currY, currM - 1, currD)
+      const prevDate = new Date(prevY, prevM - 1, prevD)
+      days = Math.round((currDate.getTime() - prevDate.getTime()) / (1000 * 60 * 60 * 24))
     }
 
     const result: ProcessedReading = {
@@ -662,9 +674,13 @@ function BuildingReadingsTable({
       result.low = current.low
       if (previous && previous.low !== undefined) {
         result.lowUsed = current.low - previous.low
-        result.lowPercent = previous.low !== 0 
-          ? ((result.lowUsed / previous.low) * 100).toFixed(2)
-          : "0.00"
+        // Calculate percentage: (used atual * 100) / used anterior
+        if (previousPrevious && previousPrevious.low !== undefined) {
+          const previousUsed = previous.low - previousPrevious.low
+          result.lowPercent = previousUsed !== 0
+            ? (((result.lowUsed - previousUsed) / previousUsed) * 100).toFixed(2)
+            : "0.00"
+        }
       }
     }
 
@@ -673,9 +689,13 @@ function BuildingReadingsTable({
       result.normal = current.normal
       if (previous && previous.normal !== undefined) {
         result.normalUsed = current.normal - previous.normal
-        result.normalPercent = previous.normal !== 0
-          ? ((result.normalUsed / previous.normal) * 100).toFixed(2)
-          : "0.00"
+        // Calculate percentage: (used atual * 100) / used anterior
+        if (previousPrevious && previousPrevious.normal !== undefined) {
+          const previousUsed = previous.normal - previousPrevious.normal
+          result.normalPercent = previousUsed !== 0
+            ? (((result.normalUsed - previousUsed) / previousUsed) * 100).toFixed(2)
+            : "0.00"
+        }
       }
     }
 
@@ -684,9 +704,13 @@ function BuildingReadingsTable({
       result.gas = current.gas
       if (previous && previous.gas !== undefined) {
         result.gasUsed = current.gas - previous.gas
-        result.gasPercent = previous.gas !== 0
-          ? ((result.gasUsed / previous.gas) * 100).toFixed(2)
-          : "0.00"
+        // Calculate percentage: (used atual * 100) / used anterior
+        if (previousPrevious && previousPrevious.gas !== undefined) {
+          const previousUsed = previous.gas - previousPrevious.gas
+          result.gasPercent = previousUsed !== 0
+            ? (((result.gasUsed - previousUsed) / previousUsed) * 100).toFixed(2)
+            : "0.00"
+        }
       }
     }
 
@@ -822,63 +846,6 @@ function BuildingReadingsTable({
           </tr>
         </thead>
         <tbody>
-          {/* "All" row with initial values */}
-          <tr className="bg-white hover:bg-gray-50">
-            <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-800 font-semibold">
-              All
-            </td>
-            <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-800">
-              {processedData.length > 0
-                ? new Date(processedData[processedData.length - 1].date).toLocaleDateString("en-GB")
-                : "-"}
-            </td>
-            {hasLow && (
-              <>
-                <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-800">
-                  {processedData.length > 0 && processedData[processedData.length - 1].low !== undefined
-                    ? processedData[processedData.length - 1].low
-                    : "All"}
-                </td>
-                <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-800 text-center">
-                  All
-                </td>
-                <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-800 text-center">
-                  no data
-                </td>
-              </>
-            )}
-            {hasNormal && (
-              <>
-                <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-800">
-                  {processedData.length > 0 && processedData[processedData.length - 1].normal !== undefined
-                    ? processedData[processedData.length - 1].normal
-                    : "All"}
-                </td>
-                <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-800 text-center">
-                  All
-                </td>
-                <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-800 text-center">
-                  no data
-                </td>
-              </>
-            )}
-            {hasGas && (
-              <>
-                <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-800">
-                  {processedData.length > 0 && processedData[processedData.length - 1].gas !== undefined
-                    ? processedData[processedData.length - 1].gas
-                    : "All"}
-                </td>
-                <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-800 text-center">
-                  All
-                </td>
-                <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-800 text-center">
-                  no data
-                </td>
-              </>
-            )}
-          </tr>
-
           {/* Data rows */}
           {processedData.slice(0, -1).map((row: any, index: number) => (
             <tr
@@ -891,7 +858,11 @@ function BuildingReadingsTable({
                 {row.days || "-"}
               </td>
               <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-800">
-                {new Date(row.date).toLocaleDateString("en-GB")}
+                {(() => {
+                  const dateStr = row.date.split("T")[0]
+                  const [y, m, d] = dateStr.split("-")
+                  return `${d}/${m}/${y}`
+                })()}
               </td>
               {hasLow && (
                 <>
@@ -946,6 +917,67 @@ function BuildingReadingsTable({
               )}
             </tr>
           ))}
+
+          {/* "All" row with initial values - moved to bottom */}
+          <tr className="bg-white hover:bg-gray-50">
+            <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-800 font-semibold">
+              All
+            </td>
+            <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-800">
+              {processedData.length > 0
+                ? (() => {
+                    const dateStr = processedData[processedData.length - 1].date.split("T")[0]
+                    const [y, m, d] = dateStr.split("-")
+                    return `${d}/${m}/${y}`
+                  })()
+                : "-"}
+            </td>
+            {hasLow && (
+              <>
+                <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-800">
+                  {processedData.length > 0 && processedData[processedData.length - 1].low !== undefined
+                    ? processedData[processedData.length - 1].low
+                    : "All"}
+                </td>
+                <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-800 text-center">
+                  All
+                </td>
+                <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-800 text-center">
+                  no data
+                </td>
+              </>
+            )}
+            {hasNormal && (
+              <>
+                <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-800">
+                  {processedData.length > 0 && processedData[processedData.length - 1].normal !== undefined
+                    ? processedData[processedData.length - 1].normal
+                    : "All"}
+                </td>
+                <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-800 text-center">
+                  All
+                </td>
+                <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-800 text-center">
+                  no data
+                </td>
+              </>
+            )}
+            {hasGas && (
+              <>
+                <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-800">
+                  {processedData.length > 0 && processedData[processedData.length - 1].gas !== undefined
+                    ? processedData[processedData.length - 1].gas
+                    : "All"}
+                </td>
+                <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-800 text-center">
+                  All
+                </td>
+                <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-800 text-center">
+                  no data
+                </td>
+              </>
+            )}
+          </tr>
         </tbody>
       </table>
     </div>
@@ -1600,18 +1632,23 @@ function FlatReadingsTable({
   // Group readings by date
   const readingsByDate: Record<string, ReadingByDate> = {}
   for (const reading of readings) {
-    const date = new Date(reading.data).toISOString().split("T")[0]
-    if (!readingsByDate[date]) {
-      readingsByDate[date] = { date: reading.data, low: undefined, normal: undefined, gas: undefined }
+    // Parse date string directly without timezone conversion
+    const dateStr = reading.data.split("T")[0]
+    if (!readingsByDate[dateStr]) {
+      readingsByDate[dateStr] = { date: reading.data, low: undefined, normal: undefined, gas: undefined }
     }
-    if (reading.tipo === 1) readingsByDate[date].low = reading.valor
-    if (reading.tipo === 2) readingsByDate[date].normal = reading.valor
-    if (reading.tipo === 4) readingsByDate[date].gas = reading.valor
+    if (reading.tipo === 1) readingsByDate[dateStr].low = reading.valor
+    if (reading.tipo === 2) readingsByDate[dateStr].normal = reading.valor
+    if (reading.tipo === 4) readingsByDate[dateStr].gas = reading.valor
   }
 
   // Convert to array and sort by date (newest first)
   const sortedReadings: ReadingByDate[] = Object.values(readingsByDate).sort(
-    (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+    (a, b) => {
+      const dateA = a.date.split("T")[0]
+      const dateB = b.date.split("T")[0]
+      return dateB.localeCompare(dateA) // Descending order
+    }
   )
 
   // Calculate days, used values, and percentages
@@ -1627,12 +1664,16 @@ function FlatReadingsTable({
 
   const processedData: ProcessedReading[] = sortedReadings.map((current, index) => {
     const previous: ReadingByDate | undefined = sortedReadings[index + 1]
-    const currentDate = new Date(current.date)
+    const previousPrevious: ReadingByDate | undefined = sortedReadings[index + 2]
 
     let days = 0
     if (previous) {
-      const prevDate = new Date(previous.date)
-      days = Math.round((currentDate.getTime() - prevDate.getTime()) / (1000 * 60 * 60 * 24))
+      // Parse dates as strings to avoid timezone issues
+      const [currY, currM, currD] = current.date.split("T")[0].split("-").map(Number)
+      const [prevY, prevM, prevD] = previous.date.split("T")[0].split("-").map(Number)
+      const currDate = new Date(currY, currM - 1, currD)
+      const prevDate = new Date(prevY, prevM - 1, prevD)
+      days = Math.round((currDate.getTime() - prevDate.getTime()) / (1000 * 60 * 60 * 24))
     }
 
     const result: ProcessedReading = {
@@ -1645,9 +1686,13 @@ function FlatReadingsTable({
       result.low = current.low
       if (previous && previous.low !== undefined) {
         result.lowUsed = current.low - previous.low
-        result.lowPercent = previous.low !== 0 
-          ? ((result.lowUsed / previous.low) * 100).toFixed(2)
-          : "0.00"
+        // Calculate percentage: (used atual * 100) / used anterior
+        if (previousPrevious && previousPrevious.low !== undefined) {
+          const previousUsed = previous.low - previousPrevious.low
+          result.lowPercent = previousUsed !== 0
+            ? (((result.lowUsed - previousUsed) / previousUsed) * 100).toFixed(2)
+            : "0.00"
+        }
       }
     }
 
@@ -1656,9 +1701,13 @@ function FlatReadingsTable({
       result.normal = current.normal
       if (previous && previous.normal !== undefined) {
         result.normalUsed = current.normal - previous.normal
-        result.normalPercent = previous.normal !== 0
-          ? ((result.normalUsed / previous.normal) * 100).toFixed(2)
-          : "0.00"
+        // Calculate percentage: (used atual * 100) / used anterior
+        if (previousPrevious && previousPrevious.normal !== undefined) {
+          const previousUsed = previous.normal - previousPrevious.normal
+          result.normalPercent = previousUsed !== 0
+            ? (((result.normalUsed - previousUsed) / previousUsed) * 100).toFixed(2)
+            : "0.00"
+        }
       }
     }
 
@@ -1667,9 +1716,13 @@ function FlatReadingsTable({
       result.gas = current.gas
       if (previous && previous.gas !== undefined) {
         result.gasUsed = current.gas - previous.gas
-        result.gasPercent = previous.gas !== 0
-          ? ((result.gasUsed / previous.gas) * 100).toFixed(2)
-          : "0.00"
+        // Calculate percentage: (used atual * 100) / used anterior
+        if (previousPrevious && previousPrevious.gas !== undefined) {
+          const previousUsed = previous.gas - previousPrevious.gas
+          result.gasPercent = previousUsed !== 0
+            ? (((result.gasUsed - previousUsed) / previousUsed) * 100).toFixed(2)
+            : "0.00"
+        }
       }
     }
 
@@ -1808,7 +1861,11 @@ function FlatReadingsTable({
                 {index === 0 ? "All" : row.days}
               </td>
               <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-700">
-                {new Date(row.date).toLocaleDateString("pt-BR")}
+                {(() => {
+                  const dateStr = row.date.split("T")[0]
+                  const [y, m, d] = dateStr.split("-")
+                  return `${d}/${m}/${y}`
+                })()}
               </td>
               {hasLow && (
                 <>

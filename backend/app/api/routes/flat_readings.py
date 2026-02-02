@@ -13,7 +13,7 @@ router = APIRouter(prefix="/flat_readings", tags=["flat_readings"])
 @router.get("/", response_model=FlatReadingsPublic, dependencies=[Depends(require_cargo(2))])
 def read_flat_readings(session: SessionDep, skip: int = 0, limit: int = 100, flat_id: uuid.UUID | None = None) -> Any:
     count_statement = select(func.count()).select_from(FlatReading)
-    statement = select(FlatReading).offset(skip).limit(limit)
+    statement = select(FlatReading).order_by(FlatReading.data.desc()).offset(skip).limit(limit)
     
     if flat_id:
         count_statement = count_statement.where(FlatReading.flat_id == flat_id)

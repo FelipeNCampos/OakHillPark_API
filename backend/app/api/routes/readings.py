@@ -13,7 +13,7 @@ router = APIRouter(prefix="/readings", tags=["readings"])
 @router.get("/", response_model=ReadingsPublicList, dependencies=[Depends(require_cargo(2))])
 def read_readings(session: SessionDep, skip: int = 0, limit: int = 100, building_id: uuid.UUID | None = None) -> Any:
     count_statement = select(func.count()).select_from(Readings)
-    statement = select(Readings).offset(skip).limit(limit)
+    statement = select(Readings).order_by(Readings.data.desc()).offset(skip).limit(limit)
     
     if building_id:
         count_statement = count_statement.where(Readings.building_id == building_id)

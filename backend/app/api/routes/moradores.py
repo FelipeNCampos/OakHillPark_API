@@ -33,6 +33,7 @@ def read_moradores(
         select(Morador, Flat, Building)
         .join(Flat, Morador.flat_id == Flat.id)
         .join(Building, Flat.building_id == Building.id)
+        .order_by(Building.nome, Flat.numero)
     )
 
     # Filter by building if provided

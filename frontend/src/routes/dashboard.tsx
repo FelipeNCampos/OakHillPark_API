@@ -1946,8 +1946,8 @@ function ResidentsContent() {
       const params = new URLSearchParams()
       params.append("skip", String(currentPage * pageSize))
       params.append("limit", String(pageSize))
-      if (selectedBuilding) params.append("building", selectedBuilding)
       if (searchTerm) params.append("search", searchTerm)
+      if (selectedBuilding && !searchTerm) params.append("building", selectedBuilding)
       return apiCall(`/api/v1/moradores/?${params.toString()}`)
     },
   })
@@ -2066,7 +2066,7 @@ function ResidentsContent() {
               placeholder="Digite para buscar..."
               value={searchTerm}
               onChange={(e) => handleSearch(e.target.value)}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 font-['Nunito',sans-serif] text-sm focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+              className="w-full text-[#000000] rounded-lg border border-gray-300 px-3 py-2 font-['Nunito',sans-serif] text-sm focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
             />
           </div>
           <div>
@@ -2076,7 +2076,7 @@ function ResidentsContent() {
             <select
               value={selectedBuilding || ""}
               onChange={(e) => handleBuildingChange(e.target.value || null)}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 font-['Nunito',sans-serif] text-sm focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+              className="w-full text-[#000000] rounded-lg border border-gray-300 px-3 py-2 font-['Nunito',sans-serif] text-sm focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
             >
               <option value="">Todos os Buildings</option>
               {buildings.map((building: any) => (
@@ -2127,8 +2127,15 @@ function ResidentsContent() {
                   </tr>
                 </thead>
                 <tbody>
-                  {moradores.map((morador: any) => (
-                    <tr key={morador.id} className="hover:bg-[#f5f1ee]">
+                    {moradores
+                    .sort((a: any, b: any) => {
+                      // Ordenar primeiro por building, depois por número do flat
+                      const buildingCompare = a.building_nome.localeCompare(b.building_nome)
+                      if (buildingCompare !== 0) return buildingCompare
+                      return a.flat_numero - b.flat_numero
+                    })
+                    .map((morador: any) => (
+                      <tr key={morador.id} className="hover:bg-[#f5f1ee]">
                       <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
                         {morador.building_nome}
                       </td>
@@ -2143,45 +2150,45 @@ function ResidentsContent() {
                       </td>
                       <td className="border border-gray-400 px-4 py-3 text-center">
                         <input
-                          type="checkbox"
-                          checked={(morador.reading_types & 2) !== 0}
-                          onChange={() => handleCheckboxChange(morador.id, morador.reading_types, 2)}
-                          disabled={updateReadingTypesMutation.isPending}
-                          className="h-4 w-4 cursor-pointer"
+                        type="checkbox"
+                        checked={(morador.reading_types & 2) !== 0}
+                        onChange={() => handleCheckboxChange(morador.id, morador.reading_types, 2)}
+                        disabled={updateReadingTypesMutation.isPending}
+                        className="h-4 w-4 cursor-pointer"
                         />
                       </td>
                       <td className="border border-gray-400 px-4 py-3 text-center">
                         <input
-                          type="checkbox"
-                          checked={(morador.reading_types & 1) !== 0}
-                          onChange={() => handleCheckboxChange(morador.id, morador.reading_types, 1)}
-                          disabled={updateReadingTypesMutation.isPending}
-                          className="h-4 w-4 cursor-pointer"
+                        type="checkbox"
+                        checked={(morador.reading_types & 1) !== 0}
+                        onChange={() => handleCheckboxChange(morador.id, morador.reading_types, 1)}
+                        disabled={updateReadingTypesMutation.isPending}
+                        className="h-4 w-4 cursor-pointer"
                         />
                       </td>
                       <td className="border border-gray-400 px-4 py-3 text-center">
                         <input
-                          type="checkbox"
-                          checked={(morador.reading_types & 4) !== 0}
-                          onChange={() => handleCheckboxChange(morador.id, morador.reading_types, 4)}
-                          disabled={updateReadingTypesMutation.isPending}
-                          className="h-4 w-4 cursor-pointer"
+                        type="checkbox"
+                        checked={(morador.reading_types & 4) !== 0}
+                        onChange={() => handleCheckboxChange(morador.id, morador.reading_types, 4)}
+                        disabled={updateReadingTypesMutation.isPending}
+                        className="h-4 w-4 cursor-pointer"
                         />
                       </td>
                       <td className="border border-gray-400 px-4 py-3 text-center">
                         <button
-                          onClick={() => {
-                            setEditingId(morador.id)
-                            setShowForm(true)
-                          }}
-                          className="mr-2 rounded-lg bg-[#8c7569] px-3 py-1 font-['Nunito',sans-serif] text-xs font-semibold text-white transition-all duration-200 hover:bg-[#55311c]"
-                          type="button"
+                        onClick={() => {
+                          setEditingId(morador.id)
+                          setShowForm(true)
+                        }}
+                        className="mr-2 rounded-lg bg-[#8c7569] px-3 py-1 font-['Nunito',sans-serif] text-xs font-semibold text-white transition-all duration-300 hover:bg-[#55311c]"
+                        type="button"
                         >
-                          Editar
+                        Editar
                         </button>
                       </td>
-                    </tr>
-                  ))}
+                      </tr>
+                    ))}
                 </tbody>
               </table>
             </div>

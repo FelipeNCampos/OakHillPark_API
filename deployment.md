@@ -60,7 +60,7 @@ export USERNAME=admin
 * Create an environment variable with the password for HTTP Basic Auth, e.g.:
 
 ```bash
-export PASSWORD=changethis
+export PASSWORD=coto1423
 ```
 
 * Use openssl to generate the "hashed" version of the password for HTTP Basic Auth and store it in an environment variable:
@@ -78,13 +78,13 @@ echo $HASHED_PASSWORD
 * Create an environment variable with the domain name for your server, e.g.:
 
 ```bash
-export DOMAIN=fastapi-project.example.com
+export DOMAIN=oakhillpark.cloud
 ```
 
 * Create an environment variable with the email for Let's Encrypt, e.g.:
 
 ```bash
-export EMAIL=admin@example.com
+export EMAIL=felipe.n.cmp@gmail.com
 ```
 
 **Note**: you need to set a different email, an email `@example.com` won't work.

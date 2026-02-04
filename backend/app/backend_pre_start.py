@@ -34,10 +34,6 @@ def init(db_engine: Engine) -> None:
 def main() -> None:
     logger.info("Initializing service")
     init(engine)
-    logger.info("Populating historical readings")
-    populate_readings()
-    logger.info("Populating residents from contact list")
-    populate_moradores()
     logger.info("Service finished initializing")
 
 

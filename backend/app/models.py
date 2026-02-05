@@ -17,6 +17,7 @@ class UserBase(SQLModel):
     is_superuser: bool = False
     full_name: str | None = Field(default=None, max_length=255)
     cargo: int = Field(default=0, ge=0, le=3)
+    condominio_id: uuid.UUID | None = Field(default=None, foreign_key="condominio.id")
 
 
 # Properties to receive via API on creation
@@ -29,6 +30,7 @@ class UserRegister(SQLModel):
     password: str = Field(min_length=8, max_length=128)
     full_name: str | None = Field(default=None, max_length=255)
     cargo: int = Field(default=0, ge=0, le=3)
+    condominio_id: uuid.UUID | None = Field(default=None)
 
 
 # Properties to receive via API on update, all are optional
@@ -36,6 +38,7 @@ class UserUpdate(UserBase):
     email: EmailStr | None = Field(default=None, max_length=255)
     password: str | None = Field(default=None, min_length=8, max_length=128)
     cargo: int | None = Field(default=None, ge=0, le=3)
+    condominio_id: uuid.UUID | None = Field(default=None)
 
 
 class UserUpdateMe(SQLModel):
@@ -138,6 +141,7 @@ class Morador(SQLModel, table=True):
 class Funcionario(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     status: bool = Field(default=True)
+    is_default: bool = Field(default=False)
     nome: str = Field(default="", max_length=255)
     mobile: int = Field(default=0)
     cargo: int = Field(default=0)
@@ -385,6 +389,7 @@ class MoradoresWithFlatPublic(SQLModel):
 
 class FuncionarioBase(SQLModel):
     status: bool = Field(default=True)
+    is_default: bool = Field(default=False)
     nome: str = Field(default="", max_length=255)
     mobile: int = Field(default=0)
     cargo: int = Field(default=0)
@@ -398,6 +403,7 @@ class FuncionarioCreate(FuncionarioBase):
 
 class FuncionarioUpdate(SQLModel):
     status: bool | None = None
+    is_default: bool | None = None
     nome: str | None = Field(default=None, max_length=255)
     mobile: int | None = None
     cargo: int | None = None
@@ -437,6 +443,7 @@ class AcessUpdate(SQLModel):
 
 class AcessPublic(AcessBase):
     id: uuid.UUID
+    funcionario_id: uuid.UUID
 
 
 class AcessesPublic(SQLModel):

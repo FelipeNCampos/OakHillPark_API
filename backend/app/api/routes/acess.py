@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import func, select
 
 from app.api.deps import SessionDep, require_cargo
-from app.models import Acess, AcessCreate, AcessPublic, AcessUpdate, AcessesPublic, Message
+from app.models import Acess, AcessCreate, AcessPublic, AcessUpdate, AcessesPublic, Funcionario, Message
 
 router = APIRouter(prefix="/acess", tags=["acess"])
 
@@ -27,9 +27,43 @@ def read_acess_by_id(session: SessionDep, id: uuid.UUID) -> Any:
     return acess
 
 
-@router.post("/", response_model=AcessPublic, dependencies=[Depends(require_cargo(0))])
+@router.post("/", response_model=AcessPublic)
 def create_acess(*, session: SessionDep, acess_in: AcessCreate) -> Any:
+    default_cleaner = session.exec(
+        select(Funcionario)
+        .where(
+            Funcionario.cargo == 0,
+            Funcionario.status == True,
+            Funcionario.is_default == True,
+        )
+        .limit(1)
+    ).first()
+
+    if not default_cleaner:
+        default_cleaner = session.exec(
+            select(Funcionario)
+            .where(Funcionario.cargo == 0, Funcionario.status == True)
+            .limit(1)
+        ).first()
+
+    if not default_cleaner:
+        raise HTTPException(status_code=404, detail="Default cleaner not found")
+
+    if acess_in.operacao == 0:
+        last_acess = session.exec(
+            select(Acess)
+            .where(Acess.funcionario_id == default_cleaner.id)
+            .order_by(Acess.data.desc())
+            .limit(1)
+        ).first()
+        if last_acess and last_acess.operacao == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Cleaner already has an open session",
+            )
+
     acess = Acess.model_validate(acess_in)
+    acess.funcionario_id = default_cleaner.id
     session.add(acess)
     session.commit()
     session.refresh(acess)

@@ -2,7 +2,7 @@ from sqlmodel import Session, create_engine, select
 
 from app import crud
 from app.core.config import settings
-from app.models import User, UserCreate
+from app.models import Condominio, User, UserCreate
 
 engine = create_engine(str(settings.SQLALCHEMY_DATABASE_URI))
 
@@ -25,10 +25,15 @@ def init_db(session: Session) -> None:
         select(User).where(User.email == settings.FIRST_SUPERUSER)
     ).first()
     if not user:
+        # Get the first condominio to associate with the superuser
+        condominio = session.exec(select(Condominio)).first()
+        condominio_id = condominio.id if condominio else None
+        
         user_in = UserCreate(
             email=settings.FIRST_SUPERUSER,
             password=settings.FIRST_SUPERUSER_PASSWORD,
             is_superuser=True,
             cargo=3,
+            condominio_id=condominio_id,
         )
         user = crud.create_user(session=session, user_create=user_in)

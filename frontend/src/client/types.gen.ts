@@ -69,6 +69,7 @@ export type UserCreate = {
     full_name?: (string | null);
     password: string;
     cargo?: number;
+    condominio_id?: (string | null);
 };
 
 export type UserPublic = {
@@ -79,6 +80,7 @@ export type UserPublic = {
     id: string;
     created_at?: (string | null);
     cargo?: number;
+    condominio_id?: (string | null);
 };
 
 export type UserRegister = {
@@ -86,6 +88,7 @@ export type UserRegister = {
     password: string;
     full_name?: (string | null);
     cargo?: number;
+    condominio_id?: (string | null);
 };
 
 export type UsersPublic = {
@@ -100,6 +103,7 @@ export type UserUpdate = {
     full_name?: (string | null);
     password?: (string | null);
     cargo?: number;
+    condominio_id?: (string | null);
 };
 
 export type UserUpdateMe = {

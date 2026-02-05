@@ -1,5 +1,5 @@
 import { createFileRoute, redirect } from "@tanstack/react-router"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { isLoggedIn } from "@/hooks/useAuth"
 import useAuth from "@/hooks/useAuth"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
@@ -138,7 +138,7 @@ function ClientDashboard() {
       case "residents":
         return <ResidentsContent />
       case "cleaner":
-        return <TabContent title="Cleaner" />
+        return <CleanerContent />
       case "caretaker":
         return <TabContent title="Caretaker" />
       case "bins":
@@ -1915,6 +1915,10 @@ function FlatReadingsTable({
 }
 
 function TabContent({ title }: { title: string }) {
+  if (title === "Cleaner") {
+    return <CleanerContent />
+  }
+
   return (
     <div className="mx-auto max-w-7xl">
       <div className="rounded-lg bg-white p-8 shadow-md">
@@ -1924,6 +1928,492 @@ function TabContent({ title }: { title: string }) {
         <p className="mt-2 text-[rgba(0,0,0,0.7)]">
           Conteúdo de {title} será exibido aqui.
         </p>
+      </div>
+    </div>
+  )
+}
+
+function CleanerContent() {
+  const [activeSubTab, setActiveSubTab] = useState<"summary" | "register">(
+    "summary",
+  )
+
+  return (
+    <div className="mx-auto max-w-7xl">
+      <div className="mb-6 rounded-lg bg-white p-6 shadow-md">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
+              Cleaner
+            </h2>
+            <p className="mt-1 text-[rgba(0,0,0,0.7)]">
+              Resumo de trabalho e cadastro de cleaners.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setActiveSubTab("summary")}
+              className={`rounded-lg px-4 py-2 text-sm font-semibold transition-all duration-200 ${
+                activeSubTab === "summary"
+                  ? "bg-[#8c7569] text-white"
+                  : "bg-[#f5f1ee] text-[#55311c] hover:bg-[#e8e1dc]"
+              }`}
+            >
+              Resumo
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveSubTab("register")}
+              className={`rounded-lg px-4 py-2 text-sm font-semibold transition-all duration-200 ${
+                activeSubTab === "register"
+                  ? "bg-[#8c7569] text-white"
+                  : "bg-[#f5f1ee] text-[#55311c] hover:bg-[#e8e1dc]"
+              }`}
+            >
+              Cadastro
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {activeSubTab === "summary" ? <CleanerSummary /> : <CleanerRegister />}
+    </div>
+  )
+}
+
+function CleanerSummary() {
+  const { data: cleanersData } = useQuery({
+    queryKey: ["funcionarios", "cleaners-summary"],
+    queryFn: () => apiCall("/api/v1/funcionarios/", { skip: 0, limit: 500 }),
+  })
+
+  const { data: acessData, isLoading: isLoadingAcess } = useQuery({
+    queryKey: ["acess", "cleaner"],
+    queryFn: () => apiCall("/api/v1/acess/", { skip: 0, limit: 200 }),
+  })
+
+  const { data: buildingsData } = useQuery({
+    queryKey: ["buildings", "cleaner-summary"],
+    queryFn: () => apiCall("/api/v1/buildings/"),
+  })
+
+  const acesses = (acessData?.data || []) as any[]
+  const buildings = (buildingsData?.data || []) as any[]
+
+  const buildingMap = useMemo(() => {
+    const map = new Map<string, string>()
+    buildings.forEach((building) => {
+      map.set(building.id, building.nome)
+    })
+    return map
+  }, [buildings])
+
+  const activeCleanerId = useMemo(() => {
+    const cleaners = (cleanersData?.data || []).filter(
+      (funcionario: any) => funcionario.cargo === 0,
+    )
+    return cleaners.find((cleaner: any) => cleaner.is_default)?.id || null
+  }, [cleanersData])
+
+  const sessions = useMemo(() => {
+    const sorted = [...acesses]
+      .filter((record) => record?.data)
+      .sort(
+        (a, b) =>
+          new Date(a.data).getTime() - new Date(b.data).getTime(),
+      )
+
+    const filtered = activeCleanerId
+      ? sorted.filter(
+          (record) =>
+            record.funcionario_id === activeCleanerId ||
+            record.funcionario_id === undefined,
+        )
+      : sorted
+
+    const result: Array<{ inRecord?: any; outRecord?: any }> = []
+    let openRecord: any | null = null
+
+    filtered.forEach((record) => {
+      if (record.operacao === 0) {
+        if (!openRecord) openRecord = record
+      } else if (record.operacao === 1) {
+        if (openRecord) {
+          result.push({ inRecord: openRecord, outRecord: record })
+          openRecord = null
+        } else {
+          result.push({ outRecord: record })
+        }
+      }
+    })
+
+    if (openRecord) result.push({ inRecord: openRecord })
+
+    return result.reverse().slice(0, 20)
+  }, [acesses, activeCleanerId])
+
+  const formatDate = (dateValue?: string | null) => {
+    if (!dateValue) return "-"
+    const date = new Date(dateValue)
+    if (Number.isNaN(date.getTime())) return "-"
+    return date.toLocaleDateString("pt-BR")
+  }
+
+  const formatTime = (dateValue?: string | null) => {
+    if (!dateValue) return "-"
+    const date = new Date(dateValue)
+    if (Number.isNaN(date.getTime())) return "-"
+    return date.toLocaleTimeString("pt-BR", {
+      hour: "2-digit",
+      minute: "2-digit",
+    })
+  }
+
+  const formatUsed = (inValue?: string | null, outValue?: string | null) => {
+    if (!inValue || !outValue) return "-"
+    const start = new Date(inValue).getTime()
+    const end = new Date(outValue).getTime()
+    if (Number.isNaN(start) || Number.isNaN(end) || end < start) return "-"
+    const diffMinutes = Math.floor((end - start) / 60000)
+    const hours = Math.floor(diffMinutes / 60)
+    const minutes = diffMinutes % 60
+    if (hours <= 0) return `${minutes}m`
+    return `${hours}h ${minutes}m`
+  }
+
+  return (
+    <div className="rounded-lg bg-white p-6 shadow-md">
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <h3 className="font-['Nunito',sans-serif] text-xl font-bold text-[#55311c]">
+          Resumo de trabalho
+        </h3>
+        {!activeCleanerId && (
+          <span className="rounded-full bg-[#f5f1ee] px-3 py-1 text-xs font-semibold text-[#55311c]">
+            Selecione um cleaner ativo no cadastro
+          </span>
+        )}
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse">
+          <thead>
+            <tr className="bg-gray-200">
+              <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700">
+                Data
+              </th>
+              <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700">
+                Building
+              </th>
+              <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700">
+                Time IN
+              </th>
+              <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700">
+                Time OUT
+              </th>
+              <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700">
+                Used
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {isLoadingAcess && (
+              <tr>
+                <td
+                  className="border border-gray-400 px-3 py-3 text-center text-sm text-gray-600"
+                  colSpan={5}
+                >
+                  Carregando...
+                </td>
+              </tr>
+            )}
+            {!isLoadingAcess && sessions.length === 0 && (
+              <tr>
+                <td
+                  className="border border-gray-400 px-3 py-3 text-center text-sm text-gray-600"
+                  colSpan={5}
+                >
+                  Nenhum registro encontrado.
+                </td>
+              </tr>
+            )}
+            {sessions.map((session, index) => {
+              const buildingId =
+                session.inRecord?.building_id || session.outRecord?.building_id
+              const buildingLabel =
+                (buildingId && buildingMap.get(buildingId)) ||
+                session.inRecord?.building_nome ||
+                session.outRecord?.building_nome ||
+                "-"
+              const dateLabel =
+                formatDate(session.inRecord?.data || session.outRecord?.data)
+
+              return (
+                <tr
+                  key={`${session.inRecord?.id || "in"}-${session.outRecord?.id || "out"}-${index}`}
+                  className="bg-white hover:bg-gray-50"
+                >
+                  <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
+                    {dateLabel}
+                  </td>
+                  <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
+                    {buildingLabel}
+                  </td>
+                  <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
+                    {formatTime(session.inRecord?.data)}
+                  </td>
+                  <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
+                    {formatTime(session.outRecord?.data)}
+                  </td>
+                  <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
+                    {formatUsed(session.inRecord?.data, session.outRecord?.data)}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+function CleanerRegister() {
+  const [showForm, setShowForm] = useState(false)
+  const [nome, setNome] = useState("")
+  const [email, setEmail] = useState("")
+  const [mobile, setMobile] = useState("")
+  const queryClient = useQueryClient()
+  const { showSuccessToast, showErrorToast } = useCustomToast()
+  const { user } = useAuth()
+
+  const { data: cleanersData, isLoading } = useQuery({
+    queryKey: ["funcionarios", "cleaners"],
+    queryFn: () => apiCall("/api/v1/funcionarios/", { skip: 0, limit: 500 }),
+  })
+
+  const cleaners = (cleanersData?.data || []).filter(
+    (funcionario: any) => funcionario.cargo === 0,
+  )
+
+  const activeCleanerId = cleaners.find(
+    (cleaner: any) => cleaner.is_default,
+  )?.id
+
+  const createCleanerMutation = useMutation({
+    mutationFn: (payload: any) =>
+      apiCall("/api/v1/funcionarios/", {
+        method: "POST",
+        body: payload,
+      }),
+    onSuccess: () => {
+      showSuccessToast("Cleaner cadastrado com sucesso")
+      queryClient.invalidateQueries({ queryKey: ["funcionarios", "cleaners"] })
+      setShowForm(false)
+      setNome("")
+      setEmail("")
+      setMobile("")
+    },
+    onError: () => {
+      showErrorToast("Não foi possível cadastrar o cleaner")
+    },
+  })
+
+  const setDefaultCleanerMutation = useMutation({
+    mutationFn: (id: string) =>
+      apiCall(`/api/v1/funcionarios/${id}`, {
+        method: "PATCH",
+        body: { is_default: true },
+      }),
+    onSuccess: () => {
+      showSuccessToast("Cleaner padrão atualizado")
+      queryClient.invalidateQueries({ queryKey: ["funcionarios", "cleaners"] })
+      queryClient.invalidateQueries({ queryKey: ["funcionarios", "cleaners-summary"] })
+    },
+    onError: () => {
+      showErrorToast("Não foi possível atualizar o cleaner padrão")
+    },
+  })
+
+  const handleSetActive = (cleaner: any) => {
+    setDefaultCleanerMutation.mutate(cleaner.id)
+  }
+
+  const handleCreateCleaner = () => {
+    if (!nome.trim()) {
+      showErrorToast("Informe o nome")
+      return
+    }
+
+    if (!user?.condominio_id) {
+      showErrorToast("Usuário não está associado a um condomínio")
+      return
+    }
+
+    createCleanerMutation.mutate({
+      status: true,
+      nome: nome.trim(),
+      mobile: mobile ? Number(mobile) : 0,
+      cargo: 0,
+      email: email || null,
+      condominio_id: user.condominio_id,
+    })
+  }
+
+  return (
+    <div className="rounded-lg bg-white p-6 shadow-md">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h3 className="font-['Nunito',sans-serif] text-xl font-bold text-[#55311c]">
+          Cadastro de cleaners
+        </h3>
+        <button
+          type="button"
+          onClick={() => setShowForm((prev) => !prev)}
+          className="flex items-center gap-2 rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-300 hover:bg-[#55311c]"
+        >
+          <svg
+            className="h-5 w-5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M12 4v16m8-8H4"
+            />
+          </svg>
+          Add new cleaner
+        </button>
+      </div>
+
+      {showForm && (
+        <div className="mb-6 rounded-lg border border-[#e5e0dc] bg-[#f9f7f5] p-4">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div>
+              <label className="block text-sm font-semibold text-[#55311c] mb-1">
+                Nome
+              </label>
+              <input
+                type="text"
+                value={nome}
+                onChange={(e) => setNome(e.target.value)}
+                className="w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                placeholder="Nome do cleaner"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-[#55311c] mb-1">
+                Email (opcional)
+              </label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                placeholder="email@exemplo.com"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-[#55311c] mb-1">
+                Telefone
+              </label>
+              <input
+                type="tel"
+                value={mobile}
+                onChange={(e) => setMobile(e.target.value)}
+                className="w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                placeholder="Telefone"
+              />
+            </div>
+          </div>
+          <div className="mt-4 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setShowForm(false)}
+              className="rounded-lg border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={handleCreateCleaner}
+              className="rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c]"
+            >
+              Salvar
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse">
+          <thead>
+            <tr className="bg-gray-200">
+              <th className="border border-gray-400 px-3 py-2 text-left text-sm font-bold text-gray-700">
+                Nome
+              </th>
+              <th className="border border-gray-400 px-3 py-2 text-left text-sm font-bold text-gray-700">
+                Email
+              </th>
+              <th className="border border-gray-400 px-3 py-2 text-left text-sm font-bold text-gray-700">
+                Telefone
+              </th>
+              <th className="border border-gray-400 px-3 py-2 text-left text-sm font-bold text-gray-700">
+                Ativo
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {isLoading && (
+              <tr>
+                <td
+                  colSpan={4}
+                  className="border border-gray-400 px-3 py-3 text-center text-sm text-gray-600"
+                >
+                  Carregando...
+                </td>
+              </tr>
+            )}
+            {!isLoading && cleaners.length === 0 && (
+              <tr>
+                <td
+                  colSpan={4}
+                  className="border border-gray-400 px-3 py-3 text-center text-sm text-gray-600"
+                >
+                  Nenhum cleaner cadastrado.
+                </td>
+              </tr>
+            )}
+            {cleaners.map((cleaner: any) => (
+              <tr key={cleaner.id} className="bg-white hover:bg-gray-50">
+                <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
+                  {cleaner.nome}
+                </td>
+                <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
+                  {cleaner.email || "-"}
+                </td>
+                <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
+                  {cleaner.mobile || "-"}
+                </td>
+                <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
+                  <button
+                    type="button"
+                    onClick={() => handleSetActive(cleaner)}
+                    className={`rounded-full px-3 py-1 text-xs font-semibold transition-all duration-200 ${
+                      activeCleanerId === cleaner.id
+                        ? "bg-[#8c7569] text-white"
+                        : "bg-[#f5f1ee] text-[#55311c] hover:bg-[#e8e1dc]"
+                    }`}
+                  >
+                    {activeCleanerId === cleaner.id ? "Ativo" : "Marcar ativo"}
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   )

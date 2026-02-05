@@ -14,6 +14,7 @@ import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as RecoverPasswordRouteImport } from './routes/recover-password'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as DashboardRouteImport } from './routes/dashboard'
+import { Route as CleanerAccessRouteImport } from './routes/cleaner-access'
 import { Route as LayoutRouteImport } from './routes/_layout'
 import { Route as LayoutIndexRouteImport } from './routes/_layout/index'
 import { Route as LayoutSettingsRouteImport } from './routes/_layout/settings'
@@ -44,6 +45,11 @@ const DashboardRoute = DashboardRouteImport.update({
   path: '/dashboard',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CleanerAccessRoute = CleanerAccessRouteImport.update({
+  id: '/cleaner-access',
+  path: '/cleaner-access',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LayoutRoute = LayoutRouteImport.update({
   id: '/_layout',
   getParentRoute: () => rootRouteImport,
@@ -66,6 +72,7 @@ const LayoutAdminRoute = LayoutAdminRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof LayoutIndexRoute
+  '/cleaner-access': typeof CleanerAccessRoute
   '/dashboard': typeof DashboardRoute
   '/login': typeof LoginRoute
   '/recover-password': typeof RecoverPasswordRoute
@@ -75,6 +82,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof LayoutSettingsRoute
 }
 export interface FileRoutesByTo {
+  '/cleaner-access': typeof CleanerAccessRoute
   '/dashboard': typeof DashboardRoute
   '/login': typeof LoginRoute
   '/recover-password': typeof RecoverPasswordRoute
@@ -87,6 +95,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_layout': typeof LayoutRouteWithChildren
+  '/cleaner-access': typeof CleanerAccessRoute
   '/dashboard': typeof DashboardRoute
   '/login': typeof LoginRoute
   '/recover-password': typeof RecoverPasswordRoute
@@ -100,6 +109,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/cleaner-access'
     | '/dashboard'
     | '/login'
     | '/recover-password'
@@ -109,6 +119,7 @@ export interface FileRouteTypes {
     | '/settings'
   fileRoutesByTo: FileRoutesByTo
   to:
+    | '/cleaner-access'
     | '/dashboard'
     | '/login'
     | '/recover-password'
@@ -120,6 +131,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/_layout'
+    | '/cleaner-access'
     | '/dashboard'
     | '/login'
     | '/recover-password'
@@ -132,6 +144,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   LayoutRoute: typeof LayoutRouteWithChildren
+  CleanerAccessRoute: typeof CleanerAccessRoute
   DashboardRoute: typeof DashboardRoute
   LoginRoute: typeof LoginRoute
   RecoverPasswordRoute: typeof RecoverPasswordRoute
@@ -174,6 +187,13 @@ declare module '@tanstack/react-router' {
       path: '/dashboard'
       fullPath: '/dashboard'
       preLoaderRoute: typeof DashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/cleaner-access': {
+      id: '/cleaner-access'
+      path: '/cleaner-access'
+      fullPath: '/cleaner-access'
+      preLoaderRoute: typeof CleanerAccessRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_layout': {
@@ -224,6 +244,7 @@ const LayoutRouteWithChildren =
 
 const rootRouteChildren: RootRouteChildren = {
   LayoutRoute: LayoutRouteWithChildren,
+  CleanerAccessRoute: CleanerAccessRoute,
   DashboardRoute: DashboardRoute,
   LoginRoute: LoginRoute,
   RecoverPasswordRoute: RecoverPasswordRoute,

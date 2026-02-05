@@ -21,16 +21,13 @@ def create_initial_data() -> None:
         condominio = session.exec(
             select(Condominio).where(Condominio.nome == "Oak Hill Park")
         ).first()
-        
         if condominio:
             logger.info("Initial data already exists, skipping creation")
             return
-        
         # Create condominio
         condominio = Condominio(nome="Oak Hill Park")
         session.add(condominio)
         session.flush()
-        
         # Buildings data: name -> number of flats
         buildings_data = {
             "Falcon": 12,
@@ -40,23 +37,23 @@ def create_initial_data() -> None:
             "Oak Lodge": 14,
             "Office": 0,  # Office doesn't have flats
         }
-        
+
         buildings = {}
         # Create buildings
         for building_name, num_flats in buildings_data.items():
             # Set reading_types based on building
             # Office has only Normal (2), others have Low + Normal (1 + 2 = 3)
             reading_types = 2 if building_name == "Office" else 3
-            
+
             building = Building(
-                nome=building_name, 
+                nome=building_name,
                 condominio_id=condominio.id,
                 reading_types=reading_types
             )
             session.add(building)
             session.flush()
             buildings[building_name] = building
-            
+
             # Create flats for this building
             for flat_number in range(1, num_flats + 1):
                 flat = Flat(
@@ -65,17 +62,18 @@ def create_initial_data() -> None:
                     building_id=building.id
                 )
                 session.add(flat)
-        
+
         session.commit()
         logger.info(f"Created condominio: {condominio.nome}")
         logger.info(f"Created {len(buildings)} buildings with flats")
-        
+
         # Create funcionarios
         funcionarios_data = [
             {
                 "nome": "Cleaner",
                 "cargo": 0,
                 "status": True,
+                "is_default": True,
                 "mobile": 0,
                 "email": None,
             },
@@ -83,11 +81,12 @@ def create_initial_data() -> None:
                 "nome": "Caretaker",
                 "cargo": 1,
                 "status": True,
+                "is_default": False,
                 "mobile": 0,
                 "email": None,
             },
         ]
-        
+
         funcionarios = {}
         for func_data in funcionarios_data:
             funcionario = Funcionario(
@@ -98,13 +97,13 @@ def create_initial_data() -> None:
             session.flush()
             funcionarios[func_data["nome"]] = funcionario
             logger.info(f"Created funcionario: {func_data['nome']} (cargo={func_data['cargo']})")
-        
+
         session.commit()
-        
+
         # Create Access records linking funcionarios to buildings
         # Each funcionario has access to all buildings
         for func_name, funcionario in funcionarios.items():
-            for building_name, building in buildings.items():
+            for _, building in buildings.items():
                 acess = Acess(
                     status=True,
                     operacao=0,
@@ -113,7 +112,7 @@ def create_initial_data() -> None:
                 )
                 session.add(acess)
             logger.info(f"Created {len(buildings)} access records for {func_name}")
-        
+
         session.commit()
         logger.info("Initial data created successfully")
 

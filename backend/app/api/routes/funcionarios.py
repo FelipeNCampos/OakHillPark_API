@@ -14,6 +14,21 @@ from app.models import (
     Message,
 )
 
+
+def _unset_other_defaults(session: SessionDep, condominio_id: uuid.UUID, current_id: uuid.UUID | None = None) -> None:
+    statement = select(Funcionario).where(
+        Funcionario.condominio_id == condominio_id,
+        Funcionario.cargo == 0,
+        Funcionario.is_default == True,
+    )
+    if current_id:
+        statement = statement.where(Funcionario.id != current_id)
+
+    defaults = session.exec(statement).all()
+    for funcionario in defaults:
+        funcionario.is_default = False
+        session.add(funcionario)
+
 router = APIRouter(prefix="/funcionarios", tags=["funcionarios"])
 
 
@@ -39,6 +54,8 @@ def create_funcionario(
     *, session: SessionDep, funcionario_in: FuncionarioCreate
 ) -> Any:
     funcionario = Funcionario.model_validate(funcionario_in)
+    if funcionario.is_default:
+        _unset_other_defaults(session, funcionario.condominio_id)
     session.add(funcionario)
     session.commit()
     session.refresh(funcionario)
@@ -53,6 +70,8 @@ def update_funcionario(
     if not funcionario:
         raise HTTPException(status_code=404, detail="Funcionario not found")
     update_dict = funcionario_in.model_dump(exclude_unset=True)
+    if update_dict.get("is_default") is True:
+        _unset_other_defaults(session, funcionario.condominio_id, funcionario.id)
     funcionario.sqlmodel_update(update_dict)
     session.add(funcionario)
     session.commit()

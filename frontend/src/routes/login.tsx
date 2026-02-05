@@ -90,7 +90,7 @@ function Login() {
                     data-testid="email-input"
                     placeholder="seu@email.com"
                     type="email"
-                    className="rounded border border-[#ddd] px-[10px] pb-2 pt-[10px] transition-all focus-within:border-[#8c7569] text-black"
+                    className="rounded border border-[#ddd] px-2.5 pb-2 pt-2.5 transition-all focus-within:border-[#8c7569] text-black"
                     {...field}
                   />
                 </FormControl>
@@ -111,7 +111,7 @@ function Login() {
                   <PasswordInput
                     data-testid="password-input"
                     placeholder="Password"
-                    className="rounded border border-[#ddd] px-[10px] pb-2 pt-[10px] transition-all focus-within:border-[#8c7569] text-black"
+                    className="rounded border border-[#ddd] px-2.5 pb-2 pt-2.5 transition-all focus-within:border-[#8c7569] text-black"
                     {...field}
                   />
                 </FormControl>
@@ -136,7 +136,7 @@ function Login() {
             </LoadingButton>
           </div>
 
-          <p className="invisible mt-[60px] text-center text-sm">
+          <p className="invisible mt-15 text-center text-sm">
             Don't have an account?{" "}
             <RouterLink to="/signup" className="text-[#8c7569]">
               Sign up now

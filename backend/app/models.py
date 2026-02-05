@@ -59,6 +59,7 @@ class User(UserBase, table=True):
         default_factory=get_datetime_utc,
         sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
     )
+    condominio_id: uuid.UUID | None = Field(default=None, foreign_key="condominio.id")
 
 
 # Properties to return via API, id is always required

@@ -1,18 +1,19 @@
 import uuid
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import InstrumentedAttribute, selectinload
 from sqlmodel import func, select
 
-from app.api.deps import SessionDep, require_cargo
+from app.api.deps import SessionDep, get_current_user, require_cargo
 from app.models import (
     Building,
     BuildingCreate,
     BuildingPublic,
-    BuildingUpdate,
     BuildingsPublic,
+    BuildingUpdate,
     Message,
+    User
 )
 
 router = APIRouter(prefix="/buildings", tags=["buildings"])
@@ -22,7 +23,7 @@ router = APIRouter(prefix="/buildings", tags=["buildings"])
 def read_buildings(session: SessionDep, skip: int = 0, limit: int = 100) -> Any:
     count_statement = select(func.count()).select_from(Building)
     count = session.exec(count_statement).one()
-    statement = select(Building).options(selectinload(Building.flats)).offset(skip).limit(limit)
+    statement = select(Building).options(selectinload(cast(InstrumentedAttribute, Building.flats))).offset(skip).limit(limit)
     buildings = session.exec(statement).all()
     return BuildingsPublic(data=buildings, count=count)
 
@@ -65,3 +66,14 @@ def delete_building(session: SessionDep, id: uuid.UUID) -> Message:
     session.delete(building)
     session.commit()
     return Message(message="Building deleted successfully")
+
+@router.get("/id/{name}", response_model=BuildingPublic, dependencies=[Depends(require_cargo(1))])
+def get_building_by_name(session: SessionDep, name: str,current_user: User = Depends(get_current_user),) -> Any:
+    condominio = current_user.condominio_id
+    
+
+    statement = select(Building).where(Building.nome == name , Building.condominio_id == condominio)
+    building = session.exec(statement).first()
+    if not building:
+        raise HTTPException(status_code=404, detail="Building not found")
+    return building

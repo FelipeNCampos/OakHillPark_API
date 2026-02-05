@@ -1,11 +1,21 @@
+import datetime
 import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlmodel import func, select
+from sqlalchemy import desc
+from sqlmodel import col, func, select
 
 from app.api.deps import SessionDep, require_cargo
-from app.models import Acess, AcessCreate, AcessPublic, AcessUpdate, AcessesPublic, Funcionario, Message
+from app.models import (
+    Acess,
+    AcessCreate,
+    AcessesPublic,
+    AcessPublic,
+    AcessUpdate,
+    Funcionario,
+    Message,
+)
 
 router = APIRouter(prefix="/acess", tags=["acess"])
 
@@ -33,8 +43,8 @@ def create_acess(*, session: SessionDep, acess_in: AcessCreate) -> Any:
         select(Funcionario)
         .where(
             Funcionario.cargo == 0,
-            Funcionario.status == True,
-            Funcionario.is_default == True,
+            Funcionario.status,
+            Funcionario.is_default,
         )
         .limit(1)
     ).first()
@@ -42,27 +52,46 @@ def create_acess(*, session: SessionDep, acess_in: AcessCreate) -> Any:
     if not default_cleaner:
         default_cleaner = session.exec(
             select(Funcionario)
-            .where(Funcionario.cargo == 0, Funcionario.status == True)
+            .where(Funcionario.cargo == 0, Funcionario.status)
             .limit(1)
         ).first()
 
     if not default_cleaner:
         raise HTTPException(status_code=404, detail="Default cleaner not found")
-
-    if acess_in.operacao == 0:
-        last_acess = session.exec(
+    last_acess = session.exec(
             select(Acess)
             .where(Acess.funcionario_id == default_cleaner.id)
-            .order_by(Acess.data.desc())
+            .order_by(desc(col(Acess.data)))
             .limit(1)
         ).first()
-        if last_acess and last_acess.operacao == 0:
+
+    if acess_in.operacao == 0:
+        if (last_acess and last_acess.operacao == 0):
             raise HTTPException(
                 status_code=400,
                 detail="Cleaner already has an open session",
             )
+    if acess_in.operacao == 1:
+        if (last_acess is None) :
+            raise HTTPException(
+            status_code=400,
+                detail="Cleaner does not have an open session to close",
+            )
+        if (last_acess.operacao == 1):
+            raise HTTPException(
+                status_code=400,
+                detail="Cleaner does not have an open session to close",
+            )
+    final: dict = {
+        "id": uuid.uuid4(),
+        "status": True,
+        "data": datetime.datetime.now(),
+        "operacao": acess_in.operacao,
+        "building_id": acess_in.building_id,
+        "funcionario_id": default_cleaner.id,
+    }
 
-    acess = Acess.model_validate(acess_in)
+    acess = Acess.model_validate(final)
     acess.funcionario_id = default_cleaner.id
     session.add(acess)
     session.commit()

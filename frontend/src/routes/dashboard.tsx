@@ -1315,7 +1315,7 @@ function AddFlatReadingsForm({ buildings, onBack }: { buildings: any[]; onBack: 
                 </h3>
                 
                 <div className="space-y-4">
-                  {building.flats.map((flat: any) => {
+                  {[...building.flats].sort((a: any, b: any) => a.numero - b.numero).map((flat: any) => {
                     const hasLow = (flat.reading_types & 1) !== 0
                     const hasNormal = (flat.reading_types & 2) !== 0
                     const hasGas = (flat.reading_types & 4) !== 0
@@ -1526,7 +1526,7 @@ function FlatsReadingsContent() {
             </label>
             {flats.length > 0 ? (
               <div className="flex gap-3 w-full flex-wrap">
-                {flats.map((flat: any) => (
+                {[...flats].sort((a: any, b: any) => a.numero - b.numero).map((flat: any) => (
                   <button
                     key={flat.id}
                     onClick={() => setSelectedFlatId(flat.id)}

@@ -19,6 +19,31 @@ from app.models import (
 router = APIRouter(prefix="/buildings", tags=["buildings"])
 
 
+@router.get("/condominio", response_model=BuildingsPublic, dependencies=[Depends(require_cargo(1))])
+def read_buildings_by_condominio(
+    session: SessionDep,
+    current_user: User = Depends(get_current_user),
+    skip: int = 0,
+    limit: int = 100,
+) -> Any:
+    condominio_id = current_user.condominio_id
+    count_statement = (
+        select(func.count())
+        .select_from(Building)
+        .where(Building.condominio_id == condominio_id)
+    )
+    count = session.exec(count_statement).one()
+    statement = (
+        select(Building)
+        .where(Building.condominio_id == condominio_id)
+        .options(selectinload(cast(InstrumentedAttribute, Building.flats)))
+        .offset(skip)
+        .limit(limit)
+    )
+    buildings = session.exec(statement).all()
+    return BuildingsPublic(data=buildings, count=count)
+
+
 @router.get("/", response_model=BuildingsPublic, dependencies=[Depends(require_cargo(2))])
 def read_buildings(session: SessionDep, skip: int = 0, limit: int = 100) -> Any:
     count_statement = select(func.count()).select_from(Building)

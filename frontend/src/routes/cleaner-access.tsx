@@ -1,5 +1,6 @@
 import { useMutation } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
+import { useState } from "react"
 import { z } from "zod"
 
 import { OpenAPI } from "@/client"
@@ -72,16 +73,22 @@ function CleanerAccess() {
   const { showSuccessToast, showErrorToast } = useCustomToast()
   const search = Route.useSearch() as z.infer<typeof searchSchema>
   const { op, operation, buildingId, building, buildingName } = search
+  const [showConfirmation, setShowConfirmation] = useState(false)
 
   const rawOperation = (op || operation || "").toLowerCase()
+  const initialOperation =
+    rawOperation === "in" || rawOperation === "out" ? rawOperation : ""
+  const [selectedOperation, setSelectedOperation] = useState<
+    "in" | "out" | ""
+  >(initialOperation as "in" | "out" | "")
+
   const operationLabel =
-    rawOperation === "in"
-      ? "Entrada"
-      : rawOperation === "out"
-        ? "Saída"
+    selectedOperation === "in"
+      ? "Entry"
+      : selectedOperation === "out"
+        ? "Exit"
         : ""
 
-  const cleanerName = "Cleaner padrão"
   const buildingLabel = building || buildingName || buildingId || ""
 
   const mutation = useMutation({
@@ -91,10 +98,17 @@ function CleanerAccess() {
         body: payload,
       }),
     onSuccess: () => {
-      showSuccessToast("Registro enviado com sucesso")
+      showSuccessToast("Record confirmed")
+      setShowConfirmation(true)
+      setTimeout(() => {
+        if (typeof window !== "undefined") {
+          window.close()
+          window.location.href = "about:blank"
+        }
+      }, 5000)
     },
     onError: (error: any) => {
-      showErrorToast(error?.message || "Não foi possível enviar o registro")
+      showErrorToast(error?.message || "Unable to submit the record")
     },
   })
 
@@ -102,13 +116,13 @@ function CleanerAccess() {
 
   const handleConfirm = () => {
     if (!canSubmit) {
-      showErrorToast("QRCode inválido. Verifique operação e building.")
+      showErrorToast("Invalid QR code. Check building and operation.")
       return
     }
 
     const payload: any = {
       status: true,
-      operacao: rawOperation === "in" ? 0 : 1,
+      operacao: selectedOperation === "in" ? 0 : 1,
       building_id: buildingId,
     }
 
@@ -120,36 +134,54 @@ function CleanerAccess() {
       <div className="mx-auto max-w-xl">
         <div className="rounded-2xl bg-white p-8 shadow-lg">
           <h1 className="mb-2 text-center text-2xl font-bold text-[#55311c]">
-            Registro de {operationLabel || "Acesso"}
+            Cleaner Access
           </h1>
           <p className="mb-6 text-center text-[rgba(0,0,0,0.7)]">
-            Confirme os dados abaixo para enviar o registro.
+            Choose the operation and confirm the record.
           </p>
 
           <div className="space-y-4">
             <div className="rounded-lg border border-[#e5e0dc] bg-[#f9f7f5] p-4">
-              <p className="text-sm font-semibold text-[#55311c]">Operação</p>
-              <p className="text-lg font-bold text-[#55311c]">
-                {operationLabel || "Não informado"}
-              </p>
-            </div>
-            <div className="rounded-lg border border-[#e5e0dc] bg-[#f9f7f5] p-4">
               <p className="text-sm font-semibold text-[#55311c]">Building</p>
               <p className="text-lg font-bold text-[#55311c]">
-                {buildingLabel || "Não informado"}
+                {buildingLabel || "Not provided"}
               </p>
             </div>
-            <div className="rounded-lg border border-[#e5e0dc] bg-[#f9f7f5] p-4">
-              <p className="text-sm font-semibold text-[#55311c]">Cleaner</p>
-              <p className="text-lg font-bold text-[#55311c]">
-                {cleanerName || "Cleaner ativo não definido"}
-              </p>
+          </div>
+
+          <div className="mt-6">
+            <p className="mb-2 text-sm font-semibold text-[#55311c]">
+              Operation
+            </p>
+            <div className="flex rounded-full bg-[#f5f1ee] p-1">
+              <button
+                type="button"
+                onClick={() => setSelectedOperation("in")}
+                className={`flex-1 rounded-full px-4 py-2 text-sm font-semibold transition-all duration-200 ${
+                  selectedOperation === "in"
+                    ? "bg-[#8c7569] text-white shadow"
+                    : "text-[#55311c] hover:bg-[#e8e1dc]"
+                }`}
+              >
+                IN
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedOperation("out")}
+                className={`flex-1 rounded-full px-4 py-2 text-sm font-semibold transition-all duration-200 ${
+                  selectedOperation === "out"
+                    ? "bg-[#8c7569] text-white shadow"
+                    : "text-[#55311c] hover:bg-[#e8e1dc]"
+                }`}
+              >
+                OUT
+              </button>
             </div>
           </div>
 
           {!canSubmit && (
             <div className="mt-4 rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-700">
-              QRCode inválido. Verifique se possui operação e building.
+              Invalid QR code. Make sure building and operation are set.
             </div>
           )}
 
@@ -159,10 +191,23 @@ function CleanerAccess() {
             disabled={mutation.isPending || !canSubmit}
             className="mt-6 w-full rounded-lg bg-[#8c7569] px-6 py-3 text-lg font-semibold text-white transition-all duration-300 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {mutation.isPending ? "Enviando..." : "Confirmar"}
+            {mutation.isPending ? "Sending..." : "Confirm"}
           </button>
         </div>
       </div>
+
+      {showConfirmation && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 text-center shadow-xl">
+            <h2 className="text-xl font-bold text-[#55311c]">
+              Record confirmed
+            </h2>
+            <p className="mt-2 text-sm text-[rgba(0,0,0,0.7)]">
+              This page will close in 5 seconds.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

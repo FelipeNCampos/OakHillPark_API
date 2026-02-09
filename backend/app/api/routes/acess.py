@@ -66,11 +66,23 @@ def create_acess(*, session: SessionDep, acess_in: AcessCreate) -> Any:
         ).first()
 
     if acess_in.operacao == 0:
-        if (last_acess and last_acess.operacao == 0):
-            raise HTTPException(
-                status_code=400,
-                detail="Cleaner already has an open session",
-            )
+        if last_acess and last_acess.operacao == 0:
+            if last_acess.building_id == acess_in.building_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Cleaner already has an open session",
+                )
+            auto_close = {
+                "id": uuid.uuid4(),
+                "status": True,
+                "data": datetime.datetime.now(),
+                "operacao": 1,
+                "building_id": last_acess.building_id,
+                "funcionario_id": default_cleaner.id,
+            }
+            auto_close_acess = Acess.model_validate(auto_close)
+            auto_close_acess.funcionario_id = default_cleaner.id
+            session.add(auto_close_acess)
     if acess_in.operacao == 1:
         if (last_acess is None) :
             raise HTTPException(

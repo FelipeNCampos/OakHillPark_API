@@ -96,13 +96,26 @@ services:
   frontend:
     restart: "no"
     ports:
-      - "5173:80"
+      - "5173:5173"
     build:
       context: .
       dockerfile: frontend/Dockerfile
+      target: build-stage
       args:
         - VITE_API_URL=http://localhost:8000
         - NODE_ENV=development
+    working_dir: /app/frontend
+    command: bun run dev --host 0.0.0.0 --port 5173
+    environment:
+      - VITE_API_URL=http://localhost:8000
+    develop:
+      watch:
+        - path: ./frontend
+          action: sync
+          target: /app/frontend
+          ignore:
+            - ./frontend/node_modules
+            - ./frontend/dist
 
   playwright:
     build:

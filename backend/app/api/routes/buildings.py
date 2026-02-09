@@ -13,7 +13,7 @@ from app.models import (
     BuildingsPublic,
     BuildingUpdate,
     Message,
-    User
+    User,
 )
 
 router = APIRouter(prefix="/buildings", tags=["buildings"])
@@ -70,7 +70,7 @@ def delete_building(session: SessionDep, id: uuid.UUID) -> Message:
 @router.get("/id/{name}", response_model=BuildingPublic, dependencies=[Depends(require_cargo(1))])
 def get_building_by_name(session: SessionDep, name: str,current_user: User = Depends(get_current_user),) -> Any:
     condominio = current_user.condominio_id
-    
+
 
     statement = select(Building).where(Building.nome == name , Building.condominio_id == condominio)
     building = session.exec(statement).first()

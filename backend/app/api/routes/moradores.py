@@ -2,7 +2,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlmodel import func, select, or_
+from sqlmodel import col, func, or_, select
 
 from app.api.deps import SessionDep, require_cargo
 from app.models import (
@@ -11,11 +11,10 @@ from app.models import (
     Message,
     Morador,
     MoradorCreate,
+    MoradoresWithFlatPublic,
     MoradorPublic,
     MoradorUpdate,
     MoradorWithFlatPublic,
-    MoradoresPublic,
-    MoradoresWithFlatPublic,
 )
 
 router = APIRouter(prefix="/moradores", tags=["moradores"])
@@ -31,9 +30,9 @@ def read_moradores(
 ) -> Any:
     statement = (
         select(Morador, Flat, Building)
-        .join(Flat, Morador.flat_id == Flat.id)
-        .join(Building, Flat.building_id == Building.id)
-        .order_by(Building.nome, Flat.numero)
+        .join(Flat, col(Morador.flat_id) == Flat.id)
+        .join(Building, col(Flat.building_id) == Building.id)
+        .order_by(col(Building.nome), col(Flat.numero))
     )
 
     # Filter by building if provided
@@ -46,9 +45,9 @@ def read_moradores(
         statement = statement.where(
             or_(
                 Flat.numero == int(search) if search.isdigit() else False,
-                Morador.nome.ilike(search_term),
-                Morador.mobile.ilike(search_term),
-                Morador.email.ilike(search_term) if search else False,
+                col(Morador.nome).ilike(search_term),
+                col(Morador.mobile).ilike(search_term),
+                col(Morador.email).ilike(search_term) if search else False,
             )
         )
 
@@ -61,9 +60,9 @@ def read_moradores(
         count_statement = count_statement.where(
             or_(
                 Flat.numero == int(search) if search.isdigit() else False,
-                Morador.nome.ilike(search_term),
-                Morador.mobile.ilike(search_term),
-                Morador.email.ilike(search_term) if search else False,
+                col(Morador.nome).ilike(search_term),
+                col(Morador.mobile).ilike(search_term),
+                col(Morador.email).ilike(search_term) if search else False,
             )
         )
     count = session.exec(count_statement).one()
@@ -128,25 +127,25 @@ def update_morador_reading_types(
 ) -> Any:
     """Update reading types for a morador's flat"""
     reading_types = request_body.get("reading_types", 0)
-    
+
     morador = session.get(Morador, id)
     if not morador:
         raise HTTPException(status_code=404, detail="Morador not found")
-    
+
     flat = session.get(Flat, morador.flat_id)
     if not flat:
         raise HTTPException(status_code=404, detail="Flat not found")
-    
+
     flat.reading_types = reading_types
     session.add(flat)
     session.commit()
     session.refresh(flat)
-    
+
     # Return the updated morador with flat info
     building = session.get(Building, flat.building_id)
     if not building:
         raise HTTPException(status_code=404, detail="Building not found")
-    
+
     return MoradorWithFlatPublic(
         id=morador.id,
         cargo=morador.cargo,

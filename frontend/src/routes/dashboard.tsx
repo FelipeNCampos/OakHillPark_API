@@ -771,6 +771,7 @@ function BuildingReadingsTable({
   const { showSuccessToast, showErrorToast } = useCustomToast()
   const [editingRow, setEditingRow] = useState<ProcessedReading | null>(null)
   const [editValues, setEditValues] = useState<{
+    date?: string
     low?: string
     normal?: string
     gas?: string
@@ -926,8 +927,10 @@ function BuildingReadingsTable({
   }
 
   const handleOpenEdit = (row: ProcessedReading) => {
+    const dateOnly = row.date ? row.date.split("T")[0] : ""
     setEditingRow(row)
     setEditValues({
+      date: dateOnly,
       low: row.low !== undefined ? String(row.low) : "",
       normal: row.normal !== undefined ? String(row.normal) : "",
       gas: row.gas !== undefined ? String(row.gas) : "",
@@ -939,17 +942,32 @@ function BuildingReadingsTable({
 
     try {
       const updates: Promise<unknown>[] = []
+      const dateOnly = editValues.date?.trim() || ""
+      const originalDateOnly = editingRow.date.split("T")[0]
+      const timePart = editingRow.date.split("T")[1] || "00:00:00"
+      const dateChanged = Boolean(dateOnly) && dateOnly !== originalDateOnly
+      const nextDate = dateChanged ? `${dateOnly}T${timePart}` : undefined
 
       if (
         editingRow.lowId &&
         editValues.low !== undefined &&
         editValues.low.trim() !== "" &&
-        Number(editValues.low) !== editingRow.low
+        (Number(editValues.low) !== editingRow.low || dateChanged)
       ) {
         updates.push(
           apiCall(`/api/v1/readings/${editingRow.lowId}`, {
             method: "PATCH",
-            body: { valor: Number(editValues.low) },
+            body: {
+              valor: Number(editValues.low),
+              ...(nextDate ? { data: nextDate } : {}),
+            },
+          }),
+        )
+      } else if (editingRow.lowId && dateChanged) {
+        updates.push(
+          apiCall(`/api/v1/readings/${editingRow.lowId}`, {
+            method: "PATCH",
+            body: { data: nextDate },
           }),
         )
       }
@@ -958,12 +976,22 @@ function BuildingReadingsTable({
         editingRow.normalId &&
         editValues.normal !== undefined &&
         editValues.normal.trim() !== "" &&
-        Number(editValues.normal) !== editingRow.normal
+        (Number(editValues.normal) !== editingRow.normal || dateChanged)
       ) {
         updates.push(
           apiCall(`/api/v1/readings/${editingRow.normalId}`, {
             method: "PATCH",
-            body: { valor: Number(editValues.normal) },
+            body: {
+              valor: Number(editValues.normal),
+              ...(nextDate ? { data: nextDate } : {}),
+            },
+          }),
+        )
+      } else if (editingRow.normalId && dateChanged) {
+        updates.push(
+          apiCall(`/api/v1/readings/${editingRow.normalId}`, {
+            method: "PATCH",
+            body: { data: nextDate },
           }),
         )
       }
@@ -972,12 +1000,22 @@ function BuildingReadingsTable({
         editingRow.gasId &&
         editValues.gas !== undefined &&
         editValues.gas.trim() !== "" &&
-        Number(editValues.gas) !== editingRow.gas
+        (Number(editValues.gas) !== editingRow.gas || dateChanged)
       ) {
         updates.push(
           apiCall(`/api/v1/readings/${editingRow.gasId}`, {
             method: "PATCH",
-            body: { valor: Number(editValues.gas) },
+            body: {
+              valor: Number(editValues.gas),
+              ...(nextDate ? { data: nextDate } : {}),
+            },
+          }),
+        )
+      } else if (editingRow.gasId && dateChanged) {
+        updates.push(
+          apiCall(`/api/v1/readings/${editingRow.gasId}`, {
+            method: "PATCH",
+            body: { data: nextDate },
           }),
         )
       }
@@ -1286,6 +1324,26 @@ function BuildingReadingsTable({
             </p>
 
             <div className="mt-4 grid gap-4">
+              <div>
+                <label
+                  className="block text-sm font-semibold text-[#55311c]"
+                  htmlFor="edit-reading-date"
+                >
+                  Data
+                </label>
+                <input
+                  type="date"
+                  id="edit-reading-date"
+                  value={editValues.date || ""}
+                  onChange={(e) =>
+                    setEditValues((prev) => ({
+                      ...prev,
+                      date: e.target.value,
+                    }))
+                  }
+                  className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                />
+              </div>
               {hasLow && (
                 <div>
                   <label
@@ -2116,6 +2174,15 @@ function FlatReadingsTable({
   const hasLow = (flat.reading_types & 1) !== 0
   const hasNormal = (flat.reading_types & 2) !== 0
   const hasGas = (flat.reading_types & 4) !== 0
+  const queryClient = useQueryClient()
+  const { showSuccessToast, showErrorToast } = useCustomToast()
+  const [editingRow, setEditingRow] = useState<ProcessedReading | null>(null)
+  const [editValues, setEditValues] = useState<{
+    date?: string
+    low?: string
+    normal?: string
+    gas?: string
+  }>({})
 
   if (isLoading) {
     return <p className="text-center text-[#55311c]">Carregando readings...</p>
@@ -2135,6 +2202,9 @@ function FlatReadingsTable({
     low?: number
     normal?: number
     gas?: number
+    lowId?: EntityId
+    normalId?: EntityId
+    gasId?: EntityId
   }
 
   // Group readings by date
@@ -2151,9 +2221,18 @@ function FlatReadingsTable({
         gas: undefined,
       }
     }
-    if (reading.tipo === 1) readingsByDate[dateStr].low = reading.valor
-    if (reading.tipo === 2) readingsByDate[dateStr].normal = reading.valor
-    if (reading.tipo === 4) readingsByDate[dateStr].gas = reading.valor
+    if (reading.tipo === 1) {
+      readingsByDate[dateStr].low = reading.valor
+      readingsByDate[dateStr].lowId = reading.id
+    }
+    if (reading.tipo === 2) {
+      readingsByDate[dateStr].normal = reading.valor
+      readingsByDate[dateStr].normalId = reading.id
+    }
+    if (reading.tipo === 4) {
+      readingsByDate[dateStr].gas = reading.valor
+      readingsByDate[dateStr].gasId = reading.id
+    }
   }
 
   // Convert to array and sort by date (newest first)
@@ -2276,6 +2355,116 @@ function FlatReadingsTable({
     return "bg-yellow-50" // Normal consumption
   }
 
+  const handleOpenEdit = (row: ProcessedReading) => {
+    const dateOnly = row.date ? row.date.split("T")[0] : ""
+    setEditingRow(row)
+    setEditValues({
+      date: dateOnly,
+      low: row.low !== undefined ? String(row.low) : "",
+      normal: row.normal !== undefined ? String(row.normal) : "",
+      gas: row.gas !== undefined ? String(row.gas) : "",
+    })
+  }
+
+  const handleSaveEdit = async () => {
+    if (!editingRow) return
+
+    try {
+      const updates: Promise<unknown>[] = []
+      const dateOnly = editValues.date?.trim() || ""
+      const originalDateOnly = editingRow.date.split("T")[0]
+      const timePart = editingRow.date.split("T")[1] || "00:00:00"
+      const dateChanged = Boolean(dateOnly) && dateOnly !== originalDateOnly
+      const nextDate = dateChanged ? `${dateOnly}T${timePart}` : undefined
+
+      if (
+        editingRow.lowId &&
+        editValues.low !== undefined &&
+        editValues.low.trim() !== "" &&
+        (Number(editValues.low) !== editingRow.low || dateChanged)
+      ) {
+        updates.push(
+          apiCall(`/api/v1/flat_readings/${editingRow.lowId}`, {
+            method: "PATCH",
+            body: {
+              valor: Number(editValues.low),
+              ...(nextDate ? { data: nextDate } : {}),
+            },
+          }),
+        )
+      } else if (editingRow.lowId && dateChanged) {
+        updates.push(
+          apiCall(`/api/v1/flat_readings/${editingRow.lowId}`, {
+            method: "PATCH",
+            body: { data: nextDate },
+          }),
+        )
+      }
+
+      if (
+        editingRow.normalId &&
+        editValues.normal !== undefined &&
+        editValues.normal.trim() !== "" &&
+        (Number(editValues.normal) !== editingRow.normal || dateChanged)
+      ) {
+        updates.push(
+          apiCall(`/api/v1/flat_readings/${editingRow.normalId}`, {
+            method: "PATCH",
+            body: {
+              valor: Number(editValues.normal),
+              ...(nextDate ? { data: nextDate } : {}),
+            },
+          }),
+        )
+      } else if (editingRow.normalId && dateChanged) {
+        updates.push(
+          apiCall(`/api/v1/flat_readings/${editingRow.normalId}`, {
+            method: "PATCH",
+            body: { data: nextDate },
+          }),
+        )
+      }
+
+      if (
+        editingRow.gasId &&
+        editValues.gas !== undefined &&
+        editValues.gas.trim() !== "" &&
+        (Number(editValues.gas) !== editingRow.gas || dateChanged)
+      ) {
+        updates.push(
+          apiCall(`/api/v1/flat_readings/${editingRow.gasId}`, {
+            method: "PATCH",
+            body: {
+              valor: Number(editValues.gas),
+              ...(nextDate ? { data: nextDate } : {}),
+            },
+          }),
+        )
+      } else if (editingRow.gasId && dateChanged) {
+        updates.push(
+          apiCall(`/api/v1/flat_readings/${editingRow.gasId}`, {
+            method: "PATCH",
+            body: { data: nextDate },
+          }),
+        )
+      }
+
+      if (updates.length === 0) {
+        showErrorToast("Nenhuma alteração detectada")
+        return
+      }
+
+      await Promise.all(updates)
+      showSuccessToast("Leituras atualizadas com sucesso")
+      queryClient.invalidateQueries({ queryKey: ["flat_readings", flat.id] })
+      setEditingRow(null)
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Erro ao atualizar leituras"
+      showErrorToast(message)
+    }
+  }
+
   return (
     <div className="overflow-x-auto">
       {/* Flat Header */}
@@ -2393,6 +2582,9 @@ function FlatReadingsTable({
                 </th>
               </>
             )}
+            <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700">
+              Acoes
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -2453,10 +2645,141 @@ function FlatReadingsTable({
                   </td>
                 </>
               )}
+              <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
+                <button
+                  type="button"
+                  onClick={() => handleOpenEdit(row)}
+                  className="rounded-lg bg-[#8c7569] px-3 py-1 text-xs font-semibold text-white transition-all duration-200 hover:bg-[#55311c]"
+                >
+                  Editar
+                </button>
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
+
+      {editingRow && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+            <h3 className="text-lg font-bold text-[#55311c]">
+              Editar leituras
+            </h3>
+            <p className="mt-1 text-sm text-[rgba(0,0,0,0.7)]">
+              Data: {editingRow.date.split("T")[0]}
+            </p>
+
+            <div className="mt-4 grid gap-4">
+              <div>
+                <label
+                  className="block text-sm font-semibold text-[#55311c]"
+                  htmlFor="edit-flat-reading-date"
+                >
+                  Data
+                </label>
+                <input
+                  type="date"
+                  id="edit-flat-reading-date"
+                  value={editValues.date || ""}
+                  onChange={(e) =>
+                    setEditValues((prev) => ({
+                      ...prev,
+                      date: e.target.value,
+                    }))
+                  }
+                  className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                />
+              </div>
+
+              {hasLow && (
+                <div>
+                  <label
+                    className="block text-sm font-semibold text-[#55311c]"
+                    htmlFor="edit-flat-reading-low"
+                  >
+                    Low
+                  </label>
+                  <input
+                    type="number"
+                    id="edit-flat-reading-low"
+                    value={editValues.low || ""}
+                    onChange={(e) =>
+                      setEditValues((prev) => ({
+                        ...prev,
+                        low: e.target.value,
+                      }))
+                    }
+                    className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                  />
+                </div>
+              )}
+
+              {hasNormal && (
+                <div>
+                  <label
+                    className="block text-sm font-semibold text-[#55311c]"
+                    htmlFor="edit-flat-reading-normal"
+                  >
+                    Normal
+                  </label>
+                  <input
+                    type="number"
+                    id="edit-flat-reading-normal"
+                    value={editValues.normal || ""}
+                    onChange={(e) =>
+                      setEditValues((prev) => ({
+                        ...prev,
+                        normal: e.target.value,
+                      }))
+                    }
+                    className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                  />
+                </div>
+              )}
+
+              {hasGas && (
+                <div>
+                  <label
+                    className="block text-sm font-semibold text-[#55311c]"
+                    htmlFor="edit-flat-reading-gas"
+                  >
+                    Gas
+                  </label>
+                  <input
+                    type="number"
+                    id="edit-flat-reading-gas"
+                    value={editValues.gas || ""}
+                    onChange={(e) =>
+                      setEditValues((prev) => ({
+                        ...prev,
+                        gas: e.target.value,
+                      }))
+                    }
+                    className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setEditingRow(null)}
+                className="rounded-lg border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveEdit}
+                className="rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c]"
+              >
+                Salvar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

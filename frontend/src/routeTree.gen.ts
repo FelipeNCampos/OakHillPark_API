@@ -15,6 +15,7 @@ import { Route as RecoverPasswordRouteImport } from './routes/recover-password'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as CleanerAccessRouteImport } from './routes/cleaner-access'
+import { Route as CaretakerAccessRouteImport } from './routes/caretaker-access'
 import { Route as LayoutRouteImport } from './routes/_layout'
 import { Route as LayoutIndexRouteImport } from './routes/_layout/index'
 import { Route as LayoutSettingsRouteImport } from './routes/_layout/settings'
@@ -50,6 +51,11 @@ const CleanerAccessRoute = CleanerAccessRouteImport.update({
   path: '/cleaner-access',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CaretakerAccessRoute = CaretakerAccessRouteImport.update({
+  id: '/caretaker-access',
+  path: '/caretaker-access',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LayoutRoute = LayoutRouteImport.update({
   id: '/_layout',
   getParentRoute: () => rootRouteImport,
@@ -72,6 +78,7 @@ const LayoutAdminRoute = LayoutAdminRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof LayoutIndexRoute
+  '/caretaker-access': typeof CaretakerAccessRoute
   '/cleaner-access': typeof CleanerAccessRoute
   '/dashboard': typeof DashboardRoute
   '/login': typeof LoginRoute
@@ -82,6 +89,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof LayoutSettingsRoute
 }
 export interface FileRoutesByTo {
+  '/caretaker-access': typeof CaretakerAccessRoute
   '/cleaner-access': typeof CleanerAccessRoute
   '/dashboard': typeof DashboardRoute
   '/login': typeof LoginRoute
@@ -95,6 +103,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_layout': typeof LayoutRouteWithChildren
+  '/caretaker-access': typeof CaretakerAccessRoute
   '/cleaner-access': typeof CleanerAccessRoute
   '/dashboard': typeof DashboardRoute
   '/login': typeof LoginRoute
@@ -109,6 +118,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/caretaker-access'
     | '/cleaner-access'
     | '/dashboard'
     | '/login'
@@ -119,6 +129,7 @@ export interface FileRouteTypes {
     | '/settings'
   fileRoutesByTo: FileRoutesByTo
   to:
+    | '/caretaker-access'
     | '/cleaner-access'
     | '/dashboard'
     | '/login'
@@ -131,6 +142,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/_layout'
+    | '/caretaker-access'
     | '/cleaner-access'
     | '/dashboard'
     | '/login'
@@ -144,6 +156,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   LayoutRoute: typeof LayoutRouteWithChildren
+  CaretakerAccessRoute: typeof CaretakerAccessRoute
   CleanerAccessRoute: typeof CleanerAccessRoute
   DashboardRoute: typeof DashboardRoute
   LoginRoute: typeof LoginRoute
@@ -196,6 +209,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CleanerAccessRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/caretaker-access': {
+      id: '/caretaker-access'
+      path: '/caretaker-access'
+      fullPath: '/caretaker-access'
+      preLoaderRoute: typeof CaretakerAccessRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_layout': {
       id: '/_layout'
       path: ''
@@ -244,6 +264,7 @@ const LayoutRouteWithChildren =
 
 const rootRouteChildren: RootRouteChildren = {
   LayoutRoute: LayoutRouteWithChildren,
+  CaretakerAccessRoute: CaretakerAccessRoute,
   CleanerAccessRoute: CleanerAccessRoute,
   DashboardRoute: DashboardRoute,
   LoginRoute: LoginRoute,

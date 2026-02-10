@@ -241,7 +241,7 @@ function ClientDashboard() {
       case "qr-contractor":
         return <TabContent title="QR Code - Contractor" />
       case "qr-caretaker":
-        return <TabContent title="QR Code - Caretaker" />
+        return <CaretakerQrCodesContent />
       case "residents":
         return <ResidentsContent />
       case "cleaner":
@@ -2889,7 +2889,154 @@ function CleanerQrCodesContent() {
       )}
 
       <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-        {buildings.map((building) => {
+        {[...buildings]
+          .filter((building) => !building.nome.toLowerCase().includes("office"))
+          .map((building) => {
+            const qrItem = qrMap[String(building.id)]
+            return (
+              <div
+          key={building.id}
+          className="flex h-full flex-col justify-between rounded-lg bg-white p-6 shadow-md"
+              >
+          <div>
+            <h3 className="text-lg font-semibold text-[#55311c]">
+              {building.nome || "Building"}
+            </h3>
+            <p className="text-sm text-[rgba(0,0,0,0.6)]">
+              Código: {building.id}
+            </p>
+          </div>
+
+          <div className="mt-4 flex flex-col items-center justify-center gap-4">
+            {qrItem?.dataUrl ? (
+              <img
+                src={qrItem.dataUrl}
+                alt={`QR Code ${building.nome || building.id}`}
+                className="h-48 w-48 rounded-lg border border-[#e5e0dc] bg-white p-2"
+              />
+            ) : (
+              <div className="flex h-48 w-48 items-center justify-center rounded-lg border border-dashed border-[#e5e0dc] text-xs text-[rgba(0,0,0,0.6)]">
+                QR Code indisponível
+              </div>
+            )}
+
+            <div className="flex w-full flex-col gap-2">
+              <a
+                href={qrItem?.dataUrl || "#"}
+                download={`qr-cleaner-${building.nome || building.id}.png`}
+                className={`w-full rounded-lg px-4 py-2 text-center text-sm font-semibold transition-all duration-200 ${
+            qrItem?.dataUrl
+              ? "bg-[#8c7569] text-white hover:bg-[#55311c]"
+              : "cursor-not-allowed bg-[#e5e0dc] text-[#8c7569]"
+                }`}
+                onClick={(event) => {
+            if (!qrItem?.dataUrl) event.preventDefault()
+                }}
+              >
+                Baixar QR Code
+              </a>
+              {qrItem?.link && (
+                <p className="break-all text-xs text-[rgba(0,0,0,0.5)]">
+            {qrItem.link}
+                </p>
+              )}
+            </div>
+          </div>
+              </div>
+            )
+          })}
+      </div>
+    </div>
+  )
+}
+
+function CaretakerQrCodesContent() {
+  const { data: buildingsData, isLoading } = useQuery({
+    queryKey: ["buildings", "qr-caretaker"],
+    queryFn: () => apiCall("/api/v1/buildings/condominio"),
+  })
+
+  const buildings = (buildingsData?.data || []) as Building[]
+
+  const baseUrl = useMemo(() => {
+    if (typeof window === "undefined") return ""
+    return window.location.origin
+  }, [])
+
+  const [qrMap, setQrMap] = useState<
+    Record<string, { dataUrl: string; link: string }>
+  >({})
+  const [isGenerating, setIsGenerating] = useState(false)
+
+  useEffect(() => {
+    let isActive = true
+
+    const generateQRCodes = async () => {
+      if (!baseUrl || buildings.length === 0) {
+        setQrMap({})
+        return
+      }
+
+      setIsGenerating(true)
+
+      const entries = await Promise.all(
+        buildings.map(async (building) => {
+          const params = new URLSearchParams()
+          params.set("buildingId", String(building.id))
+          if (building.nome) {
+            params.set("buildingName", String(building.nome))
+          }
+          const link = `${baseUrl}/caretaker-access?${params.toString()}`
+          const dataUrl = await QRCode.toDataURL(link, {
+            width: 240,
+            margin: 1,
+          })
+          return [String(building.id), { dataUrl, link }] as const
+        }),
+      )
+
+      if (!isActive) return
+
+      setQrMap(Object.fromEntries(entries))
+      setIsGenerating(false)
+    }
+
+    generateQRCodes().catch(() => {
+      if (!isActive) return
+      setQrMap({})
+      setIsGenerating(false)
+    })
+
+    return () => {
+      isActive = false
+    }
+  }, [baseUrl, buildings])
+
+  return (
+    <div className="mx-auto max-w-7xl">
+      <div className="mb-6 rounded-lg bg-white p-6 shadow-md">
+        <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
+          QR Code - Caretaker
+        </h2>
+        <p className="mt-2 text-[rgba(0,0,0,0.7)]">
+          Baixe um QR Code por building para registrar acesso no painel Caretaker.
+        </p>
+      </div>
+
+      {(isLoading || isGenerating) && (
+        <div className="rounded-lg bg-white p-6 text-center text-sm text-[#55311c] shadow-md">
+          Gerando QR Codes...
+        </div>
+      )}
+
+      {!isLoading && buildings.length === 0 && (
+        <div className="rounded-lg bg-white p-6 text-center text-sm text-[#55311c] shadow-md">
+          Nenhum building encontrado.
+        </div>
+      )}
+
+      <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+        {[...buildings].filter((building) => building.nome.toLowerCase().includes("office")).map((building) => {
           const qrItem = qrMap[String(building.id)]
           return (
             <div
@@ -2921,7 +3068,7 @@ function CleanerQrCodesContent() {
                 <div className="flex w-full flex-col gap-2">
                   <a
                     href={qrItem?.dataUrl || "#"}
-                    download={`qr-cleaner-${building.nome || building.id}.png`}
+                    download={`qr-caretaker-${building.nome || building.id}.png`}
                     className={`w-full rounded-lg px-4 py-2 text-center text-sm font-semibold transition-all duration-200 ${
                       qrItem?.dataUrl
                         ? "bg-[#8c7569] text-white hover:bg-[#55311c]"

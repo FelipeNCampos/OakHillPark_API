@@ -21,34 +21,62 @@ from app.models import (
 router = APIRouter(prefix="/acess", tags=["acess"])
 
 
-@router.get("/active", response_model=AcessActiveStatus)
-def read_active_acess(session: SessionDep) -> Any:
-    default_cleaner = session.exec(
+def get_default_funcionario(session: SessionDep, cargo: int) -> Funcionario | None:
+    funcionario = session.exec(
         select(Funcionario)
         .where(
-            Funcionario.cargo == 0,
+            Funcionario.cargo == cargo,
             Funcionario.status,
             Funcionario.is_default,
         )
         .limit(1)
     ).first()
 
-    if not default_cleaner:
-        default_cleaner = session.exec(
-            select(Funcionario)
-            .where(Funcionario.cargo == 0, Funcionario.status)
-            .limit(1)
-        ).first()
+    if funcionario:
+        return funcionario
+
+    return session.exec(
+        select(Funcionario)
+        .where(Funcionario.cargo == cargo, Funcionario.status)
+        .limit(1)
+    ).first()
+
+
+def get_last_acess(session: SessionDep, funcionario_id: uuid.UUID) -> Acess | None:
+    return session.exec(
+        select(Acess)
+        .where(Acess.funcionario_id == funcionario_id)
+        .order_by(desc(col(Acess.data)))
+        .limit(1)
+    ).first()
+
+
+@router.get("/active", response_model=AcessActiveStatus)
+def read_active_acess(session: SessionDep) -> Any:
+    default_cleaner = get_default_funcionario(session, 0)
 
     if not default_cleaner:
         return AcessActiveStatus(has_open_session=False, building_id=None)
 
-    last_acess = session.exec(
-        select(Acess)
-        .where(Acess.funcionario_id == default_cleaner.id)
-        .order_by(desc(col(Acess.data)))
-        .limit(1)
-    ).first()
+    last_acess = get_last_acess(session, default_cleaner.id)
+
+    if last_acess and last_acess.operacao == 0:
+        return AcessActiveStatus(
+            has_open_session=True,
+            building_id=last_acess.building_id,
+        )
+
+    return AcessActiveStatus(has_open_session=False, building_id=None)
+
+
+@router.get("/caretaker/active", response_model=AcessActiveStatus)
+def read_active_caretaker(session: SessionDep) -> Any:
+    caretaker = get_default_funcionario(session, 1)
+
+    if not caretaker:
+        return AcessActiveStatus(has_open_session=False, building_id=None)
+
+    last_acess = get_last_acess(session, caretaker.id)
 
     if last_acess and last_acess.operacao == 0:
         return AcessActiveStatus(
@@ -78,31 +106,11 @@ def read_acess_by_id(session: SessionDep, id: uuid.UUID) -> Any:
 
 @router.post("/", response_model=AcessPublic)
 def create_acess(*, session: SessionDep, acess_in: AcessCreate) -> Any:
-    default_cleaner = session.exec(
-        select(Funcionario)
-        .where(
-            Funcionario.cargo == 0,
-            Funcionario.status,
-            Funcionario.is_default,
-        )
-        .limit(1)
-    ).first()
-
-    if not default_cleaner:
-        default_cleaner = session.exec(
-            select(Funcionario)
-            .where(Funcionario.cargo == 0, Funcionario.status)
-            .limit(1)
-        ).first()
+    default_cleaner = get_default_funcionario(session, 0)
 
     if not default_cleaner:
         raise HTTPException(status_code=404, detail="Default cleaner not found")
-    last_acess = session.exec(
-            select(Acess)
-            .where(Acess.funcionario_id == default_cleaner.id)
-            .order_by(desc(col(Acess.data)))
-            .limit(1)
-        ).first()
+    last_acess = get_last_acess(session, default_cleaner.id)
 
     if acess_in.operacao == 0:
         if last_acess and last_acess.operacao == 0:
@@ -144,6 +152,63 @@ def create_acess(*, session: SessionDep, acess_in: AcessCreate) -> Any:
 
     acess = Acess.model_validate(final)
     acess.funcionario_id = default_cleaner.id
+    session.add(acess)
+    session.commit()
+    session.refresh(acess)
+    return acess
+
+
+@router.post("/caretaker", response_model=AcessPublic)
+def create_caretaker_acess(*, session: SessionDep, acess_in: AcessCreate) -> Any:
+    caretaker = get_default_funcionario(session, 1)
+
+    if not caretaker:
+        raise HTTPException(status_code=404, detail="Default caretaker not found")
+
+    last_acess = get_last_acess(session, caretaker.id)
+
+    if acess_in.operacao == 0:
+        if last_acess and last_acess.operacao == 0:
+            if last_acess.building_id == acess_in.building_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Caretaker already has an open session",
+                )
+            auto_close = {
+                "id": uuid.uuid4(),
+                "status": True,
+                "data": datetime.datetime.now(),
+                "operacao": 1,
+                "building_id": last_acess.building_id,
+                "funcionario_id": caretaker.id,
+            }
+            auto_close_acess = Acess.model_validate(auto_close)
+            auto_close_acess.funcionario_id = caretaker.id
+            session.add(auto_close_acess)
+
+    if acess_in.operacao == 1:
+        if last_acess is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Caretaker does not have an open session to close",
+            )
+        if last_acess.operacao == 1:
+            raise HTTPException(
+                status_code=400,
+                detail="Caretaker does not have an open session to close",
+            )
+
+    final: dict = {
+        "id": uuid.uuid4(),
+        "status": True,
+        "data": datetime.datetime.now(),
+        "operacao": acess_in.operacao,
+        "building_id": acess_in.building_id,
+        "funcionario_id": caretaker.id,
+    }
+
+    acess = Acess.model_validate(final)
+    acess.funcionario_id = caretaker.id
     session.add(acess)
     session.commit()
     session.refresh(acess)

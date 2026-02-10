@@ -452,6 +452,11 @@ class AcessesPublic(SQLModel):
     count: int
 
 
+class AcessActiveStatus(SQLModel):
+    has_open_session: bool
+    building_id: uuid.UUID | None = None
+
+
 class ReadingsBase(SQLModel):
     data: datetime = Field(
         default_factory=get_datetime_utc,

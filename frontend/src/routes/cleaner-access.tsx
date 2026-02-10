@@ -1,6 +1,6 @@
 import { useMutation } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { z } from "zod"
 
 import { OpenAPI } from "@/client"
@@ -76,11 +76,15 @@ function CleanerAccess() {
   const [showConfirmation, setShowConfirmation] = useState(false)
 
   const rawOperation = (op || operation || "").toLowerCase()
-  const initialOperation =
-    rawOperation === "in" || rawOperation === "out" ? rawOperation : ""
+  const hasExplicitOperation = rawOperation === "in" || rawOperation === "out"
+  const initialOperation = hasExplicitOperation ? rawOperation : ""
   const [selectedOperation, setSelectedOperation] = useState<"in" | "out" | "">(
     initialOperation as "in" | "out" | "",
   )
+  const [hasUserSelected, setHasUserSelected] = useState(false)
+  const [hasOpenSession, setHasOpenSession] = useState(false)
+  const [activeBuildingId, setActiveBuildingId] = useState<string | null>(null)
+  const [isCheckingSession, setIsCheckingSession] = useState(false)
 
   const operationLabel =
     selectedOperation === "in"
@@ -90,6 +94,57 @@ function CleanerAccess() {
         : ""
 
   const buildingLabel = building || buildingName || buildingId || ""
+
+  const hasActiveSessionInBuilding =
+    hasOpenSession &&
+    activeBuildingId &&
+    buildingId &&
+    String(activeBuildingId) === String(buildingId)
+
+  useEffect(() => {
+    if (!buildingId) return
+    let isActive = true
+
+    setIsCheckingSession(true)
+    publicApiCall("/api/v1/acess/active")
+      .then((data) => {
+        if (!isActive) return
+        const open = Boolean(data?.has_open_session)
+        const activeId = data?.building_id ? String(data.building_id) : null
+        setHasOpenSession(open)
+        setActiveBuildingId(activeId)
+
+        if (!hasExplicitOperation && !hasUserSelected) {
+          if (open && activeId && String(activeId) === String(buildingId)) {
+            setSelectedOperation("out")
+          } else {
+            setSelectedOperation("in")
+          }
+        }
+      })
+      .catch(() => {
+        if (!isActive) return
+        setHasOpenSession(false)
+        setActiveBuildingId(null)
+        if (!hasExplicitOperation && !hasUserSelected) {
+          setSelectedOperation("in")
+        }
+      })
+      .finally(() => {
+        if (!isActive) return
+        setIsCheckingSession(false)
+      })
+
+    return () => {
+      isActive = false
+    }
+  }, [buildingId, hasExplicitOperation, hasUserSelected])
+
+  useEffect(() => {
+    if (hasActiveSessionInBuilding && selectedOperation === "in") {
+      setSelectedOperation("out")
+    }
+  }, [hasActiveSessionInBuilding, selectedOperation])
 
   const mutation = useMutation({
     mutationFn: (payload: any) =>
@@ -154,20 +209,28 @@ function CleanerAccess() {
               Operation
             </p>
             <div className="flex rounded-full bg-[#f5f1ee] p-1">
+              {!hasActiveSessionInBuilding && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedOperation("in")
+                    setHasUserSelected(true)
+                  }}
+                  className={`flex-1 rounded-full px-4 py-2 text-sm font-semibold transition-all duration-200 ${
+                    selectedOperation === "in"
+                      ? "bg-[#8c7569] text-white shadow"
+                      : "text-[#55311c] hover:bg-[#e8e1dc]"
+                  }`}
+                >
+                  IN
+                </button>
+              )}
               <button
                 type="button"
-                onClick={() => setSelectedOperation("in")}
-                className={`flex-1 rounded-full px-4 py-2 text-sm font-semibold transition-all duration-200 ${
-                  selectedOperation === "in"
-                    ? "bg-[#8c7569] text-white shadow"
-                    : "text-[#55311c] hover:bg-[#e8e1dc]"
-                }`}
-              >
-                IN
-              </button>
-              <button
-                type="button"
-                onClick={() => setSelectedOperation("out")}
+                onClick={() => {
+                  setSelectedOperation("out")
+                  setHasUserSelected(true)
+                }}
                 className={`flex-1 rounded-full px-4 py-2 text-sm font-semibold transition-all duration-200 ${
                   selectedOperation === "out"
                     ? "bg-[#8c7569] text-white shadow"
@@ -177,6 +240,16 @@ function CleanerAccess() {
                 OUT
               </button>
             </div>
+            {isCheckingSession && (
+              <p className="mt-2 text-xs text-[rgba(0,0,0,0.6)]">
+                Verificando sessao ativa...
+              </p>
+            )}
+            {!isCheckingSession && hasActiveSessionInBuilding && (
+              <p className="mt-2 text-xs text-[rgba(0,0,0,0.6)]">
+                Active session in this building. Only OUT available.
+              </p>
+            )}
           </div>
 
           {!canSubmit && (

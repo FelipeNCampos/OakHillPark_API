@@ -9,6 +9,7 @@ from sqlmodel import col, func, select
 from app.api.deps import SessionDep, require_cargo
 from app.models import (
     Acess,
+    AcessActiveStatus,
     AcessCreate,
     AcessesPublic,
     AcessPublic,
@@ -18,6 +19,44 @@ from app.models import (
 )
 
 router = APIRouter(prefix="/acess", tags=["acess"])
+
+
+@router.get("/active", response_model=AcessActiveStatus)
+def read_active_acess(session: SessionDep) -> Any:
+    default_cleaner = session.exec(
+        select(Funcionario)
+        .where(
+            Funcionario.cargo == 0,
+            Funcionario.status,
+            Funcionario.is_default,
+        )
+        .limit(1)
+    ).first()
+
+    if not default_cleaner:
+        default_cleaner = session.exec(
+            select(Funcionario)
+            .where(Funcionario.cargo == 0, Funcionario.status)
+            .limit(1)
+        ).first()
+
+    if not default_cleaner:
+        return AcessActiveStatus(has_open_session=False, building_id=None)
+
+    last_acess = session.exec(
+        select(Acess)
+        .where(Acess.funcionario_id == default_cleaner.id)
+        .order_by(desc(col(Acess.data)))
+        .limit(1)
+    ).first()
+
+    if last_acess and last_acess.operacao == 0:
+        return AcessActiveStatus(
+            has_open_session=True,
+            building_id=last_acess.building_id,
+        )
+
+    return AcessActiveStatus(has_open_session=False, building_id=None)
 
 
 @router.get("/", response_model=AcessesPublic, dependencies=[Depends(require_cargo(1))])

@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import { createFileRoute, redirect } from "@tanstack/react-router"
 import QRCode from "qrcode"
 import { useEffect, useMemo, useState } from "react"
@@ -1909,7 +1914,7 @@ function FlatsReadingsContent() {
     (building) => building.id === selectedBuildingId,
   )
   const allFlats = selectedBuilding?.flats || []
-  const flats = allFlats
+  const flats = allFlats.filter((flat) => flat.reading_types !== 0)
 
   // Reset flat selection when building changes
   useEffect(() => {
@@ -1917,6 +1922,12 @@ function FlatsReadingsContent() {
       setSelectedFlatId(null)
     }
   }, [selectedBuildingId])
+
+  useEffect(() => {
+    if (selectedFlatId && !flats.some((flat) => flat.id === selectedFlatId)) {
+      setSelectedFlatId(null)
+    }
+  }, [flats, selectedFlatId])
 
   if (buildingsLoading) {
     return (
@@ -3151,6 +3162,7 @@ function ResidentsContent() {
     ApiListResponse<Morador> & { count?: number }
   >({
     queryKey: ["moradores", currentPage, selectedBuilding, searchTerm],
+    placeholderData: keepPreviousData,
     queryFn: () => {
       const params = new URLSearchParams()
       params.append("skip", String(currentPage * pageSize))

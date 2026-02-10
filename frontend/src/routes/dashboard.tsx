@@ -598,6 +598,37 @@ function BuildingReadingsTable({
   const hasNormal = (building.reading_types & 2) !== 0
   const hasGas = (building.reading_types & 4) !== 0
 
+  // Define interface for grouped readings
+  interface ReadingByDate {
+    date: string
+    low?: number
+    normal?: number
+    gas?: number
+    lowId?: string
+    normalId?: string
+    gasId?: string
+  }
+
+  // Calculate days, used values, and percentages
+  interface ProcessedReading extends ReadingByDate {
+    days: number
+    lowUsed?: number
+    lowPercent?: string
+    normalUsed?: number
+    normalPercent?: string
+    gasUsed?: number
+    gasPercent?: string
+  }
+
+  const queryClient = useQueryClient()
+  const { showSuccessToast, showErrorToast } = useCustomToast()
+  const [editingRow, setEditingRow] = useState<ProcessedReading | null>(null)
+  const [editValues, setEditValues] = useState<{
+    low?: string
+    normal?: string
+    gas?: string
+  }>({})
+
   if (isLoading) {
     return <p className="text-center text-[#55311c]">Carregando readings...</p>
   }
@@ -610,25 +641,28 @@ function BuildingReadingsTable({
     )
   }
 
-  // Define interface for grouped readings
-  interface ReadingByDate {
-    date: string
-    low?: number
-    normal?: number
-    gas?: number
-  }
 
   // Group readings by date
   const readingsByDate: Record<string, ReadingByDate> = {}
   for (const reading of readings) {
+    if (!reading?.data || typeof reading.data !== "string") continue
     // Parse date string directly without timezone conversion
     const dateStr = reading.data.split("T")[0]
     if (!readingsByDate[dateStr]) {
       readingsByDate[dateStr] = { date: reading.data, low: undefined, normal: undefined, gas: undefined }
     }
-    if (reading.tipo === 1) readingsByDate[dateStr].low = reading.valor
-    if (reading.tipo === 2) readingsByDate[dateStr].normal = reading.valor
-    if (reading.tipo === 4) readingsByDate[dateStr].gas = reading.valor
+    if (reading.tipo === 1) {
+      readingsByDate[dateStr].low = reading.valor
+      readingsByDate[dateStr].lowId = reading.id
+    }
+    if (reading.tipo === 2) {
+      readingsByDate[dateStr].normal = reading.valor
+      readingsByDate[dateStr].normalId = reading.id
+    }
+    if (reading.tipo === 4) {
+      readingsByDate[dateStr].gas = reading.valor
+      readingsByDate[dateStr].gasId = reading.id
+    }
   }
 
   // Convert to array and sort by date (newest first)
@@ -639,17 +673,6 @@ function BuildingReadingsTable({
       return dateB.localeCompare(dateA) // Descending order
     }
   )
-
-  // Calculate days, used values, and percentages
-  interface ProcessedReading extends ReadingByDate {
-    days: number
-    lowUsed?: number
-    lowPercent?: string
-    normalUsed?: number
-    normalPercent?: string
-    gasUsed?: number
-    gasPercent?: string
-  }
 
   const processedData: ProcessedReading[] = sortedReadings.map((current, index) => {
     const previous: ReadingByDate | undefined = sortedReadings[index + 1]
@@ -726,6 +749,77 @@ function BuildingReadingsTable({
     if (value > 20) return "bg-red-200" // High consumption
     if (value > 10) return "bg-orange-100" // Medium-high consumption
     return "bg-yellow-50" // Normal consumption
+  }
+
+  const handleOpenEdit = (row: ProcessedReading) => {
+    setEditingRow(row)
+    setEditValues({
+      low: row.low !== undefined ? String(row.low) : "",
+      normal: row.normal !== undefined ? String(row.normal) : "",
+      gas: row.gas !== undefined ? String(row.gas) : "",
+    })
+  }
+
+  const handleSaveEdit = async () => {
+    if (!editingRow) return
+
+    try {
+      const updates: Promise<any>[] = []
+
+      if (
+        editingRow.lowId &&
+        editValues.low !== undefined &&
+        editValues.low.trim() !== "" &&
+        Number(editValues.low) !== editingRow.low
+      ) {
+        updates.push(
+          apiCall(`/api/v1/readings/${editingRow.lowId}`, {
+            method: "PATCH",
+            body: { valor: Number(editValues.low) },
+          }),
+        )
+      }
+
+      if (
+        editingRow.normalId &&
+        editValues.normal !== undefined &&
+        editValues.normal.trim() !== "" &&
+        Number(editValues.normal) !== editingRow.normal
+      ) {
+        updates.push(
+          apiCall(`/api/v1/readings/${editingRow.normalId}`, {
+            method: "PATCH",
+            body: { valor: Number(editValues.normal) },
+          }),
+        )
+      }
+
+      if (
+        editingRow.gasId &&
+        editValues.gas !== undefined &&
+        editValues.gas.trim() !== "" &&
+        Number(editValues.gas) !== editingRow.gas
+      ) {
+        updates.push(
+          apiCall(`/api/v1/readings/${editingRow.gasId}`, {
+            method: "PATCH",
+            body: { valor: Number(editValues.gas) },
+          }),
+        )
+      }
+
+      if (updates.length === 0) {
+        showErrorToast("Nenhuma alteração detectada")
+        return
+      }
+
+      await Promise.all(updates)
+      showSuccessToast("Leituras atualizadas com sucesso")
+      queryClient.invalidateQueries({ queryKey: ["readings", building.id] })
+      setEditingRow(null)
+    } catch (error: any) {
+      showErrorToast(error?.message || "Erro ao atualizar leituras")
+    }
   }
 
   return (
@@ -844,6 +938,9 @@ function BuildingReadingsTable({
                 </th>
               </>
             )}
+            <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700">
+              Ações
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -916,6 +1013,15 @@ function BuildingReadingsTable({
                   </td>
                 </>
               )}
+              <td className="border border-gray-400 px-3 py-2 text-sm text-gray-800">
+                <button
+                  type="button"
+                  onClick={() => handleOpenEdit(row)}
+                  className="rounded-lg bg-[#8c7569] px-3 py-1 text-xs font-semibold text-white transition-all duration-200 hover:bg-[#55311c]"
+                >
+                  Editar
+                </button>
+              </td>
             </tr>
           ))}
 
@@ -978,9 +1084,99 @@ function BuildingReadingsTable({
                 </td>
               </>
             )}
+            <td className="border border-gray-400 px-3 py-2 text-sm text-gray-800">-</td>
           </tr>
         </tbody>
       </table>
+
+      {editingRow && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+            <h3 className="text-lg font-bold text-[#55311c]">
+              Editar leituras
+            </h3>
+            <p className="mt-1 text-sm text-[rgba(0,0,0,0.7)]">
+              Data: {editingRow.date.split("T")[0]}
+            </p>
+
+            <div className="mt-4 grid gap-4">
+              {hasLow && (
+                <div>
+                  <label className="block text-sm font-semibold text-[#55311c]">
+                    Low
+                  </label>
+                  <input
+                    type="number"
+                    value={editValues.low || ""}
+                    onChange={(e) =>
+                      setEditValues((prev) => ({
+                        ...prev,
+                        low: e.target.value,
+                      }))
+                    }
+                    className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                  />
+                </div>
+              )}
+
+              {hasNormal && (
+                <div>
+                  <label className="block text-sm font-semibold text-[#55311c]">
+                    Normal
+                  </label>
+                  <input
+                    type="number"
+                    value={editValues.normal || ""}
+                    onChange={(e) =>
+                      setEditValues((prev) => ({
+                        ...prev,
+                        normal: e.target.value,
+                      }))
+                    }
+                    className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                  />
+                </div>
+              )}
+
+              {hasGas && (
+                <div>
+                  <label className="block text-sm font-semibold text-[#55311c]">
+                    Gas
+                  </label>
+                  <input
+                    type="number"
+                    value={editValues.gas || ""}
+                    onChange={(e) =>
+                      setEditValues((prev) => ({
+                        ...prev,
+                        gas: e.target.value,
+                      }))
+                    }
+                    className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setEditingRow(null)}
+                className="rounded-lg border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveEdit}
+                className="rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c]"
+              >
+                Salvar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -1428,8 +1624,7 @@ function FlatsReadingsContent() {
   const buildings = buildingsData?.data || []
   const selectedBuilding = buildings.find((b: any) => b.id === selectedBuildingId)
   const allFlats = selectedBuilding?.flats || []
-  // Filter flats by reading_types != 0
-  const flats = allFlats.filter((f: any) => f.reading_types !== 0)
+  const flats = allFlats
 
   // Reset flat selection when building changes
   useEffect(() => {
@@ -1633,6 +1828,7 @@ function FlatReadingsTable({
   // Group readings by date
   const readingsByDate: Record<string, ReadingByDate> = {}
   for (const reading of readings) {
+    if (!reading?.data || typeof reading.data !== "string") continue
     // Parse date string directly without timezone conversion
     const dateStr = reading.data.split("T")[0]
     if (!readingsByDate[dateStr]) {

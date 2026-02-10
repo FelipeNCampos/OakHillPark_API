@@ -124,7 +124,7 @@ class Flat(SQLModel, table=True):
     )
 
 
-class Morador(SQLModel, table=True):
+class Morador(SQLModel, table=True): # cargo 0 owner 1 | cargo 1 owner 2 | cargo 3 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     cargo: int = Field(default=0)
     nome: str = Field(default="", max_length=255)

@@ -33,7 +33,10 @@ interface CrudSectionProps<T extends { id: string }> {
   title: string
   description?: string
   queryKey: string[]
-  listFn: (params?: { skip?: number; limit?: number }) => Promise<CrudListResponse<T>>
+  listFn: (params?: {
+    skip?: number
+    limit?: number
+  }) => Promise<CrudListResponse<T>>
   createFn: (payload: Record<string, unknown>) => Promise<T>
   updateFn: (id: string, payload: Record<string, unknown>) => Promise<T>
   deleteFn: (id: string) => Promise<{ message: string }>
@@ -75,10 +78,10 @@ const CrudSection = <T extends { id: string }>({
   })
 
   const rows = data?.data ?? []
-  const countLabel = useMemo(() => `${rows.length} de ${data?.count ?? 0}`, [
-    rows.length,
-    data?.count,
-  ])
+  const countLabel = useMemo(
+    () => `${rows.length} de ${data?.count ?? 0}`,
+    [rows.length, data?.count],
+  )
 
   const createMutation = useMutation({
     mutationFn: (payload: Record<string, unknown>) => createFn(payload),
@@ -91,8 +94,13 @@ const CrudSection = <T extends { id: string }>({
   })
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, payload }: { id: string; payload: Record<string, unknown> }) =>
-      updateFn(id, payload),
+    mutationFn: ({
+      id,
+      payload,
+    }: {
+      id: string
+      payload: Record<string, unknown>
+    }) => updateFn(id, payload),
     onSuccess: () => {
       showSuccessToast(`${title} atualizado com sucesso`)
       setEditOpen(false)
@@ -190,7 +198,10 @@ const CrudSection = <T extends { id: string }>({
               <DialogClose asChild>
                 <Button variant="outline">Cancelar</Button>
               </DialogClose>
-              <Button onClick={handleCreate} disabled={createMutation.isPending}>
+              <Button
+                onClick={handleCreate}
+                disabled={createMutation.isPending}
+              >
                 Salvar
               </Button>
             </DialogFooter>

@@ -13,8 +13,8 @@ import {
   ReadingsService,
 } from "@/client/admin"
 import AddUser from "@/components/Admin/AddUser"
-import { columns, type UserTableData } from "@/components/Admin/columns"
 import CrudSection from "@/components/Admin/CrudSection"
+import { columns, type UserTableData } from "@/components/Admin/columns"
 import { DataTable } from "@/components/Common/DataTable"
 import PendingUsers from "@/components/Pending/PendingUsers"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"

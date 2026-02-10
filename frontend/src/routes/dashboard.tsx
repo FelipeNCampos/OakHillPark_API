@@ -1,11 +1,10 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, redirect } from "@tanstack/react-router"
-import { useState, useEffect, useMemo } from "react"
-import { isLoggedIn } from "@/hooks/useAuth"
-import useAuth from "@/hooks/useAuth"
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { OpenAPI } from "@/client"
-import useCustomToast from "@/hooks/useCustomToast"
 import QRCode from "qrcode"
+import { useEffect, useMemo, useState } from "react"
+import { OpenAPI } from "@/client"
+import useAuth, { isLoggedIn } from "@/hooks/useAuth"
+import useCustomToast from "@/hooks/useCustomToast"
 
 type EntityId = string | number
 
@@ -90,7 +89,10 @@ interface NewReadingPayload {
   data?: string
 }
 
-type ApiQueryParams = Record<string, string | number | boolean | null | undefined>
+type ApiQueryParams = Record<
+  string,
+  string | number | boolean | null | undefined
+>
 type ApiRequestOptions = { method?: string; body?: unknown }
 
 const isRequestOptions = (
@@ -156,10 +158,12 @@ function ClientDashboard() {
   const { user, logout } = useAuth()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [activeTab, setActiveTab] = useState("overview")
-  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
-    readings: true,
-    qrCodes: true,
-  })
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(
+    {
+      readings: true,
+      qrCodes: true,
+    },
+  )
 
   // Verifica se o usuário é gerente ou superior (cargo >= 1)
   if (!user || (user.cargo ?? 0) < 1) {
@@ -272,6 +276,7 @@ function ClientDashboard() {
                 setActiveTab("overview")
                 setSidebarOpen(false)
               }}
+              type="button"
               className={`mb-2 w-full rounded-lg px-4 py-2 text-left font-['Nunito',sans-serif] text-sm font-semibold transition-all duration-200 ${
                 activeTab === "overview"
                   ? "bg-[#8c7569] text-white"
@@ -286,6 +291,7 @@ function ClientDashboard() {
               <div key={group.id} className="mb-4">
                 <button
                   onClick={() => toggleGroup(group.id)}
+                  type="button"
                   className="flex w-full items-center justify-between rounded-lg px-4 py-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c] hover:bg-[#f9f7f5]"
                 >
                   <span>{group.name}</span>
@@ -317,6 +323,7 @@ function ClientDashboard() {
                           setActiveTab(item.id)
                           setSidebarOpen(false)
                         }}
+                        type="button"
                         className={`block w-full rounded-lg px-4 py-2 text-left font-['Nunito',sans-serif] text-sm transition-all duration-200 ${
                           activeTab === item.id
                             ? "bg-[#8c7569] text-white"
@@ -343,6 +350,7 @@ function ClientDashboard() {
                     setActiveTab(item.id)
                     setSidebarOpen(false)
                   }}
+                  type="button"
                   className={`w-full rounded-lg px-4 py-2 text-left font-['Nunito',sans-serif] text-sm font-semibold transition-all duration-200 ${
                     activeTab === item.id
                       ? "bg-[#8c7569] text-white"
@@ -466,7 +474,9 @@ function OverviewContent({ user }: { user: UserProfile }) {
             </svg>
           </div>
           <p className="text-3xl font-bold text-[#55311c]">--</p>
-          <p className="mt-1 text-sm text-[rgba(0,0,0,0.6)]">Total de apartamentos</p>
+          <p className="mt-1 text-sm text-[rgba(0,0,0,0.6)]">
+            Total de apartamentos
+          </p>
         </div>
 
         <div className="rounded-lg bg-white p-6 shadow-md transition-all duration-300 hover:shadow-lg">
@@ -546,7 +556,9 @@ function OverviewContent({ user }: { user: UserProfile }) {
 }
 
 function BuildingsReadingsContent() {
-  const [selectedBuildingId, setSelectedBuildingId] = useState<EntityId | null>(null)
+  const [selectedBuildingId, setSelectedBuildingId] = useState<EntityId | null>(
+    null,
+  )
   const [showForm, setShowForm] = useState(false)
 
   const {
@@ -561,11 +573,13 @@ function BuildingsReadingsContent() {
   const buildings = buildingsData?.data || []
 
   // Set first building as selected if available
+  const firstBuildingId = buildings[0]?.id
+
   useEffect(() => {
-    if (buildings.length > 0 && !selectedBuildingId) {
-      setSelectedBuildingId(buildings[0].id)
+    if (firstBuildingId !== undefined && !selectedBuildingId) {
+      setSelectedBuildingId(firstBuildingId)
     }
-  }, [buildings.length, selectedBuildingId])
+  }, [firstBuildingId, selectedBuildingId])
 
   if (buildingsLoading) {
     return (
@@ -587,10 +601,17 @@ function BuildingsReadingsContent() {
     )
   }
 
-  const selectedBuilding = buildings.find((building) => building.id === selectedBuildingId)
+  const selectedBuilding = buildings.find(
+    (building) => building.id === selectedBuildingId,
+  )
 
   if (showForm) {
-    return <AddReadingsForm buildings={buildings} onBack={() => setShowForm(false)} />
+    return (
+      <AddReadingsForm
+        buildings={buildings}
+        onBack={() => setShowForm(false)}
+      />
+    )
   }
 
   return (
@@ -629,26 +650,28 @@ function BuildingsReadingsContent() {
             Selecione um Building:
           </p>
           <div className="flex gap-3 w-full">
-            {[...buildings].sort((a, b) => a.nome.localeCompare(b.nome)).map((building) => (
-              <button
-                key={building.id}
-                onClick={() => setSelectedBuildingId(building.id)}
-                className={`flex-1 px-6 py-3 rounded-lg font-['Nunito',sans-serif] font-semibold transition-all duration-200 ${
-                  selectedBuildingId === building.id
-                    ? 'bg-[#55311c] text-white shadow-lg'
-                    : 'bg-[#e8e4e1] text-[#55311c] hover:bg-[#ddd8d5]'
-                }`}
-                type="button"
-              >
-                {building.nome}
-              </button>
-            ))}
+            {[...buildings]
+              .sort((a, b) => a.nome.localeCompare(b.nome))
+              .map((building) => (
+                <button
+                  key={building.id}
+                  onClick={() => setSelectedBuildingId(building.id)}
+                  className={`flex-1 px-6 py-3 rounded-lg font-['Nunito',sans-serif] font-semibold transition-all duration-200 ${
+                    selectedBuildingId === building.id
+                      ? "bg-[#55311c] text-white shadow-lg"
+                      : "bg-[#e8e4e1] text-[#55311c] hover:bg-[#ddd8d5]"
+                  }`}
+                  type="button"
+                >
+                  {building.nome}
+                </button>
+              ))}
           </div>
         </div>
 
         {selectedBuilding && (
-          <BuildingReadingsTable 
-            building={selectedBuilding} 
+          <BuildingReadingsTable
+            building={selectedBuilding}
             onPrevious={() => {
               const currentIndex = buildings.findIndex(
                 (building) => building.id === selectedBuildingId,
@@ -665,8 +688,17 @@ function BuildingsReadingsContent() {
                 setSelectedBuildingId(buildings[currentIndex + 1].id)
               }
             }}
-            hasPrevious={buildings.findIndex((building) => building.id === selectedBuildingId) > 0}
-            hasNext={buildings.findIndex((building) => building.id === selectedBuildingId) < buildings.length - 1}
+            hasPrevious={
+              buildings.findIndex(
+                (building) => building.id === selectedBuildingId,
+              ) > 0
+            }
+            hasNext={
+              buildings.findIndex(
+                (building) => building.id === selectedBuildingId,
+              ) <
+              buildings.length - 1
+            }
           />
         )}
       </div>
@@ -674,13 +706,13 @@ function BuildingsReadingsContent() {
   )
 }
 
-function BuildingReadingsTable({ 
-  building, 
-  onPrevious, 
-  onNext, 
-  hasPrevious, 
-  hasNext 
-}: { 
+function BuildingReadingsTable({
+  building,
+  onPrevious,
+  onNext,
+  hasPrevious,
+  hasNext,
+}: {
   building: Building
   onPrevious: () => void
   onNext: () => void
@@ -751,7 +783,6 @@ function BuildingReadingsTable({
     )
   }
 
-
   // Group readings by date
   const readingsByDate: Record<string, ReadingByDate> = {}
   for (const reading of readings) {
@@ -759,7 +790,12 @@ function BuildingReadingsTable({
     // Parse date string directly without timezone conversion
     const dateStr = reading.data.split("T")[0]
     if (!readingsByDate[dateStr]) {
-      readingsByDate[dateStr] = { date: reading.data, low: undefined, normal: undefined, gas: undefined }
+      readingsByDate[dateStr] = {
+        date: reading.data,
+        low: undefined,
+        normal: undefined,
+        gas: undefined,
+      }
     }
     if (reading.tipo === 1) {
       readingsByDate[dateStr].low = reading.valor
@@ -781,75 +817,98 @@ function BuildingReadingsTable({
       const dateA = a.date.split("T")[0]
       const dateB = b.date.split("T")[0]
       return dateB.localeCompare(dateA) // Descending order
-    }
+    },
   )
 
-  const processedData: ProcessedReading[] = sortedReadings.map((current, index) => {
-    const previous: ReadingByDate | undefined = sortedReadings[index + 1]
-    const previousPrevious: ReadingByDate | undefined = sortedReadings[index + 2]
-    
-    let days = 0
-    if (previous) {
-      // Parse dates as strings to avoid timezone issues
-      const [currY, currM, currD] = current.date.split("T")[0].split("-").map(Number)
-      const [prevY, prevM, prevD] = previous.date.split("T")[0].split("-").map(Number)
-      const currDate = new Date(currY, currM - 1, currD)
-      const prevDate = new Date(prevY, prevM - 1, prevD)
-      days = Math.round((currDate.getTime() - prevDate.getTime()) / (1000 * 60 * 60 * 24))
-    }
+  const processedData: ProcessedReading[] = sortedReadings.map(
+    (current, index) => {
+      const previous: ReadingByDate | undefined = sortedReadings[index + 1]
+      const previousPrevious: ReadingByDate | undefined =
+        sortedReadings[index + 2]
 
-    const result: ProcessedReading = {
-      ...current,
-      days,
-    }
+      let days = 0
+      if (previous) {
+        // Parse dates as strings to avoid timezone issues
+        const [currY, currM, currD] = current.date
+          .split("T")[0]
+          .split("-")
+          .map(Number)
+        const [prevY, prevM, prevD] = previous.date
+          .split("T")[0]
+          .split("-")
+          .map(Number)
+        const currDate = new Date(currY, currM - 1, currD)
+        const prevDate = new Date(prevY, prevM - 1, prevD)
+        days = Math.round(
+          (currDate.getTime() - prevDate.getTime()) / (1000 * 60 * 60 * 24),
+        )
+      }
 
-    // Calculate Low values
-    if (hasLow && current.low !== undefined) {
-      result.low = current.low
-      if (previous && previous.low !== undefined) {
-        result.lowUsed = current.low - previous.low
-        // Calculate percentage: (used atual * 100) / used anterior
-        if (previousPrevious && previousPrevious.low !== undefined) {
-          const previousUsed = previous.low - previousPrevious.low
-          result.lowPercent = previousUsed !== 0
-            ? (((result.lowUsed - previousUsed) / previousUsed) * 100).toFixed(2)
-            : "0.00"
+      const result: ProcessedReading = {
+        ...current,
+        days,
+      }
+
+      // Calculate Low values
+      if (hasLow && current.low !== undefined) {
+        result.low = current.low
+        if (previous && previous.low !== undefined) {
+          result.lowUsed = current.low - previous.low
+          // Calculate percentage: (used atual * 100) / used anterior
+          if (previousPrevious && previousPrevious.low !== undefined) {
+            const previousUsed = previous.low - previousPrevious.low
+            result.lowPercent =
+              previousUsed !== 0
+                ? (
+                    ((result.lowUsed - previousUsed) / previousUsed) *
+                    100
+                  ).toFixed(2)
+                : "0.00"
+          }
         }
       }
-    }
 
-    // Calculate Normal values
-    if (hasNormal && current.normal !== undefined) {
-      result.normal = current.normal
-      if (previous && previous.normal !== undefined) {
-        result.normalUsed = current.normal - previous.normal
-        // Calculate percentage: (used atual * 100) / used anterior
-        if (previousPrevious && previousPrevious.normal !== undefined) {
-          const previousUsed = previous.normal - previousPrevious.normal
-          result.normalPercent = previousUsed !== 0
-            ? (((result.normalUsed - previousUsed) / previousUsed) * 100).toFixed(2)
-            : "0.00"
+      // Calculate Normal values
+      if (hasNormal && current.normal !== undefined) {
+        result.normal = current.normal
+        if (previous && previous.normal !== undefined) {
+          result.normalUsed = current.normal - previous.normal
+          // Calculate percentage: (used atual * 100) / used anterior
+          if (previousPrevious && previousPrevious.normal !== undefined) {
+            const previousUsed = previous.normal - previousPrevious.normal
+            result.normalPercent =
+              previousUsed !== 0
+                ? (
+                    ((result.normalUsed - previousUsed) / previousUsed) *
+                    100
+                  ).toFixed(2)
+                : "0.00"
+          }
         }
       }
-    }
 
-    // Calculate Gas values
-    if (hasGas && current.gas !== undefined) {
-      result.gas = current.gas
-      if (previous && previous.gas !== undefined) {
-        result.gasUsed = current.gas - previous.gas
-        // Calculate percentage: (used atual * 100) / used anterior
-        if (previousPrevious && previousPrevious.gas !== undefined) {
-          const previousUsed = previous.gas - previousPrevious.gas
-          result.gasPercent = previousUsed !== 0
-            ? (((result.gasUsed - previousUsed) / previousUsed) * 100).toFixed(2)
-            : "0.00"
+      // Calculate Gas values
+      if (hasGas && current.gas !== undefined) {
+        result.gas = current.gas
+        if (previous && previous.gas !== undefined) {
+          result.gasUsed = current.gas - previous.gas
+          // Calculate percentage: (used atual * 100) / used anterior
+          if (previousPrevious && previousPrevious.gas !== undefined) {
+            const previousUsed = previous.gas - previousPrevious.gas
+            result.gasPercent =
+              previousUsed !== 0
+                ? (
+                    ((result.gasUsed - previousUsed) / previousUsed) *
+                    100
+                  ).toFixed(2)
+                : "0.00"
+          }
         }
       }
-    }
 
-    return result
-  })
+      return result
+    },
+  )
 
   // Get color class based on percentage value
   const getPercentColor = (percent: string | undefined) => {
@@ -928,7 +987,8 @@ function BuildingReadingsTable({
       queryClient.invalidateQueries({ queryKey: ["readings", building.id] })
       setEditingRow(null)
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Erro ao atualizar leituras"
+      const message =
+        error instanceof Error ? error.message : "Erro ao atualizar leituras"
       showErrorToast(message)
     }
   }
@@ -942,9 +1002,9 @@ function BuildingReadingsTable({
           onClick={onPrevious}
           disabled={!hasPrevious}
           className={`absolute left-4 top-1/2 -translate-y-1/2 p-2 rounded-full transition-all duration-200 ${
-            hasPrevious 
-              ? 'bg-white/20 hover:bg-white/30 cursor-pointer' 
-              : 'bg-white/10 cursor-not-allowed opacity-50'
+            hasPrevious
+              ? "bg-white/20 hover:bg-white/30 cursor-pointer"
+              : "bg-white/10 cursor-not-allowed opacity-50"
           }`}
           type="button"
         >
@@ -970,7 +1030,7 @@ function BuildingReadingsTable({
             {building.nome}
           </h3>
           <div className="mt-2 flex items-center justify-center gap-6 text-sm">
-            <p>Electricity S/N: {building.electricity_sn || 'N/A'}</p>
+            <p>Electricity S/N: {building.electricity_sn || "N/A"}</p>
             {building.gas_sn && <p>Gas S/N: {building.gas_sn}</p>}
           </div>
         </div>
@@ -980,9 +1040,9 @@ function BuildingReadingsTable({
           onClick={onNext}
           disabled={!hasNext}
           className={`absolute right-4 top-1/2 -translate-y-1/2 p-2 rounded-full transition-all duration-200 ${
-            hasNext 
-              ? 'bg-white/20 hover:bg-white/30 cursor-pointer' 
-              : 'bg-white/10 cursor-not-allowed opacity-50'
+            hasNext
+              ? "bg-white/20 hover:bg-white/30 cursor-pointer"
+              : "bg-white/10 cursor-not-allowed opacity-50"
           }`}
           type="button"
         >
@@ -1060,7 +1120,7 @@ function BuildingReadingsTable({
           {/* Data rows */}
           {processedData.slice(0, -1).map((row, index) => (
             <tr
-              key={index}
+              key={`${row.date}-${row.lowId ?? ""}-${row.normalId ?? ""}-${row.gasId ?? ""}`}
               className={`${
                 index % 2 === 0 ? "bg-white" : "bg-gray-50"
               } hover:bg-gray-100 transition-colors duration-150`}
@@ -1085,7 +1145,7 @@ function BuildingReadingsTable({
                   </td>
                   <td
                     className={`border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-800 text-center ${getPercentColor(
-                      row.lowPercent
+                      row.lowPercent,
                     )}`}
                   >
                     {row.lowPercent !== undefined ? row.lowPercent : "no data"}
@@ -1102,10 +1162,12 @@ function BuildingReadingsTable({
                   </td>
                   <td
                     className={`border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-800 text-center ${getPercentColor(
-                      row.normalPercent
+                      row.normalPercent,
                     )}`}
                   >
-                    {row.normalPercent !== undefined ? row.normalPercent : "no data"}
+                    {row.normalPercent !== undefined
+                      ? row.normalPercent
+                      : "no data"}
                   </td>
                 </>
               )}
@@ -1119,7 +1181,7 @@ function BuildingReadingsTable({
                   </td>
                   <td
                     className={`border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-800 text-center ${getPercentColor(
-                      row.gasPercent
+                      row.gasPercent,
                     )}`}
                   >
                     {row.gasPercent !== undefined ? row.gasPercent : "no data"}
@@ -1146,7 +1208,8 @@ function BuildingReadingsTable({
             <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-800">
               {processedData.length > 0
                 ? (() => {
-                    const dateStr = processedData[processedData.length - 1].date.split("T")[0]
+                    const dateStr =
+                      processedData[processedData.length - 1].date.split("T")[0]
                     const [y, m, d] = dateStr.split("-")
                     return `${d}/${m}/${y}`
                   })()
@@ -1155,7 +1218,8 @@ function BuildingReadingsTable({
             {hasLow && (
               <>
                 <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-800">
-                  {processedData.length > 0 && processedData[processedData.length - 1].low !== undefined
+                  {processedData.length > 0 &&
+                  processedData[processedData.length - 1].low !== undefined
                     ? processedData[processedData.length - 1].low
                     : "All"}
                 </td>
@@ -1170,7 +1234,8 @@ function BuildingReadingsTable({
             {hasNormal && (
               <>
                 <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-800">
-                  {processedData.length > 0 && processedData[processedData.length - 1].normal !== undefined
+                  {processedData.length > 0 &&
+                  processedData[processedData.length - 1].normal !== undefined
                     ? processedData[processedData.length - 1].normal
                     : "All"}
                 </td>
@@ -1185,7 +1250,8 @@ function BuildingReadingsTable({
             {hasGas && (
               <>
                 <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-800">
-                  {processedData.length > 0 && processedData[processedData.length - 1].gas !== undefined
+                  {processedData.length > 0 &&
+                  processedData[processedData.length - 1].gas !== undefined
                     ? processedData[processedData.length - 1].gas
                     : "All"}
                 </td>
@@ -1197,7 +1263,9 @@ function BuildingReadingsTable({
                 </td>
               </>
             )}
-            <td className="border border-gray-400 px-3 py-2 text-sm text-gray-800">-</td>
+            <td className="border border-gray-400 px-3 py-2 text-sm text-gray-800">
+              -
+            </td>
           </tr>
         </tbody>
       </table>
@@ -1306,8 +1374,16 @@ function BuildingReadingsTable({
   )
 }
 
-function AddReadingsForm({ buildings, onBack }: { buildings: Building[]; onBack: () => void }) {
-  const [formData, setFormData] = useState<Record<string, Record<string, string>>>({})
+function AddReadingsForm({
+  buildings,
+  onBack,
+}: {
+  buildings: Building[]
+  onBack: () => void
+}) {
+  const [formData, setFormData] = useState<
+    Record<string, Record<string, string>>
+  >({})
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   // Initialize form data with building IDs
@@ -1327,7 +1403,11 @@ function AddReadingsForm({ buildings, onBack }: { buildings: Building[]; onBack:
     setFormData(initialData)
   }, [buildings])
 
-  const handleInputChange = (buildingId: EntityId, type: string, value: string) => {
+  const handleInputChange = (
+    buildingId: EntityId,
+    type: string,
+    value: string,
+  ) => {
     const buildingKey = String(buildingId)
     setFormData((prev) => ({
       ...prev,
@@ -1344,7 +1424,7 @@ function AddReadingsForm({ buildings, onBack }: { buildings: Building[]; onBack:
 
     try {
       const readings: NewReadingPayload[] = []
-      
+
       // Convert form data to API format
       Object.entries(formData).forEach(([buildingId, types]) => {
         Object.entries(types).forEach(([type, value]) => {
@@ -1365,14 +1445,17 @@ function AddReadingsForm({ buildings, onBack }: { buildings: Building[]; onBack:
 
       // Submit all readings
       for (const reading of readings) {
-        await fetch(`${OpenAPI.BASE || "http://localhost:8000"}/api/v1/readings/`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${localStorage.getItem("access_token")}`,
+        await fetch(
+          `${OpenAPI.BASE || "http://localhost:8000"}/api/v1/readings/`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${localStorage.getItem("access_token")}`,
+            },
+            body: JSON.stringify(reading),
           },
-          body: JSON.stringify(reading),
-        })
+        )
       }
 
       alert("Readings cadastradas com sucesso!")
@@ -1403,87 +1486,101 @@ function AddReadingsForm({ buildings, onBack }: { buildings: Building[]; onBack:
 
         <form onSubmit={handleSubmit}>
           <div className="space-y-6">
-            {[...buildings].sort((a, b) => a.nome.localeCompare(b.nome)).map((building) => {
-              const hasLow = (building.reading_types & 1) !== 0
-              const hasNormal = (building.reading_types & 2) !== 0
-              const hasGas = (building.reading_types & 4) !== 0
+            {[...buildings]
+              .sort((a, b) => a.nome.localeCompare(b.nome))
+              .map((building) => {
+                const hasLow = (building.reading_types & 1) !== 0
+                const hasNormal = (building.reading_types & 2) !== 0
+                const hasGas = (building.reading_types & 4) !== 0
 
-              return (
-                <div
-                  key={building.id}
-                  className="rounded-lg border-2 border-[#ddd] p-6"
-                >
-                  <h3 className="mb-4 font-['Nunito',sans-serif] text-xl font-bold text-[#55311c]">
-                    {building.nome}
-                  </h3>
+                return (
+                  <div
+                    key={building.id}
+                    className="rounded-lg border-2 border-[#ddd] p-6"
+                  >
+                    <h3 className="mb-4 font-['Nunito',sans-serif] text-xl font-bold text-[#55311c]">
+                      {building.nome}
+                    </h3>
 
-                  <div className="grid gap-4 md:grid-cols-3">
-                    {hasLow && (
-                      <div>
-                        <label
-                          className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
-                          htmlFor={`building-${building.id}-low`}
-                        >
-                          Low
-                        </label>
-                        <input
-                          type="number"
-                          id={`building-${building.id}-low`}
-                          value={formData[String(building.id)]?.low || ""}
-                          onChange={(e) =>
-                            handleInputChange(building.id, "low", e.target.value)
-                          }
-                          className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
-                          placeholder="Valor Low"
-                        />
-                      </div>
-                    )}
+                    <div className="grid gap-4 md:grid-cols-3">
+                      {hasLow && (
+                        <div>
+                          <label
+                            className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                            htmlFor={`building-${building.id}-low`}
+                          >
+                            Low
+                          </label>
+                          <input
+                            type="number"
+                            id={`building-${building.id}-low`}
+                            value={formData[String(building.id)]?.low || ""}
+                            onChange={(e) =>
+                              handleInputChange(
+                                building.id,
+                                "low",
+                                e.target.value,
+                              )
+                            }
+                            className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+                            placeholder="Valor Low"
+                          />
+                        </div>
+                      )}
 
-                    {hasNormal && (
-                      <div>
-                        <label
-                          className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
-                          htmlFor={`building-${building.id}-normal`}
-                        >
-                          Normal
-                        </label>
-                        <input
-                          type="number"
-                          id={`building-${building.id}-normal`}
-                          value={formData[String(building.id)]?.normal || ""}
-                          onChange={(e) =>
-                            handleInputChange(building.id, "normal", e.target.value)
-                          }
-                          className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
-                          placeholder="Valor Normal"
-                        />
-                      </div>
-                    )}
+                      {hasNormal && (
+                        <div>
+                          <label
+                            className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                            htmlFor={`building-${building.id}-normal`}
+                          >
+                            Normal
+                          </label>
+                          <input
+                            type="number"
+                            id={`building-${building.id}-normal`}
+                            value={formData[String(building.id)]?.normal || ""}
+                            onChange={(e) =>
+                              handleInputChange(
+                                building.id,
+                                "normal",
+                                e.target.value,
+                              )
+                            }
+                            className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+                            placeholder="Valor Normal"
+                          />
+                        </div>
+                      )}
 
-                    {hasGas && (
-                      <div>
-                        <label
-                          className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
-                          htmlFor={`building-${building.id}-gas`}
-                        >
-                          Gas
-                        </label>
-                        <input
-                          type="number"
-                          id={`building-${building.id}-gas`}
-                          value={formData[String(building.id)]?.gas || ""}
-                          onChange={(e) =>
-                            handleInputChange(building.id, "gas", e.target.value)
-                          }
-                          className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
-                          placeholder="Valor Gas"
-                        />
-                      </div>
-                    )}
+                      {hasGas && (
+                        <div>
+                          <label
+                            className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                            htmlFor={`building-${building.id}-gas`}
+                          >
+                            Gas
+                          </label>
+                          <input
+                            type="number"
+                            id={`building-${building.id}-gas`}
+                            value={formData[String(building.id)]?.gas || ""}
+                            onChange={(e) =>
+                              handleInputChange(
+                                building.id,
+                                "gas",
+                                e.target.value,
+                              )
+                            }
+                            className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+                            placeholder="Valor Gas"
+                          />
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              )
-            })}
+                )
+              })}
           </div>
 
           <div className="mt-8 flex justify-end gap-4">
@@ -1508,8 +1605,16 @@ function AddReadingsForm({ buildings, onBack }: { buildings: Building[]; onBack:
   )
 }
 
-function AddFlatReadingsForm({ buildings, onBack }: { buildings: Building[]; onBack: () => void }) {
-  const [formData, setFormData] = useState<Record<string, Record<string, string>>>({})
+function AddFlatReadingsForm({
+  buildings,
+  onBack,
+}: {
+  buildings: Building[]
+  onBack: () => void
+}) {
+  const [formData, setFormData] = useState<
+    Record<string, Record<string, string>>
+  >({})
   const [isSubmitting, setIsSubmitting] = useState(false)
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
@@ -1522,24 +1627,26 @@ function AddFlatReadingsForm({ buildings, onBack }: { buildings: Building[]; onB
         // Skip flats without readings
         if (flat.reading_types === 0) return
 
-        initialData[flat.id] = {}
+        const flatKey = String(flat.id)
+        initialData[flatKey] = {}
         const hasLow = (flat.reading_types & 1) !== 0
         const hasNormal = (flat.reading_types & 2) !== 0
         const hasGas = (flat.reading_types & 4) !== 0
 
-        if (hasLow) initialData[flat.id].low = ""
-        if (hasNormal) initialData[flat.id].normal = ""
-        if (hasGas) initialData[flat.id].gas = ""
+        if (hasLow) initialData[flatKey].low = ""
+        if (hasNormal) initialData[flatKey].normal = ""
+        if (hasGas) initialData[flatKey].gas = ""
       })
     })
     setFormData(initialData)
   }, [buildings])
 
-  const handleInputChange = (flatId: string, type: string, value: string) => {
+  const handleInputChange = (flatId: EntityId, type: string, value: string) => {
+    const flatKey = String(flatId)
     setFormData((prev) => ({
       ...prev,
-      [flatId]: {
-        ...prev[flatId],
+      [flatKey]: {
+        ...prev[flatKey],
         [type]: value,
       },
     }))
@@ -1551,7 +1658,7 @@ function AddFlatReadingsForm({ buildings, onBack }: { buildings: Building[]; onB
 
     try {
       const readings: NewReadingPayload[] = []
-      
+
       // Convert form data to API format
       Object.entries(formData).forEach(([flatId, types]) => {
         Object.entries(types).forEach(([type, value]) => {
@@ -1573,19 +1680,22 @@ function AddFlatReadingsForm({ buildings, onBack }: { buildings: Building[]; onB
 
       // Submit all readings
       for (const reading of readings) {
-        await fetch(`${OpenAPI.BASE || "http://localhost:8000"}/api/v1/flat_readings/`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${localStorage.getItem("access_token")}`,
+        await fetch(
+          `${OpenAPI.BASE || "http://localhost:8000"}/api/v1/flat_readings/`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${localStorage.getItem("access_token")}`,
+            },
+            body: JSON.stringify(reading),
           },
-          body: JSON.stringify(reading),
-        })
+        )
       }
 
       // Invalidate cache so new readings show up
       queryClient.invalidateQueries({ queryKey: ["flat_readings"] })
-      
+
       showSuccessToast("Readings cadastradas com sucesso!")
       onBack()
     } catch (error) {
@@ -1597,10 +1707,12 @@ function AddFlatReadingsForm({ buildings, onBack }: { buildings: Building[]; onB
   }
 
   // Get flats grouped by building
-  const buildingsWithFlats = buildings.map((building) => ({
-    ...building,
-    flats: building.flats?.filter((flat) => flat.reading_types !== 0) || [],
-  })).filter((building) => building.flats.length > 0)
+  const buildingsWithFlats = buildings
+    .map((building) => ({
+      ...building,
+      flats: building.flats?.filter((flat) => flat.reading_types !== 0) || [],
+    }))
+    .filter((building) => building.flats.length > 0)
 
   if (buildingsWithFlats.length === 0) {
     return (
@@ -1645,93 +1757,112 @@ function AddFlatReadingsForm({ buildings, onBack }: { buildings: Building[]; onB
         <form onSubmit={handleSubmit}>
           <div className="space-y-6">
             {buildingsWithFlats.map((building) => (
-              <div key={building.id} className="rounded-lg border-2 border-[#8c7569] p-4">
+              <div
+                key={building.id}
+                className="rounded-lg border-2 border-[#8c7569] p-4"
+              >
                 <h3 className="mb-4 font-['Nunito',sans-serif] text-xl font-bold text-[#8c7569]">
                   {building.nome}
                 </h3>
-                
+
                 <div className="space-y-4">
-                  {[...building.flats].sort((a, b) => a.numero - b.numero).map((flat) => {
-                    const hasLow = (flat.reading_types & 1) !== 0
-                    const hasNormal = (flat.reading_types & 2) !== 0
-                    const hasGas = (flat.reading_types & 4) !== 0
+                  {[...building.flats]
+                    .sort((a, b) => a.numero - b.numero)
+                    .map((flat) => {
+                      const hasLow = (flat.reading_types & 1) !== 0
+                      const hasNormal = (flat.reading_types & 2) !== 0
+                      const hasGas = (flat.reading_types & 4) !== 0
 
-                    return (
-                      <div
-                        key={flat.id}
-                        className="rounded-lg border-2 border-[#ddd] p-4"
-                      >
-                        <h4 className="mb-3 font-['Nunito',sans-serif] text-lg font-semibold text-[#55311c]">
-                          Flat {flat.numero}
-                        </h4>
+                      return (
+                        <div
+                          key={flat.id}
+                          className="rounded-lg border-2 border-[#ddd] p-4"
+                        >
+                          <h4 className="mb-3 font-['Nunito',sans-serif] text-lg font-semibold text-[#55311c]">
+                            Flat {flat.numero}
+                          </h4>
 
-                        <div className="grid gap-4 md:grid-cols-3">
-                          {hasLow && (
-                            <div>
-                              <label
-                                className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
-                                htmlFor={`flat-${flat.id}-low`}
-                              >
-                                Low
-                              </label>
-                              <input
-                                type="number"
-                                id={`flat-${flat.id}-low`}
-                                value={formData[flat.id]?.low || ""}
-                                onChange={(e) =>
-                                  handleInputChange(flat.id, "low", e.target.value)
-                                }
-                                className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
-                                placeholder="Valor Low"
-                              />
-                            </div>
-                          )}
+                          <div className="grid gap-4 md:grid-cols-3">
+                            {hasLow && (
+                              <div>
+                                <label
+                                  className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                                  htmlFor={`flat-${flat.id}-low`}
+                                >
+                                  Low
+                                </label>
+                                <input
+                                  type="number"
+                                  id={`flat-${flat.id}-low`}
+                                  value={formData[String(flat.id)]?.low || ""}
+                                  onChange={(e) =>
+                                    handleInputChange(
+                                      flat.id,
+                                      "low",
+                                      e.target.value,
+                                    )
+                                  }
+                                  className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+                                  placeholder="Valor Low"
+                                />
+                              </div>
+                            )}
 
-                          {hasNormal && (
-                            <div>
-                              <label
-                                className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
-                                htmlFor={`flat-${flat.id}-normal`}
-                              >
-                                Normal
-                              </label>
-                              <input
-                                type="number"
-                                id={`flat-${flat.id}-normal`}
-                                value={formData[flat.id]?.normal || ""}
-                                onChange={(e) =>
-                                  handleInputChange(flat.id, "normal", e.target.value)
-                                }
-                                className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
-                                placeholder="Valor Normal"
-                              />
-                            </div>
-                          )}
+                            {hasNormal && (
+                              <div>
+                                <label
+                                  className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                                  htmlFor={`flat-${flat.id}-normal`}
+                                >
+                                  Normal
+                                </label>
+                                <input
+                                  type="number"
+                                  id={`flat-${flat.id}-normal`}
+                                  value={
+                                    formData[String(flat.id)]?.normal || ""
+                                  }
+                                  onChange={(e) =>
+                                    handleInputChange(
+                                      flat.id,
+                                      "normal",
+                                      e.target.value,
+                                    )
+                                  }
+                                  className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+                                  placeholder="Valor Normal"
+                                />
+                              </div>
+                            )}
 
-                          {hasGas && (
-                            <div>
-                              <label
-                                className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
-                                htmlFor={`flat-${flat.id}-gas`}
-                              >
-                                Gas
-                              </label>
-                              <input
-                                type="number"
-                                id={`flat-${flat.id}-gas`}
-                                value={formData[flat.id]?.gas || ""}
-                                onChange={(e) =>
-                                  handleInputChange(flat.id, "gas", e.target.value)
-                                }
-                                className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
-                                placeholder="Valor Gas"
-                              />
-                            </div>
-                          )}
+                            {hasGas && (
+                              <div>
+                                <label
+                                  className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                                  htmlFor={`flat-${flat.id}-gas`}
+                                >
+                                  Gas
+                                </label>
+                                <input
+                                  type="number"
+                                  id={`flat-${flat.id}-gas`}
+                                  value={formData[String(flat.id)]?.gas || ""}
+                                  onChange={(e) =>
+                                    handleInputChange(
+                                      flat.id,
+                                      "gas",
+                                      e.target.value,
+                                    )
+                                  }
+                                  className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+                                  placeholder="Valor Gas"
+                                />
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    )
-                  })}
+                      )
+                    })}
                 </div>
               </div>
             ))}
@@ -1760,26 +1891,31 @@ function AddFlatReadingsForm({ buildings, onBack }: { buildings: Building[]; onB
 }
 
 function FlatsReadingsContent() {
-  const [selectedBuildingId, setSelectedBuildingId] = useState<EntityId | null>(null)
+  const [selectedBuildingId, setSelectedBuildingId] = useState<EntityId | null>(
+    null,
+  )
   const [selectedFlatId, setSelectedFlatId] = useState<EntityId | null>(null)
   const [showForm, setShowForm] = useState(false)
 
-  const {
-    data: buildingsData,
-    isLoading: buildingsLoading,
-  } = useQuery<ApiListResponse<Building>>({
+  const { data: buildingsData, isLoading: buildingsLoading } = useQuery<
+    ApiListResponse<Building>
+  >({
     queryKey: ["buildings"],
     queryFn: () => apiCall("/api/v1/buildings/condominio"),
   })
 
   const buildings = buildingsData?.data || []
-  const selectedBuilding = buildings.find((building) => building.id === selectedBuildingId)
+  const selectedBuilding = buildings.find(
+    (building) => building.id === selectedBuildingId,
+  )
   const allFlats = selectedBuilding?.flats || []
   const flats = allFlats
 
   // Reset flat selection when building changes
   useEffect(() => {
-    setSelectedFlatId(null)
+    if (selectedBuildingId !== null) {
+      setSelectedFlatId(null)
+    }
   }, [selectedBuildingId])
 
   if (buildingsLoading) {
@@ -1806,9 +1942,9 @@ function FlatsReadingsContent() {
 
   if (showForm) {
     return (
-      <AddFlatReadingsForm 
-        buildings={buildings} 
-        onBack={() => setShowForm(false)} 
+      <AddFlatReadingsForm
+        buildings={buildings}
+        onBack={() => setShowForm(false)}
       />
     )
   }
@@ -1849,20 +1985,22 @@ function FlatsReadingsContent() {
             Selecione um Building:
           </p>
           <div className="flex gap-3 w-full">
-            {[...buildings].sort((a, b) => a.nome.localeCompare(b.nome)).map((building) => (
-              <button
-                key={building.id}
-                onClick={() => setSelectedBuildingId(building.id)}
-                className={`flex-1 px-6 py-3 rounded-lg font-['Nunito',sans-serif] font-semibold transition-all duration-200 ${
-                  selectedBuildingId === building.id
-                    ? 'bg-[#55311c] text-white shadow-lg'
-                    : 'bg-[#e8e4e1] text-[#55311c] hover:bg-[#ddd8d5]'
-                }`}
-                type="button"
-              >
-                {building.nome}
-              </button>
-            ))}
+            {[...buildings]
+              .sort((a, b) => a.nome.localeCompare(b.nome))
+              .map((building) => (
+                <button
+                  key={building.id}
+                  onClick={() => setSelectedBuildingId(building.id)}
+                  className={`flex-1 px-6 py-3 rounded-lg font-['Nunito',sans-serif] font-semibold transition-all duration-200 ${
+                    selectedBuildingId === building.id
+                      ? "bg-[#55311c] text-white shadow-lg"
+                      : "bg-[#e8e4e1] text-[#55311c] hover:bg-[#ddd8d5]"
+                  }`}
+                  type="button"
+                >
+                  {building.nome}
+                </button>
+              ))}
           </div>
         </div>
 
@@ -1874,20 +2012,22 @@ function FlatsReadingsContent() {
             </p>
             {flats.length > 0 ? (
               <div className="flex gap-3 w-full flex-wrap">
-                {[...flats].sort((a, b) => a.numero - b.numero).map((flat) => (
-                  <button
-                    key={flat.id}
-                    onClick={() => setSelectedFlatId(flat.id)}
-                    className={`px-6 py-3 rounded-lg font-['Nunito',sans-serif] font-semibold transition-all duration-200 ${
-                      selectedFlatId === flat.id
-                        ? 'bg-[#55311c] text-white shadow-lg'
-                        : 'bg-[#e8e4e1] text-[#55311c] hover:bg-[#ddd8d5]'
-                    }`}
-                    type="button"
-                  >
-                    Flat {flat.numero}
-                  </button>
-                ))}
+                {[...flats]
+                  .sort((a, b) => a.numero - b.numero)
+                  .map((flat) => (
+                    <button
+                      key={flat.id}
+                      onClick={() => setSelectedFlatId(flat.id)}
+                      className={`px-6 py-3 rounded-lg font-['Nunito',sans-serif] font-semibold transition-all duration-200 ${
+                        selectedFlatId === flat.id
+                          ? "bg-[#55311c] text-white shadow-lg"
+                          : "bg-[#e8e4e1] text-[#55311c] hover:bg-[#ddd8d5]"
+                      }`}
+                      type="button"
+                    >
+                      Flat {flat.numero}
+                    </button>
+                  ))}
               </div>
             ) : (
               <div className="rounded-lg bg-[#f5f1ee] p-4">
@@ -1918,8 +2058,13 @@ function FlatsReadingsContent() {
                 setSelectedFlatId(flats[currentIndex + 1].id)
               }
             }}
-            hasPrevious={flats.findIndex((flat) => flat.id === selectedFlatId) > 0}
-            hasNext={flats.findIndex((flat) => flat.id === selectedFlatId) < flats.length - 1}
+            hasPrevious={
+              flats.findIndex((flat) => flat.id === selectedFlatId) > 0
+            }
+            hasNext={
+              flats.findIndex((flat) => flat.id === selectedFlatId) <
+              flats.length - 1
+            }
           />
         )}
       </div>
@@ -1988,7 +2133,12 @@ function FlatReadingsTable({
     // Parse date string directly without timezone conversion
     const dateStr = reading.data.split("T")[0]
     if (!readingsByDate[dateStr]) {
-      readingsByDate[dateStr] = { date: reading.data, low: undefined, normal: undefined, gas: undefined }
+      readingsByDate[dateStr] = {
+        date: reading.data,
+        low: undefined,
+        normal: undefined,
+        gas: undefined,
+      }
     }
     if (reading.tipo === 1) readingsByDate[dateStr].low = reading.valor
     if (reading.tipo === 2) readingsByDate[dateStr].normal = reading.valor
@@ -2001,7 +2151,7 @@ function FlatReadingsTable({
       const dateA = a.date.split("T")[0]
       const dateB = b.date.split("T")[0]
       return dateB.localeCompare(dateA) // Descending order
-    }
+    },
   )
 
   // Calculate days, used values, and percentages
@@ -2015,72 +2165,95 @@ function FlatReadingsTable({
     gasPercent?: string
   }
 
-  const processedData: ProcessedReading[] = sortedReadings.map((current, index) => {
-    const previous: ReadingByDate | undefined = sortedReadings[index + 1]
-    const previousPrevious: ReadingByDate | undefined = sortedReadings[index + 2]
+  const processedData: ProcessedReading[] = sortedReadings.map(
+    (current, index) => {
+      const previous: ReadingByDate | undefined = sortedReadings[index + 1]
+      const previousPrevious: ReadingByDate | undefined =
+        sortedReadings[index + 2]
 
-    let days = 0
-    if (previous) {
-      // Parse dates as strings to avoid timezone issues
-      const [currY, currM, currD] = current.date.split("T")[0].split("-").map(Number)
-      const [prevY, prevM, prevD] = previous.date.split("T")[0].split("-").map(Number)
-      const currDate = new Date(currY, currM - 1, currD)
-      const prevDate = new Date(prevY, prevM - 1, prevD)
-      days = Math.round((currDate.getTime() - prevDate.getTime()) / (1000 * 60 * 60 * 24))
-    }
+      let days = 0
+      if (previous) {
+        // Parse dates as strings to avoid timezone issues
+        const [currY, currM, currD] = current.date
+          .split("T")[0]
+          .split("-")
+          .map(Number)
+        const [prevY, prevM, prevD] = previous.date
+          .split("T")[0]
+          .split("-")
+          .map(Number)
+        const currDate = new Date(currY, currM - 1, currD)
+        const prevDate = new Date(prevY, prevM - 1, prevD)
+        days = Math.round(
+          (currDate.getTime() - prevDate.getTime()) / (1000 * 60 * 60 * 24),
+        )
+      }
 
-    const result: ProcessedReading = {
-      ...current,
-      days,
-    }
+      const result: ProcessedReading = {
+        ...current,
+        days,
+      }
 
-    // Calculate Low values
-    if (hasLow && current.low !== undefined) {
-      result.low = current.low
-      if (previous && previous.low !== undefined) {
-        result.lowUsed = current.low - previous.low
-        // Calculate percentage: (used atual * 100) / used anterior
-        if (previousPrevious && previousPrevious.low !== undefined) {
-          const previousUsed = previous.low - previousPrevious.low
-          result.lowPercent = previousUsed !== 0
-            ? (((result.lowUsed - previousUsed) / previousUsed) * 100).toFixed(2)
-            : "0.00"
+      // Calculate Low values
+      if (hasLow && current.low !== undefined) {
+        result.low = current.low
+        if (previous && previous.low !== undefined) {
+          result.lowUsed = current.low - previous.low
+          // Calculate percentage: (used atual * 100) / used anterior
+          if (previousPrevious && previousPrevious.low !== undefined) {
+            const previousUsed = previous.low - previousPrevious.low
+            result.lowPercent =
+              previousUsed !== 0
+                ? (
+                    ((result.lowUsed - previousUsed) / previousUsed) *
+                    100
+                  ).toFixed(2)
+                : "0.00"
+          }
         }
       }
-    }
 
-    // Calculate Normal values
-    if (hasNormal && current.normal !== undefined) {
-      result.normal = current.normal
-      if (previous && previous.normal !== undefined) {
-        result.normalUsed = current.normal - previous.normal
-        // Calculate percentage: (used atual * 100) / used anterior
-        if (previousPrevious && previousPrevious.normal !== undefined) {
-          const previousUsed = previous.normal - previousPrevious.normal
-          result.normalPercent = previousUsed !== 0
-            ? (((result.normalUsed - previousUsed) / previousUsed) * 100).toFixed(2)
-            : "0.00"
+      // Calculate Normal values
+      if (hasNormal && current.normal !== undefined) {
+        result.normal = current.normal
+        if (previous && previous.normal !== undefined) {
+          result.normalUsed = current.normal - previous.normal
+          // Calculate percentage: (used atual * 100) / used anterior
+          if (previousPrevious && previousPrevious.normal !== undefined) {
+            const previousUsed = previous.normal - previousPrevious.normal
+            result.normalPercent =
+              previousUsed !== 0
+                ? (
+                    ((result.normalUsed - previousUsed) / previousUsed) *
+                    100
+                  ).toFixed(2)
+                : "0.00"
+          }
         }
       }
-    }
 
-    // Calculate Gas values
-    if (hasGas && current.gas !== undefined) {
-      result.gas = current.gas
-      if (previous && previous.gas !== undefined) {
-        result.gasUsed = current.gas - previous.gas
-        // Calculate percentage: (used atual * 100) / used anterior
-        if (previousPrevious && previousPrevious.gas !== undefined) {
-          const previousUsed = previous.gas - previousPrevious.gas
-          result.gasPercent = previousUsed !== 0
-            ? (((result.gasUsed - previousUsed) / previousUsed) * 100).toFixed(2)
-            : "0.00"
+      // Calculate Gas values
+      if (hasGas && current.gas !== undefined) {
+        result.gas = current.gas
+        if (previous && previous.gas !== undefined) {
+          result.gasUsed = current.gas - previous.gas
+          // Calculate percentage: (used atual * 100) / used anterior
+          if (previousPrevious && previousPrevious.gas !== undefined) {
+            const previousUsed = previous.gas - previousPrevious.gas
+            result.gasPercent =
+              previousUsed !== 0
+                ? (
+                    ((result.gasUsed - previousUsed) / previousUsed) *
+                    100
+                  ).toFixed(2)
+                : "0.00"
+          }
         }
       }
-    }
 
-    return result
-  })
+      return result
+    },
+  )
 
   // Get color class based on percentage value
   const getPercentColor = (percent: string | undefined) => {
@@ -2101,9 +2274,9 @@ function FlatReadingsTable({
           onClick={onPrevious}
           disabled={!hasPrevious}
           className={`absolute left-4 top-1/2 -translate-y-1/2 p-2 rounded-full transition-all duration-200 ${
-            hasPrevious 
-              ? 'bg-white/20 hover:bg-white/30 cursor-pointer' 
-              : 'bg-white/10 cursor-not-allowed opacity-50'
+            hasPrevious
+              ? "bg-white/20 hover:bg-white/30 cursor-pointer"
+              : "bg-white/10 cursor-not-allowed opacity-50"
           }`}
           type="button"
         >
@@ -2128,7 +2301,9 @@ function FlatReadingsTable({
           <h3 className="text-2xl font-bold font-['Nunito',sans-serif]">
             Flat {flat.numero}
           </h3>
-          <p className="text-sm mt-1">Building: {flat.building?.nome || "N/A"}</p>
+          <p className="text-sm mt-1">
+            Building: {flat.building?.nome || "N/A"}
+          </p>
         </div>
 
         {/* Next Button */}
@@ -2136,9 +2311,9 @@ function FlatReadingsTable({
           onClick={onNext}
           disabled={!hasNext}
           className={`absolute right-4 top-1/2 -translate-y-1/2 p-2 rounded-full transition-all duration-200 ${
-            hasNext 
-              ? 'bg-white/20 hover:bg-white/30 cursor-pointer' 
-              : 'bg-white/10 cursor-not-allowed opacity-50'
+            hasNext
+              ? "bg-white/20 hover:bg-white/30 cursor-pointer"
+              : "bg-white/10 cursor-not-allowed opacity-50"
           }`}
           type="button"
         >
@@ -2211,7 +2386,7 @@ function FlatReadingsTable({
         </thead>
         <tbody>
           {processedData.map((row, index) => (
-            <tr key={index} className="hover:bg-gray-50">
+            <tr key={row.date} className="hover:bg-gray-50">
               <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-700">
                 {index === 0 ? "All" : row.days}
               </td>
@@ -2228,10 +2403,12 @@ function FlatReadingsTable({
                     {row.low ?? "-"}
                   </td>
                   <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-700">
-                    {index === 0 ? "All" : row.lowUsed ?? "-"}
+                    {index === 0 ? "All" : (row.lowUsed ?? "-")}
                   </td>
-                  <td className={`border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-700 ${getPercentColor(row.lowPercent)}`}>
-                    {index === 0 ? "no data" : row.lowPercent ?? "-"}
+                  <td
+                    className={`border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-700 ${getPercentColor(row.lowPercent)}`}
+                  >
+                    {index === 0 ? "no data" : (row.lowPercent ?? "-")}
                   </td>
                 </>
               )}
@@ -2241,10 +2418,12 @@ function FlatReadingsTable({
                     {row.normal ?? "-"}
                   </td>
                   <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-700">
-                    {index === 0 ? "All" : row.normalUsed ?? "-"}
+                    {index === 0 ? "All" : (row.normalUsed ?? "-")}
                   </td>
-                  <td className={`border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-700 ${getPercentColor(row.normalPercent)}`}>
-                    {index === 0 ? "no data" : row.normalPercent ?? "-"}
+                  <td
+                    className={`border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-700 ${getPercentColor(row.normalPercent)}`}
+                  >
+                    {index === 0 ? "no data" : (row.normalPercent ?? "-")}
                   </td>
                 </>
               )}
@@ -2254,10 +2433,12 @@ function FlatReadingsTable({
                     {row.gas ?? "-"}
                   </td>
                   <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-700">
-                    {index === 0 ? "All" : row.gasUsed ?? "-"}
+                    {index === 0 ? "All" : (row.gasUsed ?? "-")}
                   </td>
-                  <td className={`border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-700 ${getPercentColor(row.gasPercent)}`}>
-                    {index === 0 ? "no data" : row.gasPercent ?? "-"}
+                  <td
+                    className={`border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-700 ${getPercentColor(row.gasPercent)}`}
+                  >
+                    {index === 0 ? "no data" : (row.gasPercent ?? "-")}
                   </td>
                 </>
               )}
@@ -2357,8 +2538,7 @@ function CleanerQrCodesContent() {
           QR Code - Cleaner
         </h2>
         <p className="mt-2 text-[rgba(0,0,0,0.7)]">
-          Baixe um QR Code por building para registrar acesso no painel
-          Cleaner.
+          Baixe um QR Code por building para registrar acesso no painel Cleaner.
         </p>
       </div>
 
@@ -2516,7 +2696,9 @@ function CleanerSummary() {
     const cleaners = (cleanersData?.data || []).filter(
       (funcionario: Funcionario) => funcionario.cargo === 0,
     )
-    return cleaners.find((cleaner: Funcionario) => cleaner.is_default)?.id || null
+    return (
+      cleaners.find((cleaner: Funcionario) => cleaner.is_default)?.id || null
+    )
   }, [cleanersData])
 
   const sessions = useMemo(() => {
@@ -2524,7 +2706,7 @@ function CleanerSummary() {
       .filter((record) => record?.data)
       .sort(
         (a, b) =>
-          new Date(a.data).getTime() - new Date(b.data).getTime(),
+          new Date(a.data ?? 0).getTime() - new Date(b.data ?? 0).getTime(),
       )
 
     const filtered = activeCleanerId
@@ -2535,7 +2717,8 @@ function CleanerSummary() {
         )
       : sorted
 
-    const result: Array<{ inRecord?: AcessRecord; outRecord?: AcessRecord }> = []
+    const result: Array<{ inRecord?: AcessRecord; outRecord?: AcessRecord }> =
+      []
     let openRecord: AcessRecord | null = null
 
     filtered.forEach((record) => {
@@ -2649,8 +2832,9 @@ function CleanerSummary() {
                 session.inRecord?.building_nome ||
                 session.outRecord?.building_nome ||
                 "-"
-              const dateLabel =
-                formatDate(session.inRecord?.data || session.outRecord?.data)
+              const dateLabel = formatDate(
+                session.inRecord?.data || session.outRecord?.data,
+              )
 
               return (
                 <tr
@@ -2670,7 +2854,10 @@ function CleanerSummary() {
                     {formatTime(session.outRecord?.data)}
                   </td>
                   <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
-                    {formatUsed(session.inRecord?.data, session.outRecord?.data)}
+                    {formatUsed(
+                      session.inRecord?.data,
+                      session.outRecord?.data,
+                    )}
                   </td>
                 </tr>
               )
@@ -2691,7 +2878,9 @@ function CleanerRegister() {
   const { showSuccessToast, showErrorToast } = useCustomToast()
   const { user } = useAuth()
 
-  const { data: cleanersData, isLoading } = useQuery<ApiListResponse<Funcionario>>({
+  const { data: cleanersData, isLoading } = useQuery<
+    ApiListResponse<Funcionario>
+  >({
     queryKey: ["funcionarios", "cleaners"],
     queryFn: () => apiCall("/api/v1/funcionarios/", { skip: 0, limit: 500 }),
   })
@@ -2733,7 +2922,7 @@ function CleanerRegister() {
   })
 
   const setDefaultCleanerMutation = useMutation({
-    mutationFn: (id: string) =>
+    mutationFn: (id: EntityId) =>
       apiCall(`/api/v1/funcionarios/${id}`, {
         method: "PATCH",
         body: { is_default: true },
@@ -2741,7 +2930,9 @@ function CleanerRegister() {
     onSuccess: () => {
       showSuccessToast("Cleaner padrão atualizado")
       queryClient.invalidateQueries({ queryKey: ["funcionarios", "cleaners"] })
-      queryClient.invalidateQueries({ queryKey: ["funcionarios", "cleaners-summary"] })
+      queryClient.invalidateQueries({
+        queryKey: ["funcionarios", "cleaners-summary"],
+      })
     },
     onError: () => {
       showErrorToast("Não foi possível atualizar o cleaner padrão")
@@ -2947,7 +3138,7 @@ function CleanerRegister() {
 
 function ResidentsContent() {
   const [showForm, setShowForm] = useState(false)
-  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editingId, setEditingId] = useState<EntityId | null>(null)
   const [currentPage, setCurrentPage] = useState(0)
   const [selectedBuilding, setSelectedBuilding] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState("")
@@ -2965,7 +3156,8 @@ function ResidentsContent() {
       params.append("skip", String(currentPage * pageSize))
       params.append("limit", String(pageSize))
       if (searchTerm) params.append("search", searchTerm)
-      if (selectedBuilding && !searchTerm) params.append("building", selectedBuilding)
+      if (selectedBuilding && !searchTerm)
+        params.append("building", selectedBuilding)
       return apiCall(`/api/v1/moradores/?${params.toString()}`)
     },
   })
@@ -2981,7 +3173,13 @@ function ResidentsContent() {
   const buildings = buildingsData?.data || []
 
   const updateReadingTypesMutation = useMutation({
-    mutationFn: async ({ id, readingTypes }: { id: string; readingTypes: number }) => {
+    mutationFn: async ({
+      id,
+      readingTypes,
+    }: {
+      id: EntityId
+      readingTypes: number
+    }) => {
       const response = await apiCall(`/api/v1/moradores/${id}/reading-types`, {
         method: "PATCH",
         body: { reading_types: readingTypes },
@@ -2993,12 +3191,19 @@ function ResidentsContent() {
       showSuccessToast("Tipos de leitura atualizados com sucesso!")
     },
     onError: (error) => {
-      const message = error instanceof Error ? error.message : "Erro ao atualizar tipos de leitura"
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Erro ao atualizar tipos de leitura"
       showErrorToast(message)
     },
   })
 
-  const handleCheckboxChange = (id: string, currentTypes: number, typeValue: number) => {
+  const handleCheckboxChange = (
+    id: EntityId,
+    currentTypes: number,
+    typeValue: number,
+  ) => {
     let newTypes = currentTypes
     if (currentTypes & typeValue) {
       // Remove this type
@@ -3119,7 +3324,9 @@ function ResidentsContent() {
         {moradores.length === 0 ? (
           <div className="rounded-lg bg-[#f5f1ee] p-8 text-center">
             <p className="text-[#55311c] font-['Nunito',sans-serif]">
-              {searchTerm || selectedBuilding ? "Nenhum morador encontrado" : "Nenhum morador cadastrado"}
+              {searchTerm || selectedBuilding
+                ? "Nenhum morador encontrado"
+                : "Nenhum morador cadastrado"}
             </p>
           </div>
         ) : (
@@ -3155,66 +3362,86 @@ function ResidentsContent() {
                   </tr>
                 </thead>
                 <tbody>
-                    {moradores
+                  {moradores
                     .sort((a, b) => {
                       // Ordenar primeiro por building, depois por número do flat
-                      const buildingCompare = a.building_nome.localeCompare(b.building_nome)
+                      const buildingCompare = a.building_nome.localeCompare(
+                        b.building_nome,
+                      )
                       if (buildingCompare !== 0) return buildingCompare
                       return a.flat_numero - b.flat_numero
                     })
                     .map((morador) => (
                       <tr key={morador.id} className="hover:bg-[#f5f1ee]">
-                      <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
-                        {morador.building_nome}
-                      </td>
-                      <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
-                        {morador.flat_numero}
-                      </td>
-                      <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
-                        {morador.nome}
-                      </td>
-                      <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
-                        {morador.mobile || "-"}
-                      </td>
-                      <td className="border border-gray-400 px-4 py-3 text-center">
-                        <input
-                        type="checkbox"
-                        checked={(morador.reading_types & 2) !== 0}
-                        onChange={() => handleCheckboxChange(morador.id, morador.reading_types, 2)}
-                        disabled={updateReadingTypesMutation.isPending}
-                        className="h-4 w-4 cursor-pointer"
-                        />
-                      </td>
-                      <td className="border border-gray-400 px-4 py-3 text-center">
-                        <input
-                        type="checkbox"
-                        checked={(morador.reading_types & 1) !== 0}
-                        onChange={() => handleCheckboxChange(morador.id, morador.reading_types, 1)}
-                        disabled={updateReadingTypesMutation.isPending}
-                        className="h-4 w-4 cursor-pointer"
-                        />
-                      </td>
-                      <td className="border border-gray-400 px-4 py-3 text-center">
-                        <input
-                        type="checkbox"
-                        checked={(morador.reading_types & 4) !== 0}
-                        onChange={() => handleCheckboxChange(morador.id, morador.reading_types, 4)}
-                        disabled={updateReadingTypesMutation.isPending}
-                        className="h-4 w-4 cursor-pointer"
-                        />
-                      </td>
-                      <td className="border border-gray-400 px-4 py-3 text-center">
-                        <button
-                        onClick={() => {
-                          setEditingId(morador.id)
-                          setShowForm(true)
-                        }}
-                        className="mr-2 rounded-lg bg-[#8c7569] px-3 py-1 font-['Nunito',sans-serif] text-xs font-semibold text-white transition-all duration-300 hover:bg-[#55311c]"
-                        type="button"
-                        >
-                        Editar
-                        </button>
-                      </td>
+                        <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
+                          {morador.building_nome}
+                        </td>
+                        <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
+                          {morador.flat_numero}
+                        </td>
+                        <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
+                          {morador.nome}
+                        </td>
+                        <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
+                          {morador.mobile || "-"}
+                        </td>
+                        <td className="border border-gray-400 px-4 py-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={(morador.reading_types & 2) !== 0}
+                            onChange={() =>
+                              handleCheckboxChange(
+                                morador.id,
+                                morador.reading_types,
+                                2,
+                              )
+                            }
+                            disabled={updateReadingTypesMutation.isPending}
+                            className="h-4 w-4 cursor-pointer"
+                          />
+                        </td>
+                        <td className="border border-gray-400 px-4 py-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={(morador.reading_types & 1) !== 0}
+                            onChange={() =>
+                              handleCheckboxChange(
+                                morador.id,
+                                morador.reading_types,
+                                1,
+                              )
+                            }
+                            disabled={updateReadingTypesMutation.isPending}
+                            className="h-4 w-4 cursor-pointer"
+                          />
+                        </td>
+                        <td className="border border-gray-400 px-4 py-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={(morador.reading_types & 4) !== 0}
+                            onChange={() =>
+                              handleCheckboxChange(
+                                morador.id,
+                                morador.reading_types,
+                                4,
+                              )
+                            }
+                            disabled={updateReadingTypesMutation.isPending}
+                            className="h-4 w-4 cursor-pointer"
+                          />
+                        </td>
+                        <td className="border border-gray-400 px-4 py-3 text-center">
+                          <button
+                            onClick={() => {
+                              setEditingId(morador.id)
+                              setShowForm(true)
+                            }}
+                            className="mr-2 rounded-lg bg-[#8c7569] px-3 py-1 font-['Nunito',sans-serif] text-xs font-semibold text-white transition-all duration-300 hover:bg-[#55311c]"
+                            type="button"
+                          >
+                            Editar
+                          </button>
+                        </td>
                       </tr>
                     ))}
                 </tbody>
@@ -3225,34 +3452,43 @@ function ResidentsContent() {
             <div className="mt-6 flex items-center justify-between">
               <div className="text-sm font-['Nunito',sans-serif] text-[#55311c]">
                 Mostrando {Math.min(currentPage * pageSize + 1, totalCount)} a{" "}
-                {Math.min((currentPage + 1) * pageSize, totalCount)} de {totalCount} moradores
+                {Math.min((currentPage + 1) * pageSize, totalCount)} de{" "}
+                {totalCount} moradores
               </div>
               <div className="flex gap-2">
                 <button
                   onClick={() => setCurrentPage(Math.max(0, currentPage - 1))}
                   disabled={currentPage === 0}
+                  type="button"
                   className="rounded-lg bg-[#8c7569] px-4 py-2 font-['Nunito',sans-serif] text-sm font-semibold text-white transition-all duration-200 disabled:opacity-50 hover:bg-[#55311c]"
                 >
                   Anterior
                 </button>
                 <div className="flex items-center gap-2">
-                  {Array.from({ length: totalPages }, (_, i) => (
-                    <button
-                      key={i}
-                      onClick={() => setCurrentPage(i)}
-                      className={`rounded-lg px-3 py-2 font-['Nunito',sans-serif] text-sm font-semibold transition-all duration-200 ${
-                        currentPage === i
-                          ? "bg-[#55311c] text-white"
-                          : "bg-gray-200 text-[#55311c] hover:bg-gray-300"
-                      }`}
-                    >
-                      {i + 1}
-                    </button>
-                  ))}
+                  {Array.from({ length: totalPages }, (_, i) => {
+                    const pageNumber = i + 1
+                    return (
+                      <button
+                        key={`page-${pageNumber}`}
+                        onClick={() => setCurrentPage(i)}
+                        type="button"
+                        className={`rounded-lg px-3 py-2 font-['Nunito',sans-serif] text-sm font-semibold transition-all duration-200 ${
+                          currentPage === i
+                            ? "bg-[#55311c] text-white"
+                            : "bg-gray-200 text-[#55311c] hover:bg-gray-300"
+                        }`}
+                      >
+                        {pageNumber}
+                      </button>
+                    )
+                  })}
                 </div>
                 <button
-                  onClick={() => setCurrentPage(Math.min(totalPages - 1, currentPage + 1))}
+                  onClick={() =>
+                    setCurrentPage(Math.min(totalPages - 1, currentPage + 1))
+                  }
                   disabled={currentPage >= totalPages - 1}
+                  type="button"
                   className="rounded-lg bg-[#8c7569] px-4 py-2 font-['Nunito',sans-serif] text-sm font-semibold text-white transition-all duration-200 disabled:opacity-50 hover:bg-[#55311c]"
                 >
                   Próximo
@@ -3266,7 +3502,13 @@ function ResidentsContent() {
   )
 }
 
-function AddResidentForm({ onBack, editingId }: { onBack: () => void; editingId: string | null }) {
+function AddResidentForm({
+  onBack,
+  editingId,
+}: {
+  onBack: () => void
+  editingId: EntityId | null
+}) {
   const [formData, setFormData] = useState({
     nome: "",
     email: "",
@@ -3296,7 +3538,7 @@ function AddResidentForm({ onBack, editingId }: { onBack: () => void; editingId:
               headers: {
                 Authorization: `Bearer ${localStorage.getItem("access_token")}`,
               },
-            }
+            },
           )
           const morador = (await response.json()) as MoradorDetail
           setFormData({
@@ -3307,7 +3549,7 @@ function AddResidentForm({ onBack, editingId }: { onBack: () => void; editingId:
             car1: morador.car1 || "",
             car2: morador.car2 || "",
             car3: morador.car3 || "",
-            flat_id: morador.flat_id,
+            flat_id: String(morador.flat_id),
           })
         } catch (error) {
           console.error("Error loading morador:", error)
@@ -3320,15 +3562,17 @@ function AddResidentForm({ onBack, editingId }: { onBack: () => void; editingId:
   // Build flats list from buildings
   useEffect(() => {
     const allFlats: Array<{ id: EntityId; label: string }> = []
-    
+
     // Sort buildings by nome and flats by numero
-    const sortedBuildings = [...(buildingsData?.data || [])].sort((a, b) => 
-      a.nome.localeCompare(b.nome)
+    const sortedBuildings = [...(buildingsData?.data || [])].sort((a, b) =>
+      a.nome.localeCompare(b.nome),
     )
-    
+
     sortedBuildings.forEach((building) => {
-      const sortedFlats = [...(building.flats || [])].sort((a, b) => a.numero - b.numero)
-      
+      const sortedFlats = [...(building.flats || [])].sort(
+        (a, b) => a.numero - b.numero,
+      )
+
       sortedFlats.forEach((flat) => {
         allFlats.push({
           id: flat.id,
@@ -3339,7 +3583,9 @@ function AddResidentForm({ onBack, editingId }: { onBack: () => void; editingId:
     setFlats(allFlats)
   }, [buildingsData])
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+  const handleInputChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
+  ) => {
     const { name, value } = e.target
     setFormData((prev) => ({
       ...prev,
@@ -3382,7 +3628,11 @@ function AddResidentForm({ onBack, editingId }: { onBack: () => void; editingId:
         throw new Error("Failed to save morador")
       }
 
-      alert(editingId ? "Morador atualizado com sucesso!" : "Morador cadastrado com sucesso!")
+      alert(
+        editingId
+          ? "Morador atualizado com sucesso!"
+          : "Morador cadastrado com sucesso!",
+      )
       onBack()
       // Refetch moradores
       window.location.reload()
@@ -3579,7 +3829,11 @@ function AddResidentForm({ onBack, editingId }: { onBack: () => void; editingId:
               disabled={isSubmitting}
               className="rounded-lg bg-[#8c7569] px-6 py-3 font-['Nunito',sans-serif] text-white transition-all duration-300 hover:bg-[#55311c] disabled:opacity-50"
             >
-              {isSubmitting ? "Salvando..." : editingId ? "Atualizar Morador" : "Criar Morador"}
+              {isSubmitting
+                ? "Salvando..."
+                : editingId
+                  ? "Atualizar Morador"
+                  : "Criar Morador"}
             </button>
           </div>
         </form>
@@ -3587,5 +3841,3 @@ function AddResidentForm({ onBack, editingId }: { onBack: () => void; editingId:
     </div>
   )
 }
-
-

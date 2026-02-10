@@ -68,8 +68,8 @@ function Login() {
   }
 
   return (
-    <AuthLayoutModal 
-      title="Bem-vindo!" 
+    <AuthLayoutModal
+      title="Bem-vindo!"
       description="Acesso para Gerentes do Condomínio"
     >
       <Form {...form}>

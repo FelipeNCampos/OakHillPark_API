@@ -26,7 +26,7 @@ const publicApiCall = async (
       if (value !== undefined) {
         url.searchParams.append(key, String(value))
       }
-    })  
+    })
   }
 
   const options: RequestInit = {
@@ -78,9 +78,9 @@ function CleanerAccess() {
   const rawOperation = (op || operation || "").toLowerCase()
   const initialOperation =
     rawOperation === "in" || rawOperation === "out" ? rawOperation : ""
-  const [selectedOperation, setSelectedOperation] = useState<
-    "in" | "out" | ""
-  >(initialOperation as "in" | "out" | "")
+  const [selectedOperation, setSelectedOperation] = useState<"in" | "out" | "">(
+    initialOperation as "in" | "out" | "",
+  )
 
   const operationLabel =
     selectedOperation === "in"

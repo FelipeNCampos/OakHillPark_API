@@ -45,13 +45,15 @@ const useAuth = () => {
     localStorage.setItem("access_token", response.access_token)
     // Fetch user data immediately after login
     const userData = await UsersService.readUserMe()
-    
+
     // Verify user has permission to login (cargo >= 1 or is_superuser)
     if ((userData.cargo ?? 0) < 1 && !userData.is_superuser) {
       localStorage.removeItem("access_token")
-      throw new Error("Acesso negado. Apenas gerentes e administradores podem acessar.")
+      throw new Error(
+        "Acesso negado. Apenas gerentes e administradores podem acessar.",
+      )
     }
-    
+
     return userData
   }
 

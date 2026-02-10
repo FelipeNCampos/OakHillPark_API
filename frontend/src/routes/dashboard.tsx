@@ -7,31 +7,120 @@ import { OpenAPI } from "@/client"
 import useCustomToast from "@/hooks/useCustomToast"
 import QRCode from "qrcode"
 
+type EntityId = string | number
+
+interface ApiListResponse<T> {
+  data: T[]
+  count?: number
+}
+
+interface UserProfile {
+  full_name?: string
+  email?: string
+  cargo?: number
+  condominio_id?: EntityId | null
+}
+
+interface Building {
+  id: EntityId
+  nome: string
+  reading_types: number
+  electricity_sn?: string | null
+  gas_sn?: string | null
+  flats?: Flat[]
+}
+
+interface Flat {
+  id: EntityId
+  numero: number
+  reading_types: number
+  building?: Building
+}
+
+interface Reading {
+  id: EntityId
+  data: string
+  tipo: number
+  valor: number
+}
+
+interface Funcionario {
+  id: EntityId
+  cargo: number
+  is_default?: boolean
+  nome?: string
+  email?: string | null
+  mobile?: string | number | null
+}
+
+interface AcessRecord {
+  id: EntityId
+  data?: string | null
+  operacao?: number
+  building_id?: EntityId
+  building_nome?: string
+  funcionario_id?: EntityId
+}
+
+interface Morador {
+  id: EntityId
+  building_nome: string
+  flat_numero: number
+  nome: string
+  mobile?: string | number | null
+  reading_types: number
+}
+
+interface MoradorDetail {
+  nome: string
+  email?: string | null
+  mobile?: string | number | null
+  cargo: number
+  car1?: string | null
+  car2?: string | null
+  car3?: string | null
+  flat_id: EntityId
+}
+
+type ApiQueryParams = Record<string, string | number | boolean | null | undefined>
+type ApiRequestOptions = { method?: string; body?: unknown }
+
+const isRequestOptions = (
+  params?: ApiQueryParams | ApiRequestOptions,
+): params is ApiRequestOptions => {
+  if (!params || typeof params !== "object") return false
+  return "method" in params || "body" in params
+}
+
 // Wrapper para chamar a API diretamente enquanto o cliente não é regenerado
-const apiCall = async (endpoint: string, params?: Record<string, any> | { method?: string; body?: any }) => {
+const apiCall = async (
+  endpoint: string,
+  params?: ApiQueryParams | ApiRequestOptions,
+) => {
   const url = new URL(`${OpenAPI.BASE || "http://localhost:8000"}${endpoint}`)
-  const isRequestWithMethod = params && "method" in params
-  
-  if (!isRequestWithMethod && params) {
+  const requestOptions = isRequestOptions(params) ? params : undefined
+
+  if (!requestOptions && params) {
     Object.entries(params).forEach(([key, value]) => {
       if (value !== undefined) {
         url.searchParams.append(key, String(value))
       }
     })
   }
-  
+
   const options: RequestInit = {
-    method: isRequestWithMethod ? (params as any).method || "GET" : "GET",
+    method: requestOptions?.method ?? "GET",
     headers: {
       Authorization: `Bearer ${localStorage.getItem("access_token")}`,
       "Content-Type": "application/json",
     },
   }
-  
-  if (isRequestWithMethod && (params as any).body !== undefined) {
-    options.body = typeof (params as any).body === "string" ? (params as any).body : JSON.stringify((params as any).body)
+
+  if (requestOptions?.body !== undefined) {
+    const { body } = requestOptions
+    options.body = typeof body === "string" ? body : JSON.stringify(body)
   }
-  
+
   const response = await fetch(url.toString(), options)
   if (!response.ok) throw new Error("API call failed")
   return response.json()
@@ -200,6 +289,7 @@ function ClientDashboard() {
                     stroke="currentColor"
                     viewBox="0 0 24 24"
                   >
+                    <title>Toggle group</title>
                     <path
                       strokeLinecap="round"
                       strokeLinejoin="round"
@@ -277,6 +367,7 @@ function ClientDashboard() {
                 stroke="currentColor"
                 viewBox="0 0 24 24"
               >
+                <title>Menu</title>
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -320,7 +411,9 @@ function ClientDashboard() {
 
       {/* Overlay */}
       {sidebarOpen && (
-        <div
+        <button
+          type="button"
+          aria-label="Close menu"
           className="fixed inset-0 z-30 bg-black/30"
           onClick={() => setSidebarOpen(false)}
         />
@@ -329,7 +422,7 @@ function ClientDashboard() {
   )
 }
 
-function OverviewContent({ user }: { user: any }) {
+function OverviewContent({ user }: { user: UserProfile }) {
   return (
     <div className="mx-auto max-w-7xl">
       {/* Welcome Section */}
@@ -355,6 +448,7 @@ function OverviewContent({ user }: { user: any }) {
               stroke="currentColor"
               viewBox="0 0 24 24"
             >
+              <title>Unidades</title>
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -378,6 +472,7 @@ function OverviewContent({ user }: { user: any }) {
               stroke="currentColor"
               viewBox="0 0 24 24"
             >
+              <title>Moradores</title>
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -401,6 +496,7 @@ function OverviewContent({ user }: { user: any }) {
               stroke="currentColor"
               viewBox="0 0 24 24"
             >
+              <title>Avisos</title>
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -424,6 +520,7 @@ function OverviewContent({ user }: { user: any }) {
               stroke="currentColor"
               viewBox="0 0 24 24"
             >
+              <title>Reservas</title>
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -441,14 +538,14 @@ function OverviewContent({ user }: { user: any }) {
 }
 
 function BuildingsReadingsContent() {
-  const [selectedBuildingId, setSelectedBuildingId] = useState<string | null>(null)
+  const [selectedBuildingId, setSelectedBuildingId] = useState<EntityId | null>(null)
   const [showForm, setShowForm] = useState(false)
 
   const {
     data: buildingsData,
     isLoading: buildingsLoading,
     error: buildingsError,
-  } = useQuery({
+  } = useQuery<ApiListResponse<Building>>({
     queryKey: ["buildings"],
     queryFn: () => apiCall("/api/v1/buildings/condominio"),
   })
@@ -482,7 +579,7 @@ function BuildingsReadingsContent() {
     )
   }
 
-  const selectedBuilding = buildings.find((b: any) => b.id === selectedBuildingId)
+  const selectedBuilding = buildings.find((building) => building.id === selectedBuildingId)
 
   if (showForm) {
     return <AddReadingsForm buildings={buildings} onBack={() => setShowForm(false)} />
@@ -519,11 +616,11 @@ function BuildingsReadingsContent() {
 
         {/* Building Navigation */}
         <div className="mb-6">
-          <label className="block font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c] mb-3">
+          <p className="block font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c] mb-3">
             Selecione um Building:
-          </label>
+          </p>
           <div className="flex gap-3 w-full">
-            {[...buildings].sort((a, b) => a.nome.localeCompare(b.nome)).map((building: any) => (
+            {[...buildings].sort((a, b) => a.nome.localeCompare(b.nome)).map((building) => (
               <button
                 key={building.id}
                 onClick={() => setSelectedBuildingId(building.id)}
@@ -544,19 +641,23 @@ function BuildingsReadingsContent() {
           <BuildingReadingsTable 
             building={selectedBuilding} 
             onPrevious={() => {
-              const currentIndex = buildings.findIndex((b: any) => b.id === selectedBuildingId)
+              const currentIndex = buildings.findIndex(
+                (building) => building.id === selectedBuildingId,
+              )
               if (currentIndex > 0) {
                 setSelectedBuildingId(buildings[currentIndex - 1].id)
               }
             }}
             onNext={() => {
-              const currentIndex = buildings.findIndex((b: any) => b.id === selectedBuildingId)
+              const currentIndex = buildings.findIndex(
+                (building) => building.id === selectedBuildingId,
+              )
               if (currentIndex < buildings.length - 1) {
                 setSelectedBuildingId(buildings[currentIndex + 1].id)
               }
             }}
-            hasPrevious={buildings.findIndex((b: any) => b.id === selectedBuildingId) > 0}
-            hasNext={buildings.findIndex((b: any) => b.id === selectedBuildingId) < buildings.length - 1}
+            hasPrevious={buildings.findIndex((building) => building.id === selectedBuildingId) > 0}
+            hasNext={buildings.findIndex((building) => building.id === selectedBuildingId) < buildings.length - 1}
           />
         )}
       </div>
@@ -571,7 +672,7 @@ function BuildingReadingsTable({
   hasPrevious, 
   hasNext 
 }: { 
-  building: any
+  building: Building
   onPrevious: () => void
   onNext: () => void
   hasPrevious: boolean
@@ -581,7 +682,7 @@ function BuildingReadingsTable({
     data: readingsData,
     isLoading,
     error,
-  } = useQuery({
+  } = useQuery<ApiListResponse<Reading>>({
     queryKey: ["readings", building.id],
     queryFn: () =>
       apiCall("/api/v1/readings/", {
@@ -591,7 +692,7 @@ function BuildingReadingsTable({
       }),
   })
 
-  const readings = (readingsData?.data || []) as any[]
+  const readings = (readingsData?.data || []) as Reading[]
 
   // Determine which types this building has (bitmask: 1=Low, 2=Normal, 4=Gas)
   const hasLow = (building.reading_types & 1) !== 0
@@ -764,7 +865,7 @@ function BuildingReadingsTable({
     if (!editingRow) return
 
     try {
-      const updates: Promise<any>[] = []
+      const updates: Promise<unknown>[] = []
 
       if (
         editingRow.lowId &&
@@ -817,8 +918,9 @@ function BuildingReadingsTable({
       showSuccessToast("Leituras atualizadas com sucesso")
       queryClient.invalidateQueries({ queryKey: ["readings", building.id] })
       setEditingRow(null)
-    } catch (error: any) {
-      showErrorToast(error?.message || "Erro ao atualizar leituras")
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Erro ao atualizar leituras"
+      showErrorToast(message)
     }
   }
 

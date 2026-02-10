@@ -15,8 +15,8 @@ interface ApiListResponse<T> {
 }
 
 interface UserProfile {
-  full_name?: string
-  email?: string
+  full_name?: string | null
+  email?: string | null
   cargo?: number
   condominio_id?: EntityId | null
 }
@@ -80,6 +80,14 @@ interface MoradorDetail {
   car2?: string | null
   car3?: string | null
   flat_id: EntityId
+}
+
+interface NewReadingPayload {
+  building_id?: EntityId
+  flat_id?: EntityId
+  tipo: number
+  valor: number
+  data?: string
 }
 
 type ApiQueryParams = Record<string, string | number | boolean | null | undefined>
@@ -603,6 +611,7 @@ function BuildingsReadingsContent() {
               stroke="currentColor"
               viewBox="0 0 24 24"
             >
+              <title>Adicionar leitura</title>
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -705,9 +714,9 @@ function BuildingReadingsTable({
     low?: number
     normal?: number
     gas?: number
-    lowId?: string
-    normalId?: string
-    gasId?: string
+    lowId?: EntityId
+    normalId?: EntityId
+    gasId?: EntityId
   }
 
   // Calculate days, used values, and percentages
@@ -945,6 +954,7 @@ function BuildingReadingsTable({
             stroke="currentColor"
             viewBox="0 0 24 24"
           >
+            <title>Building anterior</title>
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -982,6 +992,7 @@ function BuildingReadingsTable({
             stroke="currentColor"
             viewBox="0 0 24 24"
           >
+            <title>Proximo building</title>
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -1047,7 +1058,7 @@ function BuildingReadingsTable({
         </thead>
         <tbody>
           {/* Data rows */}
-          {processedData.slice(0, -1).map((row: any, index: number) => (
+          {processedData.slice(0, -1).map((row, index) => (
             <tr
               key={index}
               className={`${
@@ -1204,11 +1215,15 @@ function BuildingReadingsTable({
             <div className="mt-4 grid gap-4">
               {hasLow && (
                 <div>
-                  <label className="block text-sm font-semibold text-[#55311c]">
+                  <label
+                    className="block text-sm font-semibold text-[#55311c]"
+                    htmlFor="edit-reading-low"
+                  >
                     Low
                   </label>
                   <input
                     type="number"
+                    id="edit-reading-low"
                     value={editValues.low || ""}
                     onChange={(e) =>
                       setEditValues((prev) => ({
@@ -1223,11 +1238,15 @@ function BuildingReadingsTable({
 
               {hasNormal && (
                 <div>
-                  <label className="block text-sm font-semibold text-[#55311c]">
+                  <label
+                    className="block text-sm font-semibold text-[#55311c]"
+                    htmlFor="edit-reading-normal"
+                  >
                     Normal
                   </label>
                   <input
                     type="number"
+                    id="edit-reading-normal"
                     value={editValues.normal || ""}
                     onChange={(e) =>
                       setEditValues((prev) => ({
@@ -1242,11 +1261,15 @@ function BuildingReadingsTable({
 
               {hasGas && (
                 <div>
-                  <label className="block text-sm font-semibold text-[#55311c]">
+                  <label
+                    className="block text-sm font-semibold text-[#55311c]"
+                    htmlFor="edit-reading-gas"
+                  >
                     Gas
                   </label>
                   <input
                     type="number"
+                    id="edit-reading-gas"
                     value={editValues.gas || ""}
                     onChange={(e) =>
                       setEditValues((prev) => ({
@@ -1283,31 +1306,33 @@ function BuildingReadingsTable({
   )
 }
 
-function AddReadingsForm({ buildings, onBack }: { buildings: any[]; onBack: () => void }) {
+function AddReadingsForm({ buildings, onBack }: { buildings: Building[]; onBack: () => void }) {
   const [formData, setFormData] = useState<Record<string, Record<string, string>>>({})
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   // Initialize form data with building IDs
   useEffect(() => {
     const initialData: Record<string, Record<string, string>> = {}
-    buildings.forEach((building: any) => {
-      initialData[building.id] = {}
+    buildings.forEach((building) => {
+      const buildingKey = String(building.id)
+      initialData[buildingKey] = {}
       const hasLow = (building.reading_types & 1) !== 0
       const hasNormal = (building.reading_types & 2) !== 0
       const hasGas = (building.reading_types & 4) !== 0
 
-      if (hasLow) initialData[building.id].low = ""
-      if (hasNormal) initialData[building.id].normal = ""
-      if (hasGas) initialData[building.id].gas = ""
+      if (hasLow) initialData[buildingKey].low = ""
+      if (hasNormal) initialData[buildingKey].normal = ""
+      if (hasGas) initialData[buildingKey].gas = ""
     })
     setFormData(initialData)
   }, [buildings])
 
-  const handleInputChange = (buildingId: string, type: string, value: string) => {
+  const handleInputChange = (buildingId: EntityId, type: string, value: string) => {
+    const buildingKey = String(buildingId)
     setFormData((prev) => ({
       ...prev,
-      [buildingId]: {
-        ...prev[buildingId],
+      [buildingKey]: {
+        ...prev[buildingKey],
         [type]: value,
       },
     }))
@@ -1318,7 +1343,7 @@ function AddReadingsForm({ buildings, onBack }: { buildings: any[]; onBack: () =
     setIsSubmitting(true)
 
     try {
-      const readings: any[] = []
+      const readings: NewReadingPayload[] = []
       
       // Convert form data to API format
       Object.entries(formData).forEach(([buildingId, types]) => {
@@ -1378,7 +1403,7 @@ function AddReadingsForm({ buildings, onBack }: { buildings: any[]; onBack: () =
 
         <form onSubmit={handleSubmit}>
           <div className="space-y-6">
-            {[...buildings].sort((a, b) => a.nome.localeCompare(b.nome)).map((building: any) => {
+            {[...buildings].sort((a, b) => a.nome.localeCompare(b.nome)).map((building) => {
               const hasLow = (building.reading_types & 1) !== 0
               const hasNormal = (building.reading_types & 2) !== 0
               const hasGas = (building.reading_types & 4) !== 0
@@ -1395,12 +1420,16 @@ function AddReadingsForm({ buildings, onBack }: { buildings: any[]; onBack: () =
                   <div className="grid gap-4 md:grid-cols-3">
                     {hasLow && (
                       <div>
-                        <label className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]">
+                        <label
+                          className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                          htmlFor={`building-${building.id}-low`}
+                        >
                           Low
                         </label>
                         <input
                           type="number"
-                          value={formData[building.id]?.low || ""}
+                          id={`building-${building.id}-low`}
+                          value={formData[String(building.id)]?.low || ""}
                           onChange={(e) =>
                             handleInputChange(building.id, "low", e.target.value)
                           }
@@ -1412,12 +1441,16 @@ function AddReadingsForm({ buildings, onBack }: { buildings: any[]; onBack: () =
 
                     {hasNormal && (
                       <div>
-                        <label className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]">
+                        <label
+                          className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                          htmlFor={`building-${building.id}-normal`}
+                        >
                           Normal
                         </label>
                         <input
                           type="number"
-                          value={formData[building.id]?.normal || ""}
+                          id={`building-${building.id}-normal`}
+                          value={formData[String(building.id)]?.normal || ""}
                           onChange={(e) =>
                             handleInputChange(building.id, "normal", e.target.value)
                           }
@@ -1429,12 +1462,16 @@ function AddReadingsForm({ buildings, onBack }: { buildings: any[]; onBack: () =
 
                     {hasGas && (
                       <div>
-                        <label className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]">
+                        <label
+                          className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                          htmlFor={`building-${building.id}-gas`}
+                        >
                           Gas
                         </label>
                         <input
                           type="number"
-                          value={formData[building.id]?.gas || ""}
+                          id={`building-${building.id}-gas`}
+                          value={formData[String(building.id)]?.gas || ""}
                           onChange={(e) =>
                             handleInputChange(building.id, "gas", e.target.value)
                           }
@@ -1471,7 +1508,7 @@ function AddReadingsForm({ buildings, onBack }: { buildings: any[]; onBack: () =
   )
 }
 
-function AddFlatReadingsForm({ buildings, onBack }: { buildings: any[]; onBack: () => void }) {
+function AddFlatReadingsForm({ buildings, onBack }: { buildings: Building[]; onBack: () => void }) {
   const [formData, setFormData] = useState<Record<string, Record<string, string>>>({})
   const [isSubmitting, setIsSubmitting] = useState(false)
   const queryClient = useQueryClient()
@@ -1480,8 +1517,8 @@ function AddFlatReadingsForm({ buildings, onBack }: { buildings: any[]; onBack: 
   // Initialize form data with flat IDs - only include flats with reading_types != 0
   useEffect(() => {
     const initialData: Record<string, Record<string, string>> = {}
-    buildings.forEach((building: any) => {
-      building.flats?.forEach((flat: any) => {
+    buildings.forEach((building) => {
+      building.flats?.forEach((flat) => {
         // Skip flats without readings
         if (flat.reading_types === 0) return
 
@@ -1513,7 +1550,7 @@ function AddFlatReadingsForm({ buildings, onBack }: { buildings: any[]; onBack: 
     setIsSubmitting(true)
 
     try {
-      const readings: any[] = []
+      const readings: NewReadingPayload[] = []
       
       // Convert form data to API format
       Object.entries(formData).forEach(([flatId, types]) => {
@@ -1560,10 +1597,10 @@ function AddFlatReadingsForm({ buildings, onBack }: { buildings: any[]; onBack: 
   }
 
   // Get flats grouped by building
-  const buildingsWithFlats = buildings.map((building: any) => ({
+  const buildingsWithFlats = buildings.map((building) => ({
     ...building,
-    flats: building.flats?.filter((flat: any) => flat.reading_types !== 0) || [],
-  })).filter((building: any) => building.flats.length > 0)
+    flats: building.flats?.filter((flat) => flat.reading_types !== 0) || [],
+  })).filter((building) => building.flats.length > 0)
 
   if (buildingsWithFlats.length === 0) {
     return (
@@ -1607,14 +1644,14 @@ function AddFlatReadingsForm({ buildings, onBack }: { buildings: any[]; onBack: 
 
         <form onSubmit={handleSubmit}>
           <div className="space-y-6">
-            {buildingsWithFlats.map((building: any) => (
+            {buildingsWithFlats.map((building) => (
               <div key={building.id} className="rounded-lg border-2 border-[#8c7569] p-4">
                 <h3 className="mb-4 font-['Nunito',sans-serif] text-xl font-bold text-[#8c7569]">
                   {building.nome}
                 </h3>
                 
                 <div className="space-y-4">
-                  {[...building.flats].sort((a: any, b: any) => a.numero - b.numero).map((flat: any) => {
+                  {[...building.flats].sort((a, b) => a.numero - b.numero).map((flat) => {
                     const hasLow = (flat.reading_types & 1) !== 0
                     const hasNormal = (flat.reading_types & 2) !== 0
                     const hasGas = (flat.reading_types & 4) !== 0
@@ -1631,11 +1668,15 @@ function AddFlatReadingsForm({ buildings, onBack }: { buildings: any[]; onBack: 
                         <div className="grid gap-4 md:grid-cols-3">
                           {hasLow && (
                             <div>
-                              <label className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]">
+                              <label
+                                className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                                htmlFor={`flat-${flat.id}-low`}
+                              >
                                 Low
                               </label>
                               <input
                                 type="number"
+                                id={`flat-${flat.id}-low`}
                                 value={formData[flat.id]?.low || ""}
                                 onChange={(e) =>
                                   handleInputChange(flat.id, "low", e.target.value)
@@ -1648,11 +1689,15 @@ function AddFlatReadingsForm({ buildings, onBack }: { buildings: any[]; onBack: 
 
                           {hasNormal && (
                             <div>
-                              <label className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]">
+                              <label
+                                className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                                htmlFor={`flat-${flat.id}-normal`}
+                              >
                                 Normal
                               </label>
                               <input
                                 type="number"
+                                id={`flat-${flat.id}-normal`}
                                 value={formData[flat.id]?.normal || ""}
                                 onChange={(e) =>
                                   handleInputChange(flat.id, "normal", e.target.value)
@@ -1665,11 +1710,15 @@ function AddFlatReadingsForm({ buildings, onBack }: { buildings: any[]; onBack: 
 
                           {hasGas && (
                             <div>
-                              <label className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]">
+                              <label
+                                className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                                htmlFor={`flat-${flat.id}-gas`}
+                              >
                                 Gas
                               </label>
                               <input
                                 type="number"
+                                id={`flat-${flat.id}-gas`}
                                 value={formData[flat.id]?.gas || ""}
                                 onChange={(e) =>
                                   handleInputChange(flat.id, "gas", e.target.value)
@@ -1711,20 +1760,20 @@ function AddFlatReadingsForm({ buildings, onBack }: { buildings: any[]; onBack: 
 }
 
 function FlatsReadingsContent() {
-  const [selectedBuildingId, setSelectedBuildingId] = useState<string | null>(null)
-  const [selectedFlatId, setSelectedFlatId] = useState<string | null>(null)
+  const [selectedBuildingId, setSelectedBuildingId] = useState<EntityId | null>(null)
+  const [selectedFlatId, setSelectedFlatId] = useState<EntityId | null>(null)
   const [showForm, setShowForm] = useState(false)
 
   const {
     data: buildingsData,
     isLoading: buildingsLoading,
-  } = useQuery({
+  } = useQuery<ApiListResponse<Building>>({
     queryKey: ["buildings"],
     queryFn: () => apiCall("/api/v1/buildings/condominio"),
   })
 
   const buildings = buildingsData?.data || []
-  const selectedBuilding = buildings.find((b: any) => b.id === selectedBuildingId)
+  const selectedBuilding = buildings.find((building) => building.id === selectedBuildingId)
   const allFlats = selectedBuilding?.flats || []
   const flats = allFlats
 
@@ -1753,7 +1802,7 @@ function FlatsReadingsContent() {
     )
   }
 
-  const selectedFlat = flats.find((f: any) => f.id === selectedFlatId)
+  const selectedFlat = flats.find((flat) => flat.id === selectedFlatId)
 
   if (showForm) {
     return (
@@ -1782,6 +1831,7 @@ function FlatsReadingsContent() {
               stroke="currentColor"
               viewBox="0 0 24 24"
             >
+              <title>Adicionar leitura</title>
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -1795,11 +1845,11 @@ function FlatsReadingsContent() {
 
         {/* Building Selection */}
         <div className="mb-6">
-          <label className="block font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c] mb-3">
+          <p className="block font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c] mb-3">
             Selecione um Building:
-          </label>
+          </p>
           <div className="flex gap-3 w-full">
-            {[...buildings].sort((a, b) => a.nome.localeCompare(b.nome)).map((building: any) => (
+            {[...buildings].sort((a, b) => a.nome.localeCompare(b.nome)).map((building) => (
               <button
                 key={building.id}
                 onClick={() => setSelectedBuildingId(building.id)}
@@ -1819,12 +1869,12 @@ function FlatsReadingsContent() {
         {/* Flat Selection */}
         {selectedBuildingId && (
           <div className="mb-6">
-            <label className="block font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c] mb-3">
+            <p className="block font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c] mb-3">
               Selecione um Flat:
-            </label>
+            </p>
             {flats.length > 0 ? (
               <div className="flex gap-3 w-full flex-wrap">
-                {[...flats].sort((a: any, b: any) => a.numero - b.numero).map((flat: any) => (
+                {[...flats].sort((a, b) => a.numero - b.numero).map((flat) => (
                   <button
                     key={flat.id}
                     onClick={() => setSelectedFlatId(flat.id)}
@@ -1853,19 +1903,23 @@ function FlatsReadingsContent() {
           <FlatReadingsTable
             flat={selectedFlat}
             onPrevious={() => {
-              const currentIndex = flats.findIndex((f: any) => f.id === selectedFlatId)
+              const currentIndex = flats.findIndex(
+                (flat) => flat.id === selectedFlatId,
+              )
               if (currentIndex > 0) {
                 setSelectedFlatId(flats[currentIndex - 1].id)
               }
             }}
             onNext={() => {
-              const currentIndex = flats.findIndex((f: any) => f.id === selectedFlatId)
+              const currentIndex = flats.findIndex(
+                (flat) => flat.id === selectedFlatId,
+              )
               if (currentIndex < flats.length - 1) {
                 setSelectedFlatId(flats[currentIndex + 1].id)
               }
             }}
-            hasPrevious={flats.findIndex((f: any) => f.id === selectedFlatId) > 0}
-            hasNext={flats.findIndex((f: any) => f.id === selectedFlatId) < flats.length - 1}
+            hasPrevious={flats.findIndex((flat) => flat.id === selectedFlatId) > 0}
+            hasNext={flats.findIndex((flat) => flat.id === selectedFlatId) < flats.length - 1}
           />
         )}
       </div>
@@ -1880,7 +1934,7 @@ function FlatReadingsTable({
   hasPrevious,
   hasNext,
 }: {
-  flat: any
+  flat: Flat
   onPrevious: () => void
   onNext: () => void
   hasPrevious: boolean
@@ -1890,7 +1944,7 @@ function FlatReadingsTable({
     data: readingsData,
     isLoading,
     error,
-  } = useQuery({
+  } = useQuery<ApiListResponse<Reading>>({
     queryKey: ["flat_readings", flat.id],
     queryFn: () =>
       apiCall("/api/v1/flat_readings/", {
@@ -1900,7 +1954,7 @@ function FlatReadingsTable({
       }),
   })
 
-  const readings = (readingsData?.data || []) as any[]
+  const readings = (readingsData?.data || []) as Reading[]
 
   // Determine which types this flat has (bitmask: 1=Low, 2=Normal, 4=Gas)
   const hasLow = (flat.reading_types & 1) !== 0
@@ -2059,6 +2113,7 @@ function FlatReadingsTable({
             stroke="currentColor"
             viewBox="0 0 24 24"
           >
+            <title>Flat anterior</title>
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -2093,6 +2148,7 @@ function FlatReadingsTable({
             stroke="currentColor"
             viewBox="0 0 24 24"
           >
+            <title>Proximo flat</title>
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -2238,7 +2294,7 @@ function CleanerQrCodesContent() {
     queryFn: () => apiCall("/api/v1/buildings/condominio"),
   })
 
-  const buildings = (buildingsData?.data || []) as any[]
+  const buildings = (buildingsData?.data || []) as Building[]
 
   const baseUrl = useMemo(() => {
     if (typeof window === "undefined") return ""
@@ -2428,26 +2484,28 @@ function CleanerContent() {
 }
 
 function CleanerSummary() {
-  const { data: cleanersData } = useQuery({
+  const { data: cleanersData } = useQuery<ApiListResponse<Funcionario>>({
     queryKey: ["funcionarios", "cleaners-summary"],
     queryFn: () => apiCall("/api/v1/funcionarios/", { skip: 0, limit: 500 }),
   })
 
-  const { data: acessData, isLoading: isLoadingAcess } = useQuery({
+  const { data: acessData, isLoading: isLoadingAcess } = useQuery<
+    ApiListResponse<AcessRecord>
+  >({
     queryKey: ["acess", "cleaner"],
     queryFn: () => apiCall("/api/v1/acess/", { skip: 0, limit: 200 }),
   })
 
-  const { data: buildingsData } = useQuery({
+  const { data: buildingsData } = useQuery<ApiListResponse<Building>>({
     queryKey: ["buildings", "cleaner-summary"],
     queryFn: () => apiCall("/api/v1/buildings/condominio"),
   })
 
-  const acesses = (acessData?.data || []) as any[]
-  const buildings = (buildingsData?.data || []) as any[]
+  const acesses = (acessData?.data || []) as AcessRecord[]
+  const buildings = (buildingsData?.data || []) as Building[]
 
   const buildingMap = useMemo(() => {
-    const map = new Map<string, string>()
+    const map = new Map<EntityId, string>()
     buildings.forEach((building) => {
       map.set(building.id, building.nome)
     })
@@ -2456,9 +2514,9 @@ function CleanerSummary() {
 
   const activeCleanerId = useMemo(() => {
     const cleaners = (cleanersData?.data || []).filter(
-      (funcionario: any) => funcionario.cargo === 0,
+      (funcionario: Funcionario) => funcionario.cargo === 0,
     )
-    return cleaners.find((cleaner: any) => cleaner.is_default)?.id || null
+    return cleaners.find((cleaner: Funcionario) => cleaner.is_default)?.id || null
   }, [cleanersData])
 
   const sessions = useMemo(() => {
@@ -2477,8 +2535,8 @@ function CleanerSummary() {
         )
       : sorted
 
-    const result: Array<{ inRecord?: any; outRecord?: any }> = []
-    let openRecord: any | null = null
+    const result: Array<{ inRecord?: AcessRecord; outRecord?: AcessRecord }> = []
+    let openRecord: AcessRecord | null = null
 
     filtered.forEach((record) => {
       if (record.operacao === 0) {
@@ -2633,21 +2691,30 @@ function CleanerRegister() {
   const { showSuccessToast, showErrorToast } = useCustomToast()
   const { user } = useAuth()
 
-  const { data: cleanersData, isLoading } = useQuery({
+  const { data: cleanersData, isLoading } = useQuery<ApiListResponse<Funcionario>>({
     queryKey: ["funcionarios", "cleaners"],
     queryFn: () => apiCall("/api/v1/funcionarios/", { skip: 0, limit: 500 }),
   })
 
   const cleaners = (cleanersData?.data || []).filter(
-    (funcionario: any) => funcionario.cargo === 0,
+    (funcionario: Funcionario) => funcionario.cargo === 0,
   )
 
   const activeCleanerId = cleaners.find(
-    (cleaner: any) => cleaner.is_default,
+    (cleaner: Funcionario) => cleaner.is_default,
   )?.id
 
+  interface NewCleanerPayload {
+    status: boolean
+    nome: string
+    mobile: number
+    cargo: number
+    email: string | null
+    condominio_id: EntityId
+  }
+
   const createCleanerMutation = useMutation({
-    mutationFn: (payload: any) =>
+    mutationFn: (payload: NewCleanerPayload) =>
       apiCall("/api/v1/funcionarios/", {
         method: "POST",
         body: payload,
@@ -2681,7 +2748,7 @@ function CleanerRegister() {
     },
   })
 
-  const handleSetActive = (cleaner: any) => {
+  const handleSetActive = (cleaner: Funcionario) => {
     setDefaultCleanerMutation.mutate(cleaner.id)
   }
 
@@ -2723,6 +2790,7 @@ function CleanerRegister() {
             stroke="currentColor"
             viewBox="0 0 24 24"
           >
+            <title>Adicionar cleaner</title>
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -2738,11 +2806,15 @@ function CleanerRegister() {
         <div className="mb-6 rounded-lg border border-[#e5e0dc] bg-[#f9f7f5] p-4">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div>
-              <label className="block text-sm font-semibold text-[#55311c] mb-1">
+              <label
+                className="block text-sm font-semibold text-[#55311c] mb-1"
+                htmlFor="cleaner-name"
+              >
                 Nome
               </label>
               <input
                 type="text"
+                id="cleaner-name"
                 value={nome}
                 onChange={(e) => setNome(e.target.value)}
                 className="w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
@@ -2750,11 +2822,15 @@ function CleanerRegister() {
               />
             </div>
             <div>
-              <label className="block text-sm font-semibold text-[#55311c] mb-1">
+              <label
+                className="block text-sm font-semibold text-[#55311c] mb-1"
+                htmlFor="cleaner-email"
+              >
                 Email (opcional)
               </label>
               <input
                 type="email"
+                id="cleaner-email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
@@ -2762,11 +2838,15 @@ function CleanerRegister() {
               />
             </div>
             <div>
-              <label className="block text-sm font-semibold text-[#55311c] mb-1">
+              <label
+                className="block text-sm font-semibold text-[#55311c] mb-1"
+                htmlFor="cleaner-mobile"
+              >
                 Telefone
               </label>
               <input
                 type="tel"
+                id="cleaner-mobile"
                 value={mobile}
                 onChange={(e) => setMobile(e.target.value)}
                 className="w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
@@ -2832,7 +2912,7 @@ function CleanerRegister() {
                 </td>
               </tr>
             )}
-            {cleaners.map((cleaner: any) => (
+            {cleaners.map((cleaner) => (
               <tr key={cleaner.id} className="bg-white hover:bg-gray-50">
                 <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
                   {cleaner.nome}
@@ -2876,7 +2956,9 @@ function ResidentsContent() {
 
   const pageSize = 20
 
-  const { data: moradoresData, isLoading } = useQuery({
+  const { data: moradoresData, isLoading } = useQuery<
+    ApiListResponse<Morador> & { count?: number }
+  >({
     queryKey: ["moradores", currentPage, selectedBuilding, searchTerm],
     queryFn: () => {
       const params = new URLSearchParams()
@@ -2888,7 +2970,7 @@ function ResidentsContent() {
     },
   })
 
-  const { data: buildingsData } = useQuery({
+  const { data: buildingsData } = useQuery<ApiListResponse<Building>>({
     queryKey: ["buildings"],
     queryFn: () => apiCall("/api/v1/buildings/condominio"),
   })
@@ -2910,8 +2992,9 @@ function ResidentsContent() {
       queryClient.invalidateQueries({ queryKey: ["moradores"] })
       showSuccessToast("Tipos de leitura atualizados com sucesso!")
     },
-    onError: (error: any) => {
-      showErrorToast(error.message || "Erro ao atualizar tipos de leitura")
+    onError: (error) => {
+      const message = error instanceof Error ? error.message : "Erro ao atualizar tipos de leitura"
+      showErrorToast(message)
     },
   })
 
@@ -2980,6 +3063,7 @@ function ResidentsContent() {
               stroke="currentColor"
               viewBox="0 0 24 24"
             >
+              <title>Adicionar morador</title>
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -2994,11 +3078,15 @@ function ResidentsContent() {
         {/* Filters and Search */}
         <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2">
           <div>
-            <label className="block text-sm font-semibold text-[#55311c] mb-2">
+            <label
+              className="block text-sm font-semibold text-[#55311c] mb-2"
+              htmlFor="residents-search"
+            >
               Buscar por Nome, Telefone, Email ou Flat
             </label>
             <input
               type="text"
+              id="residents-search"
               placeholder="Digite para buscar..."
               value={searchTerm}
               onChange={(e) => handleSearch(e.target.value)}
@@ -3006,16 +3094,20 @@ function ResidentsContent() {
             />
           </div>
           <div>
-            <label className="block text-sm font-semibold text-[#55311c] mb-2">
+            <label
+              className="block text-sm font-semibold text-[#55311c] mb-2"
+              htmlFor="residents-building"
+            >
               Filtrar por Building
             </label>
             <select
+              id="residents-building"
               value={selectedBuilding || ""}
               onChange={(e) => handleBuildingChange(e.target.value || null)}
               className="w-full text-[#000000] rounded-lg border border-gray-300 px-3 py-2 font-['Nunito',sans-serif] text-sm focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
             >
               <option value="">Todos os Buildings</option>
-              {buildings.map((building: any) => (
+              {buildings.map((building) => (
                 <option key={building.id} value={building.nome}>
                   {building.nome}
                 </option>
@@ -3064,13 +3156,13 @@ function ResidentsContent() {
                 </thead>
                 <tbody>
                     {moradores
-                    .sort((a: any, b: any) => {
+                    .sort((a, b) => {
                       // Ordenar primeiro por building, depois por número do flat
                       const buildingCompare = a.building_nome.localeCompare(b.building_nome)
                       if (buildingCompare !== 0) return buildingCompare
                       return a.flat_numero - b.flat_numero
                     })
-                    .map((morador: any) => (
+                    .map((morador) => (
                       <tr key={morador.id} className="hover:bg-[#f5f1ee]">
                       <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
                         {morador.building_nome}
@@ -3186,9 +3278,9 @@ function AddResidentForm({ onBack, editingId }: { onBack: () => void; editingId:
     flat_id: "",
   })
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [flats, setFlats] = useState<any[]>([])
+  const [flats, setFlats] = useState<Array<{ id: EntityId; label: string }>>([])
 
-  const { data: buildingsData } = useQuery({
+  const { data: buildingsData } = useQuery<ApiListResponse<Building>>({
     queryKey: ["buildings"],
     queryFn: () => apiCall("/api/v1/buildings/condominio"),
   })
@@ -3206,11 +3298,11 @@ function AddResidentForm({ onBack, editingId }: { onBack: () => void; editingId:
               },
             }
           )
-          const morador = await response.json()
+          const morador = (await response.json()) as MoradorDetail
           setFormData({
             nome: morador.nome,
             email: morador.email || "",
-            mobile: morador.mobile.toString(),
+            mobile: morador.mobile?.toString() || "",
             cargo: morador.cargo,
             car1: morador.car1 || "",
             car2: morador.car2 || "",
@@ -3227,17 +3319,17 @@ function AddResidentForm({ onBack, editingId }: { onBack: () => void; editingId:
 
   // Build flats list from buildings
   useEffect(() => {
-    const allFlats: any[] = []
+    const allFlats: Array<{ id: EntityId; label: string }> = []
     
     // Sort buildings by nome and flats by numero
-    const sortedBuildings = [...(buildingsData?.data || [])].sort((a: any, b: any) => 
+    const sortedBuildings = [...(buildingsData?.data || [])].sort((a, b) => 
       a.nome.localeCompare(b.nome)
     )
     
-    sortedBuildings.forEach((building: any) => {
-      const sortedFlats = [...(building.flats || [])].sort((a: any, b: any) => a.numero - b.numero)
+    sortedBuildings.forEach((building) => {
+      const sortedFlats = [...(building.flats || [])].sort((a, b) => a.numero - b.numero)
       
-      sortedFlats.forEach((flat: any) => {
+      sortedFlats.forEach((flat) => {
         allFlats.push({
           id: flat.id,
           label: `${building.nome} - Flat ${flat.numero}`,
@@ -3321,11 +3413,15 @@ function AddResidentForm({ onBack, editingId }: { onBack: () => void; editingId:
         <form onSubmit={handleSubmit}>
           <div className="grid gap-6 md:grid-cols-2">
             <div>
-              <label className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]">
+              <label
+                className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                htmlFor="resident-nome"
+              >
                 Nome *
               </label>
               <input
                 type="text"
+                id="resident-nome"
                 name="nome"
                 value={formData.nome}
                 onChange={handleInputChange}
@@ -3336,11 +3432,15 @@ function AddResidentForm({ onBack, editingId }: { onBack: () => void; editingId:
             </div>
 
             <div>
-              <label className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]">
+              <label
+                className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                htmlFor="resident-email"
+              >
                 Email
               </label>
               <input
                 type="email"
+                id="resident-email"
                 name="email"
                 value={formData.email}
                 onChange={handleInputChange}
@@ -3350,11 +3450,15 @@ function AddResidentForm({ onBack, editingId }: { onBack: () => void; editingId:
             </div>
 
             <div>
-              <label className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]">
+              <label
+                className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                htmlFor="resident-mobile"
+              >
                 Telefone
               </label>
               <input
                 type="tel"
+                id="resident-mobile"
                 name="mobile"
                 value={formData.mobile}
                 onChange={handleInputChange}
@@ -3364,10 +3468,14 @@ function AddResidentForm({ onBack, editingId }: { onBack: () => void; editingId:
             </div>
 
             <div>
-              <label className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]">
+              <label
+                className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                htmlFor="resident-flat"
+              >
                 Flat *
               </label>
               <select
+                id="resident-flat"
                 name="flat_id"
                 value={formData.flat_id}
                 onChange={handleInputChange}
@@ -3384,11 +3492,15 @@ function AddResidentForm({ onBack, editingId }: { onBack: () => void; editingId:
             </div>
 
             <div>
-              <label className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]">
+              <label
+                className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                htmlFor="resident-car1"
+              >
                 Carro 1
               </label>
               <input
                 type="text"
+                id="resident-car1"
                 name="car1"
                 value={formData.car1}
                 onChange={handleInputChange}
@@ -3398,11 +3510,15 @@ function AddResidentForm({ onBack, editingId }: { onBack: () => void; editingId:
             </div>
 
             <div>
-              <label className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]">
+              <label
+                className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                htmlFor="resident-car2"
+              >
                 Carro 2
               </label>
               <input
                 type="text"
+                id="resident-car2"
                 name="car2"
                 value={formData.car2}
                 onChange={handleInputChange}
@@ -3412,11 +3528,15 @@ function AddResidentForm({ onBack, editingId }: { onBack: () => void; editingId:
             </div>
 
             <div>
-              <label className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]">
+              <label
+                className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                htmlFor="resident-car3"
+              >
                 Carro 3
               </label>
               <input
                 type="text"
+                id="resident-car3"
                 name="car3"
                 value={formData.car3}
                 onChange={handleInputChange}
@@ -3426,10 +3546,14 @@ function AddResidentForm({ onBack, editingId }: { onBack: () => void; editingId:
             </div>
 
             <div>
-              <label className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]">
+              <label
+                className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                htmlFor="resident-cargo"
+              >
                 Cargo
               </label>
               <select
+                id="resident-cargo"
                 name="cargo"
                 value={formData.cargo}
                 onChange={handleInputChange}

@@ -3140,7 +3140,8 @@ function CleanerContent() {
     </div>
   )
 }
-QR Code - Cleaner
+
+
 function CaretakerContent() {
   const [activeSubTab, setActiveSubTab] = useState<"summary" | "register">(
     "summary",

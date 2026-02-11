@@ -2902,9 +2902,6 @@ function CleanerQrCodesContent() {
             <h3 className="text-lg font-semibold text-[#55311c]">
               {building.nome || "Building"}
             </h3>
-            <p className="text-sm text-[rgba(0,0,0,0.6)]">
-              Código: {building.id}
-            </p>
           </div>
 
           <div className="mt-4 flex flex-col items-center justify-center gap-4">
@@ -3143,7 +3140,7 @@ function CleanerContent() {
     </div>
   )
 }
-
+QR Code - Cleaner
 function CaretakerContent() {
   const [activeSubTab, setActiveSubTab] = useState<"summary" | "register">(
     "summary",

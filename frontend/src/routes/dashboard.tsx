@@ -247,7 +247,7 @@ function ClientDashboard() {
       case "cleaner":
         return <CleanerContent />
       case "caretaker":
-        return <TabContent title="Caretaker" />
+        return <CaretakerContent />
       case "bins":
         return <TabContent title="Bins" />
       case "twillio":

@@ -1,3 +1,6 @@
+from sqlalchemy.sql.operators import ge, le
+from greenlet.tests.fail_initialstub_already_started import c
+import stat
 import uuid
 from datetime import datetime, timezone
 
@@ -106,12 +109,20 @@ class Building(SQLModel, table=True):
     )
 
 
-class Flat(SQLModel, table=True):
-    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    numero: int = Field(default=0)
+class FlatBase(SQLModel):
+    numero: int = Field(default=0, ge=0, le=999)
     status: bool = Field(default=False)
-    # Reading types this flat has (bitmask: 1=Low, 2=Normal, 4=Gas)
-    reading_types: int = Field(default=0)  # Default: 0 (no readings)
+    building_id: uuid.UUID
+    reading_types: int = Field(default=0, ge=0, le=7)  # Bitmask: 1=Low, 2=Normal, 4=Gas
+    car1: str | None = Field(default=None, max_length=50)
+    car2: str | None = Field(default=None, max_length=50)
+    car3: str | None = Field(default=None, max_length=50)
+
+class Flat(FlatBase, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    occupied: bool = Field(default=False)
+    status: bool = Field(default=False) # 0 owner | 1 rented
+    reading_types: int = Field(default=0)  # Reading types this flat has (bitmask: 1=Low, 2=Normal, 4=Gas)
     building_id: uuid.UUID = Field(
         foreign_key="building.id", nullable=False, ondelete="CASCADE"
     )
@@ -122,17 +133,18 @@ class Flat(SQLModel, table=True):
     readings: list["FlatReading"] = Relationship(
         back_populates="flat", cascade_delete=True
     )
-
-
-class Morador(SQLModel, table=True): # cargo 0 owner 1 | cargo 1 owner 2 | cargo 3 
-    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    cargo: int = Field(default=0)
-    nome: str = Field(default="", max_length=255)
-    email: EmailStr | None = Field(default=None, max_length=255)
-    mobile: str = Field(default="", max_length=20)  # Changed to str for phone numbers
     car1: str | None = Field(default=None, max_length=50)
     car2: str | None = Field(default=None, max_length=50)
     car3: str | None = Field(default=None, max_length=50)
+
+
+class Morador(SQLModel, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    cargo: int = Field(default=0, ge=0, le=4)  # 0 owner 1 | 1 owner 2 | 2 tenant | 3 agent
+    nome: str = Field(default="", max_length=255)
+    email: EmailStr | None = Field(default=None, max_length=255)
+    mobile: str = Field(default="", max_length=20)
+    landiline: str | None = Field(default=None, max_length=20)
     flat_id: uuid.UUID = Field(
         foreign_key="flat.id", nullable=False, ondelete="CASCADE"
     )
@@ -145,7 +157,7 @@ class Funcionario(SQLModel, table=True):
     is_default: bool = Field(default=False)
     nome: str = Field(default="", max_length=255)
     mobile: int = Field(default=0)
-    cargo: int = Field(default=0)
+    cargo: int = Field(default=0, ge=0, le=2) # 0 cleaner | 1 caretaker | 2 contractor
     email: EmailStr | None = Field(default=None, max_length=255)
     condominio_id: uuid.UUID = Field(
         foreign_key="condominio.id", nullable=False, ondelete="CASCADE"
@@ -286,11 +298,7 @@ class BuildingsPublic(SQLModel):
     count: int
 
 
-class FlatBase(SQLModel):
-    numero: int = Field(default=0)
-    status: bool = Field(default=False)
-    building_id: uuid.UUID
-    reading_types: int = Field(default=0, ge=0, le=7)  # Bitmask: 1=Low, 2=Normal, 4=Gas
+
 
 
 class FlatCreate(FlatBase):
@@ -302,6 +310,9 @@ class FlatUpdate(SQLModel):
     status: bool | None = None
     building_id: uuid.UUID | None = None
     reading_types: int | None = Field(default=None, ge=0, le=7)
+    car1: str | None = Field(default=None, max_length=50)
+    car2: str | None = Field(default=None, max_length=50)
+    car3: str | None = Field(default=None, max_length=50)
 
 
 class FlatPublic(FlatBase):
@@ -345,9 +356,6 @@ class MoradorBase(SQLModel):
     nome: str = Field(default="", max_length=255)
     email: EmailStr | None = Field(default=None, max_length=255)
     mobile: str = Field(default="", max_length=20)  # Changed to str for phone numbers
-    car1: str | None = Field(default=None, max_length=50)
-    car2: str | None = Field(default=None, max_length=50)
-    car3: str | None = Field(default=None, max_length=50)
     flat_id: uuid.UUID
 
 
@@ -359,10 +367,8 @@ class MoradorUpdate(SQLModel):
     cargo: int | None = None
     nome: str | None = Field(default=None, max_length=255)
     email: EmailStr | None = Field(default=None, max_length=255)
-    mobile: str | None = Field(default=None, max_length=20)  # Changed to str
-    car1: str | None = Field(default=None, max_length=50)
-    car2: str | None = Field(default=None, max_length=50)
-    car3: str | None = Field(default=None, max_length=50)
+    mobile: str | None = Field(default=None, max_length=20)
+    landline: str | None = Field(default=None, max_length=20)
     flat_id: uuid.UUID | None = None
 
 

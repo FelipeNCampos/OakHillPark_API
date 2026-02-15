@@ -14,14 +14,20 @@ const searchSchema = z.object({
   buildingName: z.string().optional().catch(""),
 })
 
-const publicApiCall = async (
-  endpoint: string,
-  params?: Record<string, any> | { method?: string; body?: any },
-) => {
-  const url = new URL(`${OpenAPI.BASE || "http://localhost:8000"}${endpoint}`)
-  const isRequestWithMethod = params && "method" in params
+type QueryParams = Record<string, string | number | boolean | null | undefined>
+type RequestOptions = { method?: string; body?: unknown }
+type ApiParams = QueryParams | RequestOptions
 
-  if (!isRequestWithMethod && params) {
+const isRequestOptions = (params?: ApiParams): params is RequestOptions => {
+  if (!params || typeof params !== "object") return false
+  return "method" in params || "body" in params
+}
+
+const publicApiCall = async (endpoint: string, params?: ApiParams) => {
+  const url = new URL(`${OpenAPI.BASE || "http://localhost:8000"}${endpoint}`)
+  const requestOptions = isRequestOptions(params) ? params : undefined
+
+  if (!requestOptions && params) {
     Object.entries(params).forEach(([key, value]) => {
       if (value !== undefined) {
         url.searchParams.append(key, String(value))
@@ -30,17 +36,17 @@ const publicApiCall = async (
   }
 
   const options: RequestInit = {
-    method: isRequestWithMethod ? (params as any).method || "GET" : "GET",
+    method: requestOptions?.method ?? "GET",
     headers: {
       "Content-Type": "application/json",
     },
   }
 
-  if (isRequestWithMethod && (params as any).body !== undefined) {
+  if (requestOptions?.body !== undefined) {
     options.body =
-      typeof (params as any).body === "string"
-        ? (params as any).body
-        : JSON.stringify((params as any).body)
+      typeof requestOptions.body === "string"
+        ? requestOptions.body
+        : JSON.stringify(requestOptions.body)
   }
 
   const response = await fetch(url.toString(), options)
@@ -57,7 +63,7 @@ const publicApiCall = async (
   return response.json()
 }
 
-export const Route = createFileRoute("/caretaker-access" as any)({
+export const Route = createFileRoute("/caretaker-access")({
   component: CaretakerAccess,
   validateSearch: searchSchema,
   head: () => ({
@@ -146,8 +152,14 @@ function CaretakerAccess() {
     }
   }, [hasActiveSessionInBuilding, selectedOperation])
 
+  interface AcessPayload {
+    status: boolean
+    operacao: 0 | 1
+    building_id: string
+  }
+
   const mutation = useMutation({
-    mutationFn: (payload: any) =>
+    mutationFn: (payload: AcessPayload) =>
       publicApiCall("/api/v1/acess/caretaker", {
         method: "POST",
         body: payload,
@@ -162,8 +174,10 @@ function CaretakerAccess() {
         }
       }, 5000)
     },
-    onError: (error: any) => {
-      showErrorToast(error?.message || "Unable to submit the record")
+    onError: (error: unknown) => {
+      const message =
+        error instanceof Error ? error.message : "Unable to submit the record"
+      showErrorToast(message)
     },
   })
 
@@ -175,7 +189,12 @@ function CaretakerAccess() {
       return
     }
 
-    const payload: any = {
+    if (!buildingId) {
+      showErrorToast("Invalid QR code. Building not found.")
+      return
+    }
+
+    const payload: AcessPayload = {
       status: true,
       operacao: selectedOperation === "in" ? 0 : 1,
       building_id: buildingId,

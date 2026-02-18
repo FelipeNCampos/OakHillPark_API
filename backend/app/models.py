@@ -1,6 +1,3 @@
-from sqlalchemy.sql.operators import ge, le
-from greenlet.tests.fail_initialstub_already_started import c
-import stat
 import uuid
 from datetime import datetime, timezone
 
@@ -144,7 +141,6 @@ class Morador(SQLModel, table=True):
     nome: str = Field(default="", max_length=255)
     email: EmailStr | None = Field(default=None, max_length=255)
     mobile: str = Field(default="", max_length=20)
-    landiline: str | None = Field(default=None, max_length=20)
     flat_id: uuid.UUID = Field(
         foreign_key="flat.id", nullable=False, ondelete="CASCADE"
     )
@@ -368,7 +364,6 @@ class MoradorUpdate(SQLModel):
     nome: str | None = Field(default=None, max_length=255)
     email: EmailStr | None = Field(default=None, max_length=255)
     mobile: str | None = Field(default=None, max_length=20)
-    landline: str | None = Field(default=None, max_length=20)
     flat_id: uuid.UUID | None = None
 
 
@@ -387,6 +382,9 @@ class MoradorWithFlatPublic(MoradorBase):
     flat_numero: int
     building_nome: str
     reading_types: int  # Bitmask for reading types: 1=Low, 2=Normal, 4=Gas
+    car1: str | None = None
+    car2: str | None = None
+    car3: str | None = None
 
 
 class MoradoresWithFlatPublic(SQLModel):

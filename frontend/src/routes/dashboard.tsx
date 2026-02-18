@@ -1,4 +1,4 @@
-import {
+﻿import {
   keepPreviousData,
   useMutation,
   useQuery,
@@ -68,11 +68,31 @@ interface AcessRecord {
 
 interface Morador {
   id: EntityId
+  cargo: number
   building_nome: string
   flat_numero: number
+  flat_id: EntityId
   nome: string
+  email?: string | null
   mobile?: string | number | null
+  car1?: string | null
+  car2?: string | null
+  car3?: string | null
   reading_types: number
+}
+
+type ResidentTypeFilter = "owner_1" | "owner_2" | "tenant" | "agent" | "all"
+
+type FlatResidentRow = {
+  key: string
+  building_nome: string
+  flat_numero: number
+  reading_types: number
+  owner_1?: Morador
+  owner_2?: Morador
+  tenant?: Morador
+  agent?: Morador
+  edit_target_id: EntityId | null
 }
 
 interface MoradorDetail {
@@ -4150,6 +4170,8 @@ function ResidentsContent() {
   const [currentPage, setCurrentPage] = useState(0)
   const [selectedBuilding, setSelectedBuilding] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState("")
+  const [residentTypeFilter, setResidentTypeFilter] =
+    useState<ResidentTypeFilter>("owner_1")
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
 
@@ -4158,16 +4180,41 @@ function ResidentsContent() {
   const { data: moradoresData, isLoading } = useQuery<
     ApiListResponse<Morador> & { count?: number }
   >({
-    queryKey: ["moradores", currentPage, selectedBuilding, searchTerm],
+    queryKey: ["moradores", selectedBuilding, searchTerm],
     placeholderData: keepPreviousData,
-    queryFn: () => {
-      const params = new URLSearchParams()
-      params.append("skip", String(currentPage * pageSize))
-      params.append("limit", String(pageSize))
-      if (searchTerm) params.append("search", searchTerm)
-      if (selectedBuilding && !searchTerm)
-        params.append("building", selectedBuilding)
-      return apiCall(`/api/v1/moradores/?${params.toString()}`)
+    queryFn: async () => {
+      const pageLimit = 100
+      const allMoradores: Morador[] = []
+      let skip = 0
+      let totalCount: number | undefined
+
+      while (true) {
+        const params = new URLSearchParams()
+        params.append("skip", String(skip))
+        params.append("limit", String(pageLimit))
+        if (searchTerm) params.append("search", searchTerm)
+        if (selectedBuilding && !searchTerm)
+          params.append("building", selectedBuilding)
+
+        const page = (await apiCall(
+          `/api/v1/moradores/?${params.toString()}`,
+        )) as ApiListResponse<Morador> & { count?: number }
+
+        const pageData = page.data || []
+        totalCount = page.count
+        allMoradores.push(...pageData)
+
+        if (pageData.length < pageLimit) break
+        if (typeof totalCount === "number" && allMoradores.length >= totalCount)
+          break
+
+        skip += pageLimit
+      }
+
+      return {
+        data: allMoradores,
+        count: totalCount ?? allMoradores.length,
+      }
     },
   })
 
@@ -4177,9 +4224,97 @@ function ResidentsContent() {
   })
 
   const moradores = moradoresData?.data || []
-  const totalCount = moradoresData?.count || 0
-  const totalPages = Math.ceil(totalCount / pageSize)
   const buildings = buildingsData?.data || []
+
+  const sortedMoradores = useMemo(
+    () =>
+      [...moradores].sort((a, b) => {
+        const buildingCompare = a.building_nome.localeCompare(b.building_nome)
+        if (buildingCompare !== 0) return buildingCompare
+        if (a.flat_numero !== b.flat_numero) return a.flat_numero - b.flat_numero
+        return a.nome.localeCompare(b.nome)
+      }),
+    [moradores],
+  )
+
+  const cargoFilterMap: Record<Exclude<ResidentTypeFilter, "all">, number> = {
+    owner_1: 0,
+    owner_2: 1,
+    tenant: 2,
+    agent: 3,
+  }
+
+  const filteredMoradores = useMemo(() => {
+    if (residentTypeFilter === "all") return sortedMoradores
+    return sortedMoradores.filter(
+      (morador) => morador.cargo === cargoFilterMap[residentTypeFilter],
+    )
+  }, [sortedMoradores, residentTypeFilter])
+
+  const groupedFlatRows = useMemo<FlatResidentRow[]>(() => {
+    if (residentTypeFilter !== "all") return []
+
+    const groups = new Map<string, FlatResidentRow>()
+
+    filteredMoradores.forEach((morador) => {
+      const key = `${morador.building_nome}::${morador.flat_numero}::${morador.flat_id}`
+      const current = groups.get(key) ?? {
+        key,
+        building_nome: morador.building_nome,
+        flat_numero: morador.flat_numero,
+        reading_types: morador.reading_types,
+        edit_target_id: null,
+      }
+
+      if (morador.cargo === 0 && !current.owner_1) current.owner_1 = morador
+      if (morador.cargo === 1 && !current.owner_2) current.owner_2 = morador
+      if (morador.cargo === 2 && !current.tenant) current.tenant = morador
+      if (morador.cargo === 3 && !current.agent) current.agent = morador
+      current.reading_types = morador.reading_types
+      current.edit_target_id =
+        current.owner_1?.id ??
+        current.owner_2?.id ??
+        current.tenant?.id ??
+        current.agent?.id ??
+        null
+
+      groups.set(key, current)
+    })
+
+    return [...groups.values()].sort((a, b) => {
+      const buildingCompare = a.building_nome.localeCompare(b.building_nome)
+      if (buildingCompare !== 0) return buildingCompare
+      return a.flat_numero - b.flat_numero
+    })
+  }, [filteredMoradores, residentTypeFilter])
+
+  const isAllTypeView = residentTypeFilter === "all"
+  const totalCount = isAllTypeView
+    ? groupedFlatRows.length
+    : filteredMoradores.length
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
+
+  useEffect(() => {
+    setCurrentPage(0)
+  }, [selectedBuilding, searchTerm, residentTypeFilter])
+
+  useEffect(() => {
+    if (currentPage > totalPages - 1) {
+      setCurrentPage(Math.max(0, totalPages - 1))
+    }
+  }, [currentPage, totalPages])
+
+  const paginatedMoradores = useMemo(() => {
+    if (isAllTypeView) return []
+    const start = currentPage * pageSize
+    return filteredMoradores.slice(start, start + pageSize)
+  }, [filteredMoradores, currentPage, pageSize, isAllTypeView])
+
+  const paginatedFlatRows = useMemo(() => {
+    if (!isAllTypeView) return []
+    const start = currentPage * pageSize
+    return groupedFlatRows.slice(start, start + pageSize)
+  }, [groupedFlatRows, currentPage, pageSize, isAllTypeView])
 
   const updateReadingTypesMutation = useMutation({
     mutationFn: async ({
@@ -4231,6 +4366,11 @@ function ResidentsContent() {
 
   const handleSearch = (term: string) => {
     setSearchTerm(term)
+    setCurrentPage(0)
+  }
+
+  const handleResidentTypeFilterChange = (value: ResidentTypeFilter) => {
+    setResidentTypeFilter(value)
     setCurrentPage(0)
   }
 
@@ -4290,7 +4430,7 @@ function ResidentsContent() {
         </div>
 
         {/* Filters and Search */}
-        <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
           <div>
             <label
               className="block text-sm font-semibold text-[#55311c] mb-2"
@@ -4328,9 +4468,33 @@ function ResidentsContent() {
               ))}
             </select>
           </div>
+          <div>
+            <label
+              className="block text-sm font-semibold text-[#55311c] mb-2"
+              htmlFor="residents-type"
+            >
+              Filtrar por Tipo
+            </label>
+            <select
+              id="residents-type"
+              value={residentTypeFilter}
+              onChange={(e) =>
+                handleResidentTypeFilterChange(
+                  e.target.value as ResidentTypeFilter,
+                )
+              }
+              className="w-full text-[#000000] rounded-lg border border-gray-300 px-3 py-2 font-['Nunito',sans-serif] text-sm focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+            >
+              <option value="owner_1">Owner 1</option>
+              <option value="owner_2">Owner 2</option>
+              <option value="tenant">Tenant</option>
+              <option value="agent">Agent</option>
+              <option value="all">Todos</option>
+            </select>
+          </div>
         </div>
 
-        {moradores.length === 0 ? (
+        {totalCount === 0 ? (
           <div className="rounded-lg bg-[#f5f1ee] p-8 text-center">
             <p className="text-[#55311c] font-['Nunito',sans-serif]">
               {searchTerm || selectedBuilding
@@ -4342,118 +4506,269 @@ function ResidentsContent() {
           <>
             <div className="overflow-x-auto">
               <table className="w-full border-collapse rounded-lg bg-white">
-                <thead>
-                  <tr className="bg-[#8c7569]">
-                    <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
-                      Building
-                    </th>
-                    <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
-                      Número
-                    </th>
-                    <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
-                      Nome
-                    </th>
-                    <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
-                      Telefone
-                    </th>
-                    <th className="border border-gray-400 px-4 py-3 text-center font-['Nunito',sans-serif] font-semibold text-white">
-                      Normal
-                    </th>
-                    <th className="border border-gray-400 px-4 py-3 text-center font-['Nunito',sans-serif] font-semibold text-white">
-                      Low
-                    </th>
-                    <th className="border border-gray-400 px-4 py-3 text-center font-['Nunito',sans-serif] font-semibold text-white">
-                      Gas
-                    </th>
-                    <th className="border border-gray-400 px-4 py-3 text-center font-['Nunito',sans-serif] font-semibold text-white">
-                      Ações
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {moradores
-                    .sort((a, b) => {
-                      // Ordenar primeiro por building, depois por número do flat
-                      const buildingCompare = a.building_nome.localeCompare(
-                        b.building_nome,
-                      )
-                      if (buildingCompare !== 0) return buildingCompare
-                      return a.flat_numero - b.flat_numero
-                    })
-                    .map((morador) => (
-                      <tr key={morador.id} className="hover:bg-[#f5f1ee]">
-                        <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
-                          {morador.building_nome}
-                        </td>
-                        <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
-                          {morador.flat_numero}
-                        </td>
-                        <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
-                          {morador.nome}
-                        </td>
-                        <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
-                          {morador.mobile || "-"}
-                        </td>
-                        <td className="border border-gray-400 px-4 py-3 text-center">
-                          <input
-                            type="checkbox"
-                            checked={(morador.reading_types & 2) !== 0}
-                            onChange={() =>
-                              handleCheckboxChange(
-                                morador.id,
-                                morador.reading_types,
-                                2,
-                              )
-                            }
-                            disabled={updateReadingTypesMutation.isPending}
-                            className="h-4 w-4 cursor-pointer"
-                          />
-                        </td>
-                        <td className="border border-gray-400 px-4 py-3 text-center">
-                          <input
-                            type="checkbox"
-                            checked={(morador.reading_types & 1) !== 0}
-                            onChange={() =>
-                              handleCheckboxChange(
-                                morador.id,
-                                morador.reading_types,
-                                1,
-                              )
-                            }
-                            disabled={updateReadingTypesMutation.isPending}
-                            className="h-4 w-4 cursor-pointer"
-                          />
-                        </td>
-                        <td className="border border-gray-400 px-4 py-3 text-center">
-                          <input
-                            type="checkbox"
-                            checked={(morador.reading_types & 4) !== 0}
-                            onChange={() =>
-                              handleCheckboxChange(
-                                morador.id,
-                                morador.reading_types,
-                                4,
-                              )
-                            }
-                            disabled={updateReadingTypesMutation.isPending}
-                            className="h-4 w-4 cursor-pointer"
-                          />
-                        </td>
-                        <td className="border border-gray-400 px-4 py-3 text-center">
-                          <button
-                            onClick={() => {
-                              setEditingId(morador.id)
-                              setShowForm(true)
-                            }}
-                            className="mr-2 rounded-lg bg-[#8c7569] px-3 py-1 font-['Nunito',sans-serif] text-xs font-semibold text-white transition-all duration-300 hover:bg-[#55311c]"
-                            type="button"
-                          >
-                            Editar
-                          </button>
-                        </td>
+                {isAllTypeView ? (
+                  <>
+                    <thead>
+                      <tr className="bg-[#8c7569]">
+                        <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
+                          Building
+                        </th>
+                        <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
+                          Número
+                        </th>
+                        <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
+                          Owner 1
+                        </th>
+                        <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
+                          Telefone 1
+                        </th>
+                        <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
+                          Owner 2
+                        </th>
+                        <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
+                          Telefone 2
+                        </th>
+                        <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
+                          Tenant
+                        </th>
+                        <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
+                          Telefone
+                        </th>
+                        <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
+                          Agent
+                        </th>
+                        <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
+                          Telefone
+                        </th>
+                        <th className="border border-gray-400 px-4 py-3 text-center font-['Nunito',sans-serif] font-semibold text-white">
+                          Normal
+                        </th>
+                        <th className="border border-gray-400 px-4 py-3 text-center font-['Nunito',sans-serif] font-semibold text-white">
+                          Low
+                        </th>
+                        <th className="border border-gray-400 px-4 py-3 text-center font-['Nunito',sans-serif] font-semibold text-white">
+                          Gas
+                        </th>
+                        <th className="border border-gray-400 px-4 py-3 text-center font-['Nunito',sans-serif] font-semibold text-white">
+                          Ações
+                        </th>
                       </tr>
-                    ))}
-                </tbody>
+                    </thead>
+                    <tbody>
+                      {paginatedFlatRows.map((row) => (
+                        <tr key={row.key} className="hover:bg-[#f5f1ee]">
+                          <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
+                            {row.building_nome}
+                          </td>
+                          <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
+                            {row.flat_numero}
+                          </td>
+                          <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
+                            {row.owner_1?.nome || "-"}
+                          </td>
+                          <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
+                            {row.owner_1?.mobile || "-"}
+                          </td>
+                          <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
+                            {row.owner_2?.nome || "-"}
+                          </td>
+                          <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
+                            {row.owner_2?.mobile || "-"}
+                          </td>
+                          <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
+                            {row.tenant?.nome || "-"}
+                          </td>
+                          <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
+                            {row.tenant?.mobile || "-"}
+                          </td>
+                          <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
+                            {row.agent?.nome || "-"}
+                          </td>
+                          <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
+                            {row.agent?.mobile || "-"}
+                          </td>
+                          <td className="border border-gray-400 px-4 py-3 text-center">
+                            <input
+                              type="checkbox"
+                              checked={(row.reading_types & 2) !== 0}
+                              onChange={() =>
+                                row.edit_target_id !== null &&
+                                handleCheckboxChange(
+                                  row.edit_target_id,
+                                  row.reading_types,
+                                  2,
+                                )
+                              }
+                              disabled={
+                                updateReadingTypesMutation.isPending ||
+                                row.edit_target_id === null
+                              }
+                              className="h-4 w-4 cursor-pointer"
+                            />
+                          </td>
+                          <td className="border border-gray-400 px-4 py-3 text-center">
+                            <input
+                              type="checkbox"
+                              checked={(row.reading_types & 1) !== 0}
+                              onChange={() =>
+                                row.edit_target_id !== null &&
+                                handleCheckboxChange(
+                                  row.edit_target_id,
+                                  row.reading_types,
+                                  1,
+                                )
+                              }
+                              disabled={
+                                updateReadingTypesMutation.isPending ||
+                                row.edit_target_id === null
+                              }
+                              className="h-4 w-4 cursor-pointer"
+                            />
+                          </td>
+                          <td className="border border-gray-400 px-4 py-3 text-center">
+                            <input
+                              type="checkbox"
+                              checked={(row.reading_types & 4) !== 0}
+                              onChange={() =>
+                                row.edit_target_id !== null &&
+                                handleCheckboxChange(
+                                  row.edit_target_id,
+                                  row.reading_types,
+                                  4,
+                                )
+                              }
+                              disabled={
+                                updateReadingTypesMutation.isPending ||
+                                row.edit_target_id === null
+                              }
+                              className="h-4 w-4 cursor-pointer"
+                            />
+                          </td>
+                          <td className="border border-gray-400 px-4 py-3 text-center">
+                            <button
+                              onClick={() => {
+                                if (row.edit_target_id === null) return
+                                setEditingId(row.edit_target_id)
+                                setShowForm(true)
+                              }}
+                              className="mr-2 rounded-lg bg-[#8c7569] px-3 py-1 font-['Nunito',sans-serif] text-xs font-semibold text-white transition-all duration-300 hover:bg-[#55311c] disabled:opacity-50"
+                              type="button"
+                              disabled={row.edit_target_id === null}
+                            >
+                              Editar
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </>
+                ) : (
+                  <>
+                    <thead>
+                      <tr className="bg-[#8c7569]">
+                        <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
+                          Building
+                        </th>
+                        <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
+                          Número
+                        </th>
+                        <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
+                          Nome
+                        </th>
+                        <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
+                          Telefone
+                        </th>
+                        <th className="border border-gray-400 px-4 py-3 text-center font-['Nunito',sans-serif] font-semibold text-white">
+                          Normal
+                        </th>
+                        <th className="border border-gray-400 px-4 py-3 text-center font-['Nunito',sans-serif] font-semibold text-white">
+                          Low
+                        </th>
+                        <th className="border border-gray-400 px-4 py-3 text-center font-['Nunito',sans-serif] font-semibold text-white">
+                          Gas
+                        </th>
+                        <th className="border border-gray-400 px-4 py-3 text-center font-['Nunito',sans-serif] font-semibold text-white">
+                          Ações
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {paginatedMoradores.map((morador) => (
+                        <tr key={morador.id} className="hover:bg-[#f5f1ee]">
+                          <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
+                            {morador.building_nome}
+                          </td>
+                          <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
+                            {morador.flat_numero}
+                          </td>
+                          <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
+                            {morador.nome}
+                          </td>
+                          <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
+                            {morador.mobile || "-"}
+                          </td>
+                          <td className="border border-gray-400 px-4 py-3 text-center">
+                            <input
+                              type="checkbox"
+                              checked={(morador.reading_types & 2) !== 0}
+                              onChange={() =>
+                                handleCheckboxChange(
+                                  morador.id,
+                                  morador.reading_types,
+                                  2,
+                                )
+                              }
+                              disabled={updateReadingTypesMutation.isPending}
+                              className="h-4 w-4 cursor-pointer"
+                            />
+                          </td>
+                          <td className="border border-gray-400 px-4 py-3 text-center">
+                            <input
+                              type="checkbox"
+                              checked={(morador.reading_types & 1) !== 0}
+                              onChange={() =>
+                                handleCheckboxChange(
+                                  morador.id,
+                                  morador.reading_types,
+                                  1,
+                                )
+                              }
+                              disabled={updateReadingTypesMutation.isPending}
+                              className="h-4 w-4 cursor-pointer"
+                            />
+                          </td>
+                          <td className="border border-gray-400 px-4 py-3 text-center">
+                            <input
+                              type="checkbox"
+                              checked={(morador.reading_types & 4) !== 0}
+                              onChange={() =>
+                                handleCheckboxChange(
+                                  morador.id,
+                                  morador.reading_types,
+                                  4,
+                                )
+                              }
+                              disabled={updateReadingTypesMutation.isPending}
+                              className="h-4 w-4 cursor-pointer"
+                            />
+                          </td>
+                          <td className="border border-gray-400 px-4 py-3 text-center">
+                            <button
+                              onClick={() => {
+                                setEditingId(morador.id)
+                                setShowForm(true)
+                              }}
+                              className="mr-2 rounded-lg bg-[#8c7569] px-3 py-1 font-['Nunito',sans-serif] text-xs font-semibold text-white transition-all duration-300 hover:bg-[#55311c]"
+                              type="button"
+                            >
+                              Editar
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </>
+                )}
               </table>
             </div>
 
@@ -4850,3 +5165,5 @@ function AddResidentForm({
     </div>
   )
 }
+
+

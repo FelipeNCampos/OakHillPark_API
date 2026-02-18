@@ -28,7 +28,7 @@ def init_db(session: Session) -> None:
         # Get the first condominio to associate with the superuser
         condominio = session.exec(select(Condominio)).first()
         condominio_id = condominio.id if condominio else None
-        
+
         user_in = UserCreate(
             email=settings.FIRST_SUPERUSER,
             password=settings.FIRST_SUPERUSER_PASSWORD,

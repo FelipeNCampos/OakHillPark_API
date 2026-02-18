@@ -1,0 +1,2630 @@
+{
+  "source_file": "Contact List OHP  update 21-10-25 .xlsx - 1-OHP Contact List - General.csv",
+  "generated_at": "2026-02-15T23:06:38.782865+00:00",
+  "flats": [
+    {
+      "building": "Falcon",
+      "flat_number": 1,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        "Only guests",
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Noga Wine",
+          "mobile": "07717896510",
+          "email": "noga.wine@gmail.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": "Shakhaf Wine",
+          "mobile": "55 21 998209820",
+          "email": "Shakhafw@gmail.com"
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Falcon",
+      "flat_number": 2,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        "SW13BOU",
+        "RV20 SKJ",
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Anita Richman",
+          "mobile": "07831296710",
+          "email": "anita.richman21@gmail.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": "Peter",
+          "mobile": "07709 466116",
+          "email": "psusman@hendersonchambers.co.uk"
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Falcon",
+      "flat_number": 3,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        "YV21CVZ",
+        "YT67XVL",
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Tim Kendall",
+          "mobile": "07889365272",
+          "email": "Tim2.kendall@virgin.net"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": "Kitty Kendall -  Daugther",
+          "mobile": "07889365272",
+          "email": "kittykendall@icloud.com"
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Falcon",
+      "flat_number": 4,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        "SN18 OPC",
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Renos Booth",
+          "mobile": "07869252944",
+          "email": "renos@syndex.co.uk"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Falcon",
+      "flat_number": 5,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        null,
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "llana Green",
+          "mobile": "07511550855",
+          "email": "llanagreen2003@yahoo.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Falcon",
+      "flat_number": 6,
+      "status": "Occupied",
+      "status_2": "Rent",
+      "car_permits": [
+        null,
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Jonathan Kaye",
+          "mobile": "07766111211",
+          "email": "jk@jk15.co.uk"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": "Yannis",
+          "mobile": "07810 241772",
+          "email": "yannis.agiomyrgiannakis@gmail.com"
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": "Mehdi Gashi",
+          "mobile": "09767 182 836",
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Falcon",
+      "flat_number": 7,
+      "status": "Occupied",
+      "status_2": "Rent",
+      "car_permits": [
+        "FJ64 BWK",
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Oliver Wignall",
+          "mobile": "07967873442",
+          "email": "oliverwignall@hotmail.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": "Gemma",
+          "mobile": "07809 668645",
+          "email": null
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": "Georgina Edmonds / Josh",
+          "mobile": "07967 873 442",
+          "email": "georgina.edmonds@icloud.com"
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Falcon",
+      "flat_number": 8,
+      "status": "Occupied",
+      "status_2": "Rent",
+      "car_permits": [
+        "LO23 XDD",
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Kunal S Mehta",
+          "mobile": null,
+          "email": "k.s.mehta@gmail.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": "David Dalgarno",
+          "mobile": "07774 128 110",
+          "email": "didalgarno@gmail.com"
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": "Hamptons - Megan Sillett",
+          "mobile": "0207 265 6610",
+          "email": "silllettm@hamptons.co.uk"
+        }
+      ]
+    },
+    {
+      "building": "Falcon",
+      "flat_number": 9,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        null,
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Eiran",
+          "mobile": "07721639530",
+          "email": null
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": "Lynn Abbott",
+          "mobile": "07932 737341",
+          "email": "lynnabbott7@icloud.com"
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Falcon",
+      "flat_number": 10,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        null,
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Elaine Hirth",
+          "mobile": "07808578348",
+          "email": "elainehirth@hotmail.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Falcon",
+      "flat_number": 11,
+      "status": "Occupied",
+      "status_2": "Rent",
+      "car_permits": [
+        "WF22NJX",
+        "REGO UDB",
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Richard Aron",
+          "mobile": "27 72 191 7744",
+          "email": "richardaron06@aol.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": "Daniel Abbott",
+          "mobile": "07973417587",
+          "email": "danabbott101@hotmail.com"
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": "Heathgate",
+          "mobile": "020 7435 3344",
+          "email": "Bunmi@heathgate.co.uk"
+        }
+      ]
+    },
+    {
+      "building": "Falcon",
+      "flat_number": 12,
+      "status": "Occupied",
+      "status_2": "Rent",
+      "car_permits": [
+        "LP16NWD",
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Marc Tendler",
+          "mobile": "07971787543",
+          "email": "gailmarc@msn.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": "Gail Tendler",
+          "mobile": "07792 585641",
+          "email": "gail@tendler.co.uk"
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": "Elina Donskoy",
+          "mobile": "972 54 3345706",
+          "email": "linadon86@gmail.com"
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": "OWNER",
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Martlett",
+      "flat_number": 1,
+      "status": "Empty",
+      "status_2": null,
+      "car_permits": [
+        null,
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Martlett",
+      "flat_number": 2,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        null,
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Stephen Hill",
+          "mobile": "07808 400284",
+          "email": "stephen@hill3.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Martlett",
+      "flat_number": 3,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        "WU61 ZXK",
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Stephanie Egerton",
+          "mobile": "07703 318 632",
+          "email": "biran.freeborn192@btinternet.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": "Brian Freeborn",
+          "mobile": "771078233",
+          "email": "brian.freeborn192@btinternet.com"
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Martlett",
+      "flat_number": 4,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        null,
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Michael Young",
+          "mobile": "07815 557092",
+          "email": "michaelsbyoung@aol.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Martlett",
+      "flat_number": 5,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        null,
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Nicholas Dobrik",
+          "mobile": "07904981814",
+          "email": "nicholasdobrik59@gmail.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Martlett",
+      "flat_number": 6,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        null,
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Luiz Fernandes Headporter",
+          "mobile": "0207 431 6574",
+          "email": "oakhillporter@gmail.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": null,
+          "mobile": "07511 550855",
+          "email": null
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": "Luiz Fernandes",
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Martlett",
+      "flat_number": 7,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        "WD57 BZS",
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Nick Lane",
+          "mobile": "07809 341996",
+          "email": "nick.lane@ucl.ac.uk"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Martlett",
+      "flat_number": 8,
+      "status": "Occupied",
+      "status_2": "Rent",
+      "car_permits": [
+        null,
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Gerry Samuels",
+          "mobile": "7769640747",
+          "email": "gerry@samuelsuk.co.uk"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": "Caroline Samuels",
+          "mobile": "07870 637630",
+          "email": "caro@samuelsuk.co.uk"
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": "Oleksandr Panteleimonov",
+          "mobile": "07384 809320",
+          "email": "panteleymonov@gmail.com"
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": "OWNER",
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Martlett",
+      "flat_number": 9,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        null,
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Aurelie Freeman",
+          "mobile": "07904 006546",
+          "email": "aurelie.freeman@gmail.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Martlett",
+      "flat_number": 10,
+      "status": "Occupied",
+      "status_2": "Rent",
+      "car_permits": [
+        null,
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Lopa Khan",
+          "mobile": "8801776194222",
+          "email": "lopa.kfrangipani@gmail.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": "Suhi Hanif",
+          "mobile": "12013136047",
+          "email": "suhi.hanif@gmail.com"
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": "Masayuki",
+          "mobile": "7435752357",
+          "email": "masa.segawa@mitsui.com"
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": "OWNER",
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Martlett",
+      "flat_number": 11,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        "LT68 YNV",
+        "LX20 JVR",
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Nahid Alaghband-Mottahedan",
+          "mobile": "07919 272493",
+          "email": "marmba2000@yahoo.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": null,
+          "mobile": null,
+          "email": "nahid.alaghehband@gmail.com"
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Martlett",
+      "flat_number": 12,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        "LL21AZW",
+        "LN55PVD",
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Kim Mendelowitz",
+          "mobile": "07799783998",
+          "email": "kmendelowitz@hotmail.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": "Michael Mendelowitz",
+          "mobile": "07802235250",
+          "email": "michael.mendelowitz@hotmail.co.uk"
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": "00 39 055 970 4124",
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Martlett",
+      "flat_number": 13,
+      "status": "Occupied",
+      "status_2": "Rent",
+      "car_permits": [
+        "KN65 XSL",
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "A Starr",
+          "mobile": "07946 170109",
+          "email": "starrd123@gmail.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": null,
+          "mobile": "07921 566445",
+          "email": "a_broide_starr@hotmail.com"
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": "Isabelle Hendrickx",
+          "mobile": "07921 568445",
+          "email": "isabelle.funghendrickx@gmail.com"
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": "Goldschmidt & Howland",
+          "mobile": "0208 347 2600",
+          "email": "lettings@g-h.co.uk"
+        }
+      ]
+    },
+    {
+      "building": "Martlett",
+      "flat_number": 15,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        "EF68PNZ",
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Shailaja Gidwani",
+          "mobile": "07801102557",
+          "email": "shailajagidwani@outlook.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Martlett",
+      "flat_number": 16,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        "HF57 CUK",
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Shiraz Moosajee",
+          "mobile": "07772445679",
+          "email": "shirazmoosajee@outlook.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": "Aliya Moosajee",
+          "mobile": "07539 500996",
+          "email": "aliya.moosajee@mac.com"
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Merlin",
+      "flat_number": 1,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        null,
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Solveig Hill",
+          "mobile": "07711 080056",
+          "email": "solveig@solveighill.co.uk"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": "Husband",
+          "mobile": "07801916659",
+          "email": null
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Merlin",
+      "flat_number": 2,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        "LL66MJV",
+        null,
+        "LL66MJV"
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Jonathan Gestetner",
+          "mobile": "07776136464",
+          "email": "jg@gestetner.net"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": "Jaqueline Gestetner",
+          "mobile": "07747617426",
+          "email": "jmg@gestetner.net"
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Merlin",
+      "flat_number": 3,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        null,
+        null,
+        "RV09 YSD"
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Reiner Volhard",
+          "mobile": "020 7435 3747",
+          "email": "reiner.volhard@gmail.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Merlin",
+      "flat_number": 4,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        null,
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Robert Cassen",
+          "mobile": "07718283040",
+          "email": "robertc2015@gmail.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": "Sun Shuyun",
+          "mobile": "07767264106",
+          "email": "shuyun1213@gmail.com"
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Merlin",
+      "flat_number": 5,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        null,
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Jonathan Viljoen",
+          "mobile": "07794139187",
+          "email": "Jonathanjviljoen@gmail.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": "Martin Kolar",
+          "mobile": "7894140624",
+          "email": "mk12378@hotmail.com"
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Merlin",
+      "flat_number": 6,
+      "status": "Occupied",
+      "status_2": "Rent",
+      "car_permits": [
+        "LB24 MYR",
+        "LA70 NUK",
+        "LA70 NUK"
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Y Uda",
+          "mobile": "819057586208",
+          "email": "y-uda.evarich@nifty.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": "Gavin Butt",
+          "mobile": "07950930538",
+          "email": "gavinbutt9@gmail.com"
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": "Anscombe & Ringland",
+          "mobile": "020 7794 5551",
+          "email": "londonpm@chancellors.co.uk"
+        }
+      ]
+    },
+    {
+      "building": "Merlin",
+      "flat_number": 7,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        "LF23NSG",
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Vipul Chandna",
+          "mobile": "07980749205",
+          "email": "vipul_chandna@yahoo.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Merlin",
+      "flat_number": 8,
+      "status": "Occupied",
+      "status_2": "Rent",
+      "car_permits": [
+        null,
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Viacheslav Aleksanyan",
+          "mobile": "7912 162085",
+          "email": "viacheslav.aleksanyan@gmail.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": "Milana Aleksanyan",
+          "mobile": "7515137102",
+          "email": "milana.aleksanyan@gmail.com"
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": "Lucinda Auden // Michael Underhill",
+          "mobile": "07881276530 / 07745122053",
+          "email": "lucindauden@hotmail.com / michael.underhill@gmail.com"
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": "OWNER",
+          "mobile": "OWNER",
+          "email": "OWNER"
+        }
+      ]
+    },
+    {
+      "building": "Merlin",
+      "flat_number": 9,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        "LK17NBO",
+        "JOY 737",
+        "LK 17 NBO"
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Jimmy Shamash",
+          "mobile": "07956090894",
+          "email": "Jimsham1@aol.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Merlin",
+      "flat_number": 10,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        null,
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Merlin Piers",
+          "mobile": "07474 763937",
+          "email": "moraghgee@gmail.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Merlin",
+      "flat_number": 11,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        null,
+        null,
+        "LO67 OR7"
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Valerie Cass",
+          "mobile": "07854752858",
+          "email": "valerie2121@icloud.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Northwood",
+      "flat_number": 1,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        "70 DJB",
+        "LL67UGO",
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "David Birn",
+          "mobile": "07768846571",
+          "email": "d.birn@btinternet.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": "Brenda Lewis",
+          "mobile": "07836 277119",
+          "email": "brendalewis356@bt.com"
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Northwood",
+      "flat_number": 1,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        "KD15BAV",
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Sharon Caspi",
+          "mobile": "07743483087",
+          "email": "sharoncaspi1@gmail.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": "Sharon Caspi",
+          "mobile": "203 7500155",
+          "email": "office@casa-bella.co.uk"
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Northwood",
+      "flat_number": 2,
+      "status": null,
+      "status_2": "Owner",
+      "car_permits": [
+        "EK20 ZZV",
+        "LT73 SZX",
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Joy Tuffeild",
+          "mobile": "07824 140343",
+          "email": "joytuffield@gmail.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": "Minoo Tuffield",
+          "mobile": "7914333445",
+          "email": null
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Northwood",
+      "flat_number": 3,
+      "status": "Empty",
+      "status_2": "Owner",
+      "car_permits": [
+        null,
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Horacio  Furman",
+          "mobile": "07785326110",
+          "email": "horaciof46@gmail.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": "Maria Cleaner",
+          "mobile": "7539055495",
+          "email": null
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": "HouseKeeper Irene",
+          "mobile": "2077940889",
+          "email": "irenebaler8@icloud.com"
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Northwood",
+      "flat_number": 4,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        "LG65NMO",
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Karthik Krishna",
+          "mobile": "07511448173",
+          "email": "krishnamurthy.karthik@gmail.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": "A Krishna",
+          "mobile": "07801 230995",
+          "email": "anasuya.jayaraman@gmail.com"
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Northwood",
+      "flat_number": 5,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        "LT73UXA",
+        "LK65OLN",
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Allan Chasan",
+          "mobile": "07802796886",
+          "email": "allan@starsmith.co.uk"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": "Reverley Chasan",
+          "mobile": "2077943338",
+          "email": "Revchasan@gmail.com"
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Northwood",
+      "flat_number": 6,
+      "status": "Occupied",
+      "status_2": "Rent",
+      "car_permits": [
+        null,
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "M Slowe",
+          "mobile": "07801 912700",
+          "email": null
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": "Sumiko",
+          "mobile": "07538 183693",
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": "Whitestone Estates",
+          "mobile": "0207 435 4353",
+          "email": "gina@whitestones.co.uk"
+        }
+      ]
+    },
+    {
+      "building": "Northwood",
+      "flat_number": 7,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        null,
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Erica Patricia McPeak",
+          "mobile": "07387362975",
+          "email": null
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Northwood",
+      "flat_number": 8,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        "EJ15GZV",
+        "KCR 184l",
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Jacqueline Cohen",
+          "mobile": "07768687064",
+          "email": "jackiercohen@hotmail.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": "Victor Cohen",
+          "mobile": "07768570544",
+          "email": "Vicncohen@gmail.com"
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Northwood",
+      "flat_number": 9,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        "LT60EXC",
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Ikuko Pringle",
+          "mobile": "07771896127",
+          "email": "ikuko.pringle@gmail.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": "Robert Pringle",
+          "mobile": "07933462148",
+          "email": null
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Northwood",
+      "flat_number": 10,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        null,
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "S Mirfendereski",
+          "mobile": "07713 561412",
+          "email": "drsia@hotmail.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Northwood",
+      "flat_number": 11,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        "KE24 UUX",
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Ali Nader Eshan Morshed",
+          "mobile": "44 7710537329",
+          "email": "nader.morshed@gmail.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": "Safya Morshed",
+          "mobile": "07710 537329",
+          "email": "safyamorshed@gmail.com"
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Northwood",
+      "flat_number": 12,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        null,
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Patricia Freedman",
+          "mobile": "0207 7943001",
+          "email": "patriciabenstead@aol.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Oak Lodge",
+      "flat_number": 1,
+      "status": "Empty",
+      "status_2": "Owner",
+      "car_permits": [
+        "SN10\u00a0CGS",
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Morpheus Assets LTD",
+          "mobile": "0207 7945053",
+          "email": "mariam@satrap.me"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": "Jules Anderson",
+          "mobile": "07733361329",
+          "email": "pa.satrap@gmail.com"
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Oak Lodge",
+      "flat_number": 2,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        "W100OJT",
+        "LH64PAP",
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Jennifer Hirsch",
+          "mobile": "07801626061",
+          "email": "1jennyhirsch@gmail.co"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": "Leonard Hirsch",
+          "mobile": "07831847628",
+          "email": "leonard1hirsch@aol.com"
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Oak Lodge",
+      "flat_number": 3,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        "00066",
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Andre Bogaert",
+          "mobile": "07768778866",
+          "email": "andre@bogaert.uk"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": "Madalene Bogaert",
+          "mobile": "07801 626061",
+          "email": "madalene@bogaert.uk"
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Oak Lodge",
+      "flat_number": 4,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        "LF19AXV",
+        "LD21AKM",
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Evan Feldman",
+          "mobile": "07305763723",
+          "email": "Larafeldman@yahoo.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": null,
+          "mobile": null,
+          "email": "Connie@derivative.co.za"
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": "OWNER",
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Oak Lodge",
+      "flat_number": 5,
+      "status": "Empty",
+      "status_2": "Owner",
+      "car_permits": [
+        null,
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Isabella Herdeis",
+          "mobile": "07932 186050",
+          "email": "isabella.herdeis@gmail.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": "Claus Herdeis",
+          "mobile": null,
+          "email": "claus.herdeis@uni-wuerzburg.de"
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Oak Lodge",
+      "flat_number": 6,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        "LK23RUW",
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Assaph Caspi",
+          "mobile": "07779083531",
+          "email": "office@casa-bella.co.uk"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": "Yoav Caspi",
+          "mobile": "2037500155",
+          "email": "yoavcaspi1@gmail.com"
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Oak Lodge",
+      "flat_number": 7,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        null,
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "A Patou / Daugther Jill",
+          "mobile": "07779443663",
+          "email": "avrilpa@btinternet.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Oak Lodge",
+      "flat_number": 8,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        "F15 JMF",
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Galia Fishman",
+          "mobile": "07814276820",
+          "email": "Galia.fishman@hotmail.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": "Jonathan Fishman",
+          "mobile": "07989331573",
+          "email": "j_fishman@hotmail.com"
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Oak Lodge",
+      "flat_number": 9,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        null,
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Anne Schneider",
+          "mobile": "07769706485",
+          "email": "anneschneiderhome@gmail.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": null,
+          "mobile": "07769 706485",
+          "email": null
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Oak Lodge",
+      "flat_number": 10,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        "A4FEO",
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "F Scheinmann",
+          "mobile": "07711 090739",
+          "email": "feodorscheinmann@mac.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": "K E Scheinmann",
+          "mobile": "07753637725",
+          "email": "kschelmann@gmail.com"
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Oak Lodge",
+      "flat_number": 11,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        null,
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Juan Gottard Piazza",
+          "mobile": "07960 034050",
+          "email": "jgpiazza@terra.com.br"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": "Matias Iversson Piazza",
+          "mobile": "07960034050",
+          "email": "Matias.i.piazza@gmail.com"
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Oak Lodge",
+      "flat_number": 12,
+      "status": "Occupied",
+      "status_2": "Owner",
+      "car_permits": [
+        "RV71 TVM",
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Diane Franks",
+          "mobile": "07768105015",
+          "email": "dianefranks@btinternet.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": "Russell Franks",
+          "mobile": "1 617 513 1403",
+          "email": "russell@thebostonfranks.com"
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": null,
+          "mobile": null,
+          "email": null
+        }
+      ]
+    },
+    {
+      "building": "Oak Lodge",
+      "flat_number": 14,
+      "status": "Occupied",
+      "status_2": "Rent",
+      "car_permits": [
+        null,
+        null,
+        null
+      ],
+      "people": [
+        {
+          "role": "owner_1",
+          "cargo": 0,
+          "name": "Shiri Zarour",
+          "mobile": "07342095073",
+          "email": "shiri.fh@gmail.com"
+        },
+        {
+          "role": "owner_2",
+          "cargo": 1,
+          "name": "Michael Zarour",
+          "mobile": "7881003921",
+          "email": "michaelzarour194@gmail.com"
+        },
+        {
+          "role": "tenant",
+          "cargo": 2,
+          "name": null,
+          "mobile": null,
+          "email": null
+        },
+        {
+          "role": "agent",
+          "cargo": 3,
+          "name": "Ellis Green",
+          "mobile": "0203 929 9294",
+          "email": "ellis@groupnexus.co.uk"
+        }
+      ]
+    }
+  ]
+}

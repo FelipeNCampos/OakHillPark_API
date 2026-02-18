@@ -1,11 +1,15 @@
 """
-Script to populate the database with moradores (residents) data.
-This script reads from contact list and creates moradores associated with their flats.
+Populate moradores and flat car permits from versioned JSON seed data.
 """
-import csv
+
+from __future__ import annotations
+
+import json
 import logging
+import os
 import uuid
 from pathlib import Path
+from typing import Any
 
 from sqlmodel import Session, select
 
@@ -15,8 +19,8 @@ from app.models import Building, Flat, Morador
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
-CSV_PATH = Path(__file__).resolve().parents[2] / "contact list.csv"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_SEED_PATH = PROJECT_ROOT / "backend" / "data" / "moradores_seed.json"
 
 
 def _normalize_value(value: str | None) -> str | None:
@@ -30,140 +34,157 @@ def _normalize_value(value: str | None) -> str | None:
     return cleaned
 
 
-def _normalize_building(name: str | None) -> str | None:
-    cleaned = _normalize_value(name)
+def _truncate(value: str | None, max_len: int) -> str | None:
+    if value is None:
+        return None
+    return value[:max_len]
+
+
+def _normalize_mobile(value: str | None) -> str:
+    cleaned = _normalize_value(value)
+    if not cleaned:
+        return ""
+    for separator in ("/", ";"):
+        if separator in cleaned:
+            cleaned = cleaned.split(separator)[0].strip()
+    return _truncate(cleaned, 20) or ""
+
+
+def _normalize_email(value: str | None) -> str | None:
+    cleaned = _normalize_value(value)
     if not cleaned:
         return None
-    if cleaned == "Oak":
-        return "Oak Lodge"
-    return cleaned
-
-
-def _parse_flat_number(raw: str | None) -> int | None:
-    cleaned = _normalize_value(raw)
-    if not cleaned:
+    for separator in ("/", ";"):
+        if separator in cleaned:
+            cleaned = cleaned.split(separator)[0].strip()
+    if "@" not in cleaned:
         return None
-    digits = "".join(char for char in cleaned if char.isdigit())
-    if not digits:
-        return None
-    return int(digits)
+    return _truncate(cleaned, 255)
 
 
-def _header_key(value: str) -> str:
-    return value.strip().lower().replace(" ", "_").replace("'", "")
+def _resolve_seed_path() -> Path:
+    env_path = os.getenv("MORADORES_SEED_PATH")
+    if env_path:
+        candidate = Path(env_path)
+        if candidate.exists():
+            return candidate
+        raise FileNotFoundError(f"MORADORES_SEED_PATH not found: {candidate}")
+
+    if DEFAULT_SEED_PATH.exists():
+        return DEFAULT_SEED_PATH
+
+    raise FileNotFoundError(f"Moradores seed JSON not found at {DEFAULT_SEED_PATH}")
 
 
-def load_moradores_data(csv_path: Path) -> list[tuple[str, int, int, str, str, str | None, str | None]]:
-    """Load moradores from the contact list CSV with cargo by role."""
-    if not csv_path.exists():
-        logger.error(f"Contact list not found at {csv_path}")
-        return []
-
-    moradores: list[tuple[str, int, int, str, str, str | None, str | None]] = []
-
-    with csv_path.open("r", encoding="utf-8", newline="") as handle:
-        reader = csv.reader(handle)
-        header: list[str] | None = None
-
-        for row in reader:
-            if not row or all(not cell.strip() for cell in row):
-                continue
-            if header is None:
-                if any(cell.strip().upper() == "BUILDING" for cell in row):
-                    header = row
-                continue
-
-            header_map = {_header_key(value): idx for idx, value in enumerate(header)}
-
-            def get_value(key: str) -> str | None:
-                idx = header_map.get(key)
-                if idx is None or idx >= len(row):
-                    return None
-                return row[idx]
-
-            building = _normalize_building(get_value("building"))
-            flat_number = _parse_flat_number(get_value("flat"))
-
-            if not building or flat_number is None:
-                logger.warning(f"Skipping row with invalid building/flat: {row}")
-                continue
-
-            def add_if_present(cargo: int, name_key: str, phone_key: str, email_key: str, landline: str | None = None) -> None:
-                name = _normalize_value(get_value(name_key))
-                if not name or name.upper() == "OWNER":
-                    return
-                mobile = _normalize_value(get_value(phone_key)) or ""
-                email = _normalize_value(get_value(email_key))
-                moradores.append((building, flat_number, cargo, name, mobile, landline, email))
-
-            landline = _normalize_value(get_value("landline"))
-            add_if_present(0, "owner_1", "mobile_1", "email_1", landline)
-            add_if_present(1, "owner_2", "phone_2", "email_2")
-            add_if_present(2, "tenant", "phone", "email")
-            add_if_present(3, "agents_name", "agents_phone", "agents_email")
-
-    return moradores
+def load_seed_data(seed_path: Path) -> dict[str, Any]:
+    raw = seed_path.read_text(encoding="utf-8")
+    data = json.loads(raw)
+    flats = data.get("flats")
+    if not isinstance(flats, list):
+        raise ValueError("Invalid moradores seed: 'flats' must be a list")
+    return data
 
 
 def populate_moradores() -> None:
-    """Populate moradores from contact list data."""
+    seed_path = _resolve_seed_path()
+    seed_data = load_seed_data(seed_path)
+    logger.info(f"Starting moradores population from {seed_path}")
+
+    created = 0
+    updated = 0
+
     with Session(engine) as session:
-        logger.info("Starting moradores population...")
+        for flat_entry in seed_data["flats"]:
+            building_name = _normalize_value(flat_entry.get("building"))
+            flat_number = flat_entry.get("flat_number")
+            if not building_name or not isinstance(flat_number, int):
+                logger.warning(f"Skipping invalid seed flat entry: {flat_entry}")
+                continue
 
-        count = 0
-        moradores_data = load_moradores_data(CSV_PATH)
-
-        for building_name, flat_number, cargo, nome, mobile, landline, email in moradores_data:
-            # Find building
             building = session.exec(
                 select(Building).where(Building.nome == building_name)
             ).first()
-
             if not building:
-                logger.warning(f"Building '{building_name}' not found, skipping morador {nome}")
+                logger.warning(f"Building '{building_name}' not found, skipping")
                 continue
 
-            # Find flat
             flat = session.exec(
                 select(Flat).where(
-                    (Flat.building_id == building.id) & 
-                    (Flat.numero == flat_number)
+                    (Flat.building_id == building.id) & (Flat.numero == flat_number)
                 )
             ).first()
-
             if not flat:
-                logger.warning(f"Flat {flat_number} in {building_name} not found, skipping morador {nome}")
-                continue
-
-            # Check if morador already exists
-            existing = session.exec(
-                select(Morador).where(
-                    (Morador.flat_id == flat.id)
-                    & (Morador.nome == nome)
-                    & (Morador.cargo == cargo)
+                logger.warning(
+                    f"Flat {flat_number} in {building_name} not found, skipping"
                 )
-            ).first()
-
-            if existing:
-                logger.info(f"Morador {nome} already exists in {building_name} {flat_number}, skipping")
                 continue
 
-            # Create morador
-            morador = Morador(
-                id=uuid.uuid4(),
-                flat_id=flat.id,
-                cargo=cargo,
-                nome=nome,
-                mobile=mobile or "",
-                landiline=landline or None,
-                email=email or None,
-            )
-            session.add(morador)
-            count += 1
-            logger.info(f"Added morador: {nome} to {building_name} Flat {flat_number}")
+            car_permits = flat_entry.get("car_permits", [])
+            if isinstance(car_permits, list):
+                flat.car1 = _truncate(
+                    _normalize_value(car_permits[0] if len(car_permits) > 0 else None),
+                    50,
+                )
+                flat.car2 = _truncate(
+                    _normalize_value(car_permits[1] if len(car_permits) > 1 else None),
+                    50,
+                )
+                flat.car3 = _truncate(
+                    _normalize_value(car_permits[2] if len(car_permits) > 2 else None),
+                    50,
+                )
+                session.add(flat)
+
+            people = flat_entry.get("people", [])
+            if not isinstance(people, list):
+                continue
+
+            for person in people:
+                if not isinstance(person, dict):
+                    continue
+                name = _normalize_value(person.get("name"))
+                cargo = person.get("cargo")
+                if name is None or not isinstance(cargo, int):
+                    continue
+
+                mobile = _normalize_mobile(person.get("mobile"))
+                email = _normalize_email(person.get("email"))
+
+                existing = session.exec(
+                    select(Morador).where(
+                        (Morador.flat_id == flat.id)
+                        & (Morador.nome == name)
+                        & (Morador.cargo == cargo)
+                    )
+                ).first()
+
+                if existing:
+                    changed = False
+                    if existing.mobile != mobile:
+                        existing.mobile = mobile
+                        changed = True
+                    if existing.email != email:
+                        existing.email = email
+                        changed = True
+                    if changed:
+                        session.add(existing)
+                        updated += 1
+                    continue
+
+                morador = Morador(
+                    id=uuid.uuid4(),
+                    flat_id=flat.id,
+                    cargo=cargo,
+                    nome=name,
+                    mobile=mobile,
+                    email=email,
+                )
+                session.add(morador)
+                created += 1
 
         session.commit()
-        logger.info(f"Successfully populated {count} moradores!")
+
+    logger.info(f"Moradores population done. Created={created}, Updated={updated}")
 
 
 if __name__ == "__main__":

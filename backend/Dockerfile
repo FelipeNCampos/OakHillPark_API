@@ -34,6 +34,7 @@ COPY ./backend/pyproject.toml ./backend/alembic.ini /app/backend/
 COPY ./backend/app /app/backend/app
 
 COPY ./backend/tests /app/backend/tests
+COPY ./backend/data /app/backend/data
 
 # Sync the project
 # Ref: https://docs.astral.sh/uv/guides/integration/docker/#intermediate-layers

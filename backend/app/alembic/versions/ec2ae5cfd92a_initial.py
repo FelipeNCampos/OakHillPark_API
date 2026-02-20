@@ -6,8 +6,8 @@ Create Date: 2026-02-12 19:59:46.891483
 
 """
 from alembic import op
-import sqlalchemy as sa
-import sqlmodel.sql.sqltypes
+
+from app.models import SQLModel
 
 
 # revision identifiers, used by Alembic.
@@ -18,8 +18,8 @@ depends_on = None
 
 
 def upgrade():
-    pass
+    SQLModel.metadata.create_all(bind=op.get_bind())
 
 
 def downgrade():
-    pass
+    SQLModel.metadata.drop_all(bind=op.get_bind())

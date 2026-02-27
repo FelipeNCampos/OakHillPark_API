@@ -1,7 +1,7 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic.networks import EmailStr
 
-from app.api.deps import get_current_active_superuser
+from app.api.deps import CurrentUser, get_current_active_superuser
 from app.models import Message, SMSNotificationCreate
 from app.utils import generate_test_email, send_email, send_sms_notification
 
@@ -37,6 +37,20 @@ def test_sms(payload: SMSNotificationCreate) -> Message:
     """
     sid = send_sms_notification(phone_to=payload.phone_to, body=payload.body)
     return Message(message=f"Test SMS sent (sid={sid})")
+
+
+@router.post(
+    "/send-sms/",
+    status_code=201,
+)
+def send_sms(payload: SMSNotificationCreate, current_user: CurrentUser) -> Message:
+    """
+    Send SMS notifications using Twilio (manager or superuser).
+    """
+    if not current_user.is_superuser and (current_user.cargo or 0) < 1:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    sid = send_sms_notification(phone_to=payload.phone_to, body=payload.body)
+    return Message(message=f"SMS sent (sid={sid})")
 
 
 @router.get("/health-check/")

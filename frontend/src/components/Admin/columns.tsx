@@ -10,10 +10,10 @@ export type UserTableData = UserPublic & {
 }
 
 const cargoLabels: Record<number, string> = {
-  0: "Morador",
+  0: "Resident",
   1: "Funcionario",
-  2: "Gerente",
-  3: "Administrador",
+  2: "Manager",
+  3: "Administrator",
 }
 
 export const columns: ColumnDef<UserTableData>[] = [
@@ -47,10 +47,10 @@ export const columns: ColumnDef<UserTableData>[] = [
   },
   {
     accessorKey: "cargo",
-    header: "Cargo",
+    header: "Role",
     cell: ({ row }) => (
       <Badge variant="outline">
-        {cargoLabels[row.original.cargo ?? 0] ?? "Morador"}
+        {cargoLabels[row.original.cargo ?? 0] ?? "Resident"}
       </Badge>
     ),
   },

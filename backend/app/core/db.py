@@ -37,3 +37,18 @@ def init_db(session: Session) -> None:
             condominio_id=condominio_id,
         )
         user = crud.create_user(session=session, user_create=user_in)
+
+    caretaker_user = session.exec(
+        select(User).where(User.email == settings.CARETAKER_USER_EMAIL)
+    ).first()
+    if not caretaker_user:
+        condominio = session.exec(select(Condominio)).first()
+        condominio_id = condominio.id if condominio else None
+        caretaker_in = UserCreate(
+            email=settings.CARETAKER_USER_EMAIL,
+            password=settings.CARETAKER_USER_PASSWORD,
+            is_superuser=False,
+            cargo=1,
+            condominio_id=condominio_id,
+        )
+        crud.create_user(session=session, user_create=caretaker_in)

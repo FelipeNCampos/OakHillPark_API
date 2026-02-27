@@ -93,6 +93,8 @@ class Settings(BaseSettings):
     EMAIL_TEST_USER: EmailStr = "test@example.com"
     FIRST_SUPERUSER: EmailStr
     FIRST_SUPERUSER_PASSWORD: str
+    CARETAKER_USER_EMAIL: EmailStr = "caretaker@example.com"
+    CARETAKER_USER_PASSWORD: str = "changethis"
     TWILIO_ACCOUNT_SID: str | None = None
     TWILIO_AUTH_TOKEN: str | None = None
     TWILIO_FROM_NUMBER: str | None = None
@@ -121,6 +123,9 @@ class Settings(BaseSettings):
         self._check_default_secret("POSTGRES_PASSWORD", self.POSTGRES_PASSWORD)
         self._check_default_secret(
             "FIRST_SUPERUSER_PASSWORD", self.FIRST_SUPERUSER_PASSWORD
+        )
+        self._check_default_secret(
+            "CARETAKER_USER_PASSWORD", self.CARETAKER_USER_PASSWORD
         )
 
         return self

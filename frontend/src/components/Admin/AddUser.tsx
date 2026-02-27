@@ -199,21 +199,21 @@ const AddUser = () => {
                 name="cargo"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Cargo</FormLabel>
+                    <FormLabel>Role</FormLabel>
                     <Select
                       onValueChange={(value) => field.onChange(Number(value))}
                       defaultValue={String(field.value)}
                     >
                       <FormControl>
                         <SelectTrigger>
-                          <SelectValue placeholder="Selecione o cargo" />
+                          <SelectValue placeholder="Select a role" />
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="0">Morador</SelectItem>
+                        <SelectItem value="0">Resident</SelectItem>
                         <SelectItem value="1">Funcionario</SelectItem>
-                        <SelectItem value="2">Gerente</SelectItem>
-                        <SelectItem value="3">Administrador</SelectItem>
+                        <SelectItem value="2">Manager</SelectItem>
+                        <SelectItem value="3">Administrator</SelectItem>
                       </SelectContent>
                     </Select>
                     <FormMessage />

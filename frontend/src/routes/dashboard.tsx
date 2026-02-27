@@ -8,6 +8,7 @@ import { createFileRoute, redirect } from "@tanstack/react-router"
 import QRCode from "qrcode"
 import { useEffect, useMemo, useState } from "react"
 import { OpenAPI } from "@/client"
+import { TasksBoard } from "@/components/Tasks/TasksBoard"
 import useAuth, { isLoggedIn } from "@/hooks/useAuth"
 import useCustomToast from "@/hooks/useCustomToast"
 
@@ -64,6 +65,14 @@ interface AcessRecord {
   building_id?: EntityId
   building_nome?: string
   funcionario_id?: EntityId
+}
+
+interface BinMissCollectionRecord {
+  id: EntityId
+  data: string
+  miss_collection: boolean
+  building_id: EntityId
+  building_nome: string
 }
 
 interface Morador {
@@ -127,7 +136,7 @@ const isRequestOptions = (
   return "method" in params || "body" in params
 }
 
-// Wrapper para chamar a API diretamente enquanto o cliente não é regenerado
+// Wrapper to call the API directly while the client is not regenerated
 const apiCall = async (
   endpoint: string,
   params?: ApiQueryParams | ApiRequestOptions,
@@ -190,16 +199,16 @@ function ClientDashboard() {
     },
   )
 
-  // Verifica se o usuário é gerente ou superior (cargo >= 1)
-  if (!user || (user.cargo ?? 0) < 1) {
+  // Check if the user is manager/admin (role >= 2) for this dashboard
+  if (!user || ((user.cargo ?? 0) < 2 && !user.is_superuser)) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#f5f1ee]">
         <div className="rounded-lg bg-white p-8 text-center shadow-lg">
           <h1 className="mb-4 text-2xl font-bold text-[#55311c]">
-            Acesso Negado
+            Access Denied
           </h1>
           <p className="mb-6 text-[rgba(0,0,0,0.7)]">
-            Esta área é exclusiva para gerentes.
+            This area is restricted to managers and administrators.
           </p>
           <button
             onClick={logout}
@@ -236,16 +245,18 @@ function ClientDashboard() {
         { label: "Cleaner", id: "qr-cleaner" },
         { label: "Contractor", id: "qr-contractor" },
         { label: "Caretaker", id: "qr-caretaker" },
+        { label: "Bins", id: "qr-bins" },
       ],
     },
   ]
 
   const standaloneItems = [
+    { label: "Tasks", id: "tasks" },
     { label: "Residents", id: "residents" },
     { label: "Cleaner", id: "cleaner" },
     { label: "Caretaker", id: "caretaker" },
     { label: "Bins", id: "bins" },
-    { label: "Twillio", id: "twillio" },
+    { label: "Twilio", id: "twillio" },
   ]
 
   const renderContent = () => {
@@ -262,16 +273,20 @@ function ClientDashboard() {
         return <TabContent title="QR Code - Contractor" />
       case "qr-caretaker":
         return <CaretakerQrCodesContent />
+      case "qr-bins":
+        return <BinsQrCodesContent />
       case "residents":
         return <ResidentsContent />
+      case "tasks":
+        return <TasksBoard mode="manager" />
       case "cleaner":
         return <CleanerContent />
       case "caretaker":
         return <CaretakerContent />
       case "bins":
-        return <TabContent title="Bins" />
+        return <BinsContent />
       case "twillio":
-        return <TabContent title="Twillio" />
+        return <TwilioContent />
       default:
         return <OverviewContent user={user} />
     }
@@ -429,7 +444,7 @@ function ClientDashboard() {
             <div className="flex items-center gap-4">
               <div className="text-right">
                 <p className="text-sm font-semibold text-[#55311c]">
-                  {user?.full_name || "Gerente"}
+                  {user?.full_name || "Manager"}
                 </p>
                 <p className="text-xs text-[rgba(0,0,0,0.6)]">{user?.email}</p>
               </div>
@@ -438,7 +453,7 @@ function ClientDashboard() {
                 className="rounded bg-[#8c7569] px-4 py-2 font-['Nunito',sans-serif] text-sm text-white transition-all duration-300 hover:bg-[#55311c]"
                 type="button"
               >
-                Sair
+                Sign out
               </button>
             </div>
           </div>
@@ -469,10 +484,10 @@ function OverviewContent({ user }: { user: UserProfile }) {
       {/* Welcome Section */}
       <div className="mb-8 rounded-lg bg-white p-8 shadow-md">
         <h2 className="mb-2 font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
-          Bem-vindo, {user?.full_name || "Gerente"}!
+          Welcome, {user?.full_name || "Manager"}!
         </h2>
         <p className="text-[rgba(0,0,0,0.7)]">
-          Gerencie todas as operações do condomínio em um só lugar.
+          Manage all condo operations in one place.
         </p>
       </div>
 
@@ -507,7 +522,7 @@ function OverviewContent({ user }: { user: UserProfile }) {
         <div className="rounded-lg bg-white p-6 shadow-md transition-all duration-300 hover:shadow-lg">
           <div className="mb-2 flex items-center justify-between">
             <h3 className="font-['Nunito',sans-serif] text-sm font-semibold uppercase tracking-wide text-[#8c7569]">
-              Moradores
+              Residents
             </h3>
             <svg
               className="h-8 w-8 text-[#8c7569]"
@@ -515,7 +530,7 @@ function OverviewContent({ user }: { user: UserProfile }) {
               stroke="currentColor"
               viewBox="0 0 24 24"
             >
-              <title>Moradores</title>
+              <title>Residents</title>
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -573,7 +588,7 @@ function OverviewContent({ user }: { user: UserProfile }) {
             </svg>
           </div>
           <p className="text-3xl font-bold text-[#55311c]">--</p>
-          <p className="mt-1 text-sm text-[rgba(0,0,0,0.6)]">Este mês</p>
+          <p className="mt-1 text-sm text-[rgba(0,0,0,0.6)]">This month</p>
         </div>
       </div>
     </div>
@@ -610,7 +625,7 @@ function BuildingsReadingsContent() {
     return (
       <div className="mx-auto max-w-7xl">
         <div className="rounded-lg bg-white p-8 shadow-md text-center">
-          <p className="text-[#55311c]">Carregando buildings...</p>
+          <p className="text-[#55311c]">Loading buildings...</p>
         </div>
       </div>
     )
@@ -620,7 +635,7 @@ function BuildingsReadingsContent() {
     return (
       <div className="mx-auto max-w-7xl">
         <div className="rounded-lg bg-white p-8 shadow-md text-center">
-          <p className="text-[#55311c]">Nenhum building encontrado</p>
+          <p className="text-[#55311c]">No building found</p>
         </div>
       </div>
     )
@@ -657,7 +672,7 @@ function BuildingsReadingsContent() {
               stroke="currentColor"
               viewBox="0 0 24 24"
             >
-              <title>Adicionar leitura</title>
+              <title>Add reading</title>
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -672,7 +687,7 @@ function BuildingsReadingsContent() {
         {/* Building Navigation */}
         <div className="mb-6">
           <p className="block font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c] mb-3">
-            Selecione um Building:
+            Select a building:
           </p>
           <div className="flex gap-3 w-full">
             {[...buildings]
@@ -798,13 +813,13 @@ function BuildingReadingsTable({
   }>({})
 
   if (isLoading) {
-    return <p className="text-center text-[#55311c]">Carregando readings...</p>
+    return <p className="text-center text-[#55311c]">Loading readings...</p>
   }
 
   if (error || !readings.length) {
     return (
       <p className="text-center text-[#55311c]">
-        Nenhuma leitura encontrada para este building
+        No readings found for this building
       </p>
     )
   }
@@ -1041,17 +1056,17 @@ function BuildingReadingsTable({
       }
 
       if (updates.length === 0) {
-        showErrorToast("Nenhuma alteração detectada")
+        showErrorToast("No changes detected")
         return
       }
 
       await Promise.all(updates)
-      showSuccessToast("Leituras atualizadas com sucesso")
+      showSuccessToast("Readings updated successfully")
       queryClient.invalidateQueries({ queryKey: ["readings", building.id] })
       setEditingRow(null)
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "Erro ao atualizar leituras"
+        error instanceof Error ? error.message : "Error updating readings"
       showErrorToast(message)
     }
   }
@@ -1175,7 +1190,7 @@ function BuildingReadingsTable({
               </>
             )}
             <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700">
-              Ações
+              Actions
             </th>
           </tr>
         </thead>
@@ -1257,7 +1272,7 @@ function BuildingReadingsTable({
                   onClick={() => handleOpenEdit(row)}
                   className="rounded-lg bg-[#8c7569] px-3 py-1 text-xs font-semibold text-white transition-all duration-200 hover:bg-[#55311c]"
                 >
-                  Editar
+                  Edit
                 </button>
               </td>
             </tr>
@@ -1337,7 +1352,7 @@ function BuildingReadingsTable({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
             <h3 className="text-lg font-bold text-[#55311c]">
-              Editar leituras
+              Edit readings
             </h3>
             <p className="mt-1 text-sm text-[rgba(0,0,0,0.7)]">
               Data: {editingRow.date.split("T")[0]}
@@ -1440,14 +1455,14 @@ function BuildingReadingsTable({
                 onClick={() => setEditingRow(null)}
                 className="rounded-lg border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
               >
-                Cancelar
+                Cancel
               </button>
               <button
                 type="button"
                 onClick={handleSaveEdit}
                 className="rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c]"
               >
-                Salvar
+                Save
               </button>
             </div>
           </div>
@@ -1545,7 +1560,7 @@ function AddReadingsForm({
       onBack()
     } catch (error) {
       console.error("Error submitting readings:", error)
-      alert("Erro ao cadastrar readings")
+      alert("Error creating readings")
     } finally {
       setIsSubmitting(false)
     }
@@ -1672,14 +1687,14 @@ function AddReadingsForm({
               onClick={onBack}
               className="rounded-lg bg-gray-500 px-6 py-3 font-['Nunito',sans-serif] text-white transition-all duration-300 hover:bg-gray-600"
             >
-              Cancelar
+              Cancel
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
               className="rounded-lg bg-[#8c7569] px-6 py-3 font-['Nunito',sans-serif] text-white transition-all duration-300 hover:bg-[#55311c] disabled:opacity-50"
             >
-              {isSubmitting ? "Salvando..." : "Salvar Readings"}
+              {isSubmitting ? "Saving..." : "Save Readings"}
             </button>
           </div>
         </form>
@@ -1783,7 +1798,7 @@ function AddFlatReadingsForm({
       onBack()
     } catch (error) {
       console.error("Error submitting readings:", error)
-      showErrorToast("Erro ao cadastrar readings")
+      showErrorToast("Error creating readings")
     } finally {
       setIsSubmitting(false)
     }
@@ -1814,7 +1829,7 @@ function AddFlatReadingsForm({
             </button>
           </div>
           <p className="text-[#55311c] font-['Nunito',sans-serif]">
-            Nenhum flat com readings configurados encontrado
+            No flat with configured readings found
           </p>
         </div>
       </div>
@@ -1957,14 +1972,14 @@ function AddFlatReadingsForm({
               onClick={onBack}
               className="rounded-lg bg-gray-500 px-6 py-3 font-['Nunito',sans-serif] text-white transition-all duration-300 hover:bg-gray-600"
             >
-              Cancelar
+              Cancel
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
               className="rounded-lg bg-[#8c7569] px-6 py-3 font-['Nunito',sans-serif] text-white transition-all duration-300 hover:bg-[#55311c] disabled:opacity-50"
             >
-              {isSubmitting ? "Salvando..." : "Salvar Readings"}
+              {isSubmitting ? "Saving..." : "Save Readings"}
             </button>
           </div>
         </form>
@@ -2011,7 +2026,7 @@ function FlatsReadingsContent() {
     return (
       <div className="mx-auto max-w-7xl">
         <div className="rounded-lg bg-white p-8 shadow-md text-center">
-          <p className="text-[#55311c]">Carregando buildings...</p>
+          <p className="text-[#55311c]">Loading buildings...</p>
         </div>
       </div>
     )
@@ -2021,7 +2036,7 @@ function FlatsReadingsContent() {
     return (
       <div className="mx-auto max-w-7xl">
         <div className="rounded-lg bg-white p-8 shadow-md text-center">
-          <p className="text-[#55311c]">Nenhum building encontrado</p>
+          <p className="text-[#55311c]">No building found</p>
         </div>
       </div>
     )
@@ -2056,7 +2071,7 @@ function FlatsReadingsContent() {
               stroke="currentColor"
               viewBox="0 0 24 24"
             >
-              <title>Adicionar leitura</title>
+              <title>Add reading</title>
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -2071,7 +2086,7 @@ function FlatsReadingsContent() {
         {/* Building Selection */}
         <div className="mb-6">
           <p className="block font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c] mb-3">
-            Selecione um Building:
+            Select a building:
           </p>
           <div className="flex gap-3 w-full">
             {[...buildings]
@@ -2097,7 +2112,7 @@ function FlatsReadingsContent() {
         {selectedBuildingId && (
           <div className="mb-6">
             <p className="block font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c] mb-3">
-              Selecione um Flat:
+              Select a flat:
             </p>
             {flats.length > 0 ? (
               <div className="flex gap-3 w-full flex-wrap">
@@ -2121,7 +2136,7 @@ function FlatsReadingsContent() {
             ) : (
               <div className="rounded-lg bg-[#f5f1ee] p-4">
                 <p className="text-[#55311c] font-['Nunito',sans-serif]">
-                  Nenhum flat com readings configurados neste building
+                  No flat with configured readings in this building
                 </p>
               </div>
             )}
@@ -2205,13 +2220,13 @@ function FlatReadingsTable({
   }>({})
 
   if (isLoading) {
-    return <p className="text-center text-[#55311c]">Carregando readings...</p>
+    return <p className="text-center text-[#55311c]">Loading readings...</p>
   }
 
   if (error || !readings.length) {
     return (
       <p className="text-center text-[#55311c]">
-        Nenhuma leitura encontrada para este flat
+        No readings found for this flat
       </p>
     )
   }
@@ -2470,17 +2485,17 @@ function FlatReadingsTable({
       }
 
       if (updates.length === 0) {
-        showErrorToast("Nenhuma alteração detectada")
+        showErrorToast("No changes detected")
         return
       }
 
       await Promise.all(updates)
-      showSuccessToast("Leituras atualizadas com sucesso")
+      showSuccessToast("Readings updated successfully")
       queryClient.invalidateQueries({ queryKey: ["flat_readings", flat.id] })
       setEditingRow(null)
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "Erro ao atualizar leituras"
+        error instanceof Error ? error.message : "Error updating readings"
       showErrorToast(message)
     }
   }
@@ -2603,7 +2618,7 @@ function FlatReadingsTable({
               </>
             )}
             <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700">
-              Acoes
+              Actions
             </th>
           </tr>
         </thead>
@@ -2671,7 +2686,7 @@ function FlatReadingsTable({
                   onClick={() => handleOpenEdit(row)}
                   className="rounded-lg bg-[#8c7569] px-3 py-1 text-xs font-semibold text-white transition-all duration-200 hover:bg-[#55311c]"
                 >
-                  Editar
+                  Edit
                 </button>
               </td>
             </tr>
@@ -2683,7 +2698,7 @@ function FlatReadingsTable({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
             <h3 className="text-lg font-bold text-[#55311c]">
-              Editar leituras
+              Edit readings
             </h3>
             <p className="mt-1 text-sm text-[rgba(0,0,0,0.7)]">
               Data: {editingRow.date.split("T")[0]}
@@ -2787,14 +2802,14 @@ function FlatReadingsTable({
                 onClick={() => setEditingRow(null)}
                 className="rounded-lg border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
               >
-                Cancelar
+                Cancel
               </button>
               <button
                 type="button"
                 onClick={handleSaveEdit}
                 className="rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c]"
               >
-                Salvar
+                Save
               </button>
             </div>
           </div>
@@ -2816,8 +2831,803 @@ function TabContent({ title }: { title: string }) {
           {title}
         </h2>
         <p className="mt-2 text-[rgba(0,0,0,0.7)]">
-          Conteúdo de {title} será exibido aqui.
+          Content for {title} will be displayed here.
         </p>
+      </div>
+    </div>
+  )
+}
+
+function normalizePhoneToE164(
+  rawPhone: string | number | null | undefined,
+): string | null {
+  const defaultCountryCode = "+44"
+  if (rawPhone === null || rawPhone === undefined) return null
+  const cleaned = String(rawPhone).trim().replace(/[^\d+]/g, "")
+  if (!cleaned) return null
+
+  let normalized = cleaned
+  if (!normalized.startsWith("+")) {
+    const digitsOnly = normalized.replace(/\D/g, "")
+    const country = defaultCountryCode.replace(/[^\d+]/g, "")
+    normalized = `${country}${digitsOnly}`
+  }
+
+  const e164Regex = /^\+[1-9]\d{8,19}$/
+  return e164Regex.test(normalized) ? normalized : null
+}
+
+function getResidentRoleLabel(cargo: number): string {
+  switch (cargo) {
+    case 0:
+      return "Owner 1"
+    case 1:
+      return "Owner 2"
+    case 2:
+      return "Tenant"
+    case 3:
+      return "Agent"
+    default:
+      return "Unknown"
+  }
+}
+
+function TwilioContent() {
+  const { showErrorToast, showSuccessToast } = useCustomToast()
+  const [selectedBuildingIds, setSelectedBuildingIds] = useState<string[]>([])
+  const [selectedResidentIds, setSelectedResidentIds] = useState<string[]>([])
+  const [messageBody, setMessageBody] = useState("")
+  const [residentSearch, setResidentSearch] = useState("")
+  const [residentBuildingFilter, setResidentBuildingFilter] = useState("all")
+  const [residentRoleFilter, setResidentRoleFilter] = useState("all")
+  const [isSending, setIsSending] = useState(false)
+  const [sendReport, setSendReport] = useState<{
+    success: number
+    failed: number
+    skipped: number
+    errors: string[]
+  } | null>(null)
+
+  const { data: buildingsData, isLoading: buildingsLoading } = useQuery<
+    ApiListResponse<Building>
+  >({
+    queryKey: ["buildings", "twilio-sms"],
+    queryFn: () => apiCall("/api/v1/buildings/condominio", { skip: 0, limit: 100 }),
+  })
+
+  const { data: ResidentsData, isLoading: ResidentsLoading } = useQuery<Morador[]>({
+    queryKey: ["Residents", "twilio-sms"],
+    queryFn: async () => {
+      const allResidents: Morador[] = []
+      let skip = 0
+      const limit = 100
+
+      while (true) {
+        const page = (await apiCall("/api/v1/moradores/", {
+          skip,
+          limit,
+        })) as ApiListResponse<Morador>
+        const batch = page.data || []
+        allResidents.push(...batch)
+        const total = page.count ?? allResidents.length
+
+        if (allResidents.length >= total || batch.length === 0) break
+        skip += limit
+      }
+
+      return allResidents
+    },
+  })
+
+  const buildings = buildingsData?.data || []
+  const Residents = ResidentsData || []
+
+  const buildingNameById = useMemo(() => {
+    const map = new Map<string, string>()
+    buildings.forEach((building) => {
+      map.set(String(building.id), building.nome)
+    })
+    return map
+  }, [buildings])
+
+  const filteredResidents = useMemo(() => {
+    const search = residentSearch.trim().toLowerCase()
+    return Residents.filter((morador) => {
+      if (
+        residentBuildingFilter !== "all" &&
+        morador.building_nome !== residentBuildingFilter
+      ) {
+        return false
+      }
+      if (
+        residentRoleFilter !== "all" &&
+        String(morador.cargo) !== residentRoleFilter
+      ) {
+        return false
+      }
+      if (!search) return true
+
+      const fields = [
+        morador.nome,
+        morador.building_nome,
+        String(morador.flat_numero),
+        morador.mobile ? String(morador.mobile) : "",
+      ]
+      return fields.some((value) => value.toLowerCase().includes(search))
+    })
+  }, [Residents, residentSearch, residentBuildingFilter, residentRoleFilter])
+
+  const recipients = useMemo(() => {
+    const residentIdSet = new Set(selectedResidentIds)
+    const selectedBuildingNames = new Set(
+      selectedBuildingIds
+        .map((id) => buildingNameById.get(id))
+        .filter((name): name is string => Boolean(name)),
+    )
+
+    const selectedMap = new Map<string, Morador>()
+
+    Residents.forEach((morador) => {
+      const id = String(morador.id)
+      const includedByResident = residentIdSet.has(id)
+      const includedByBuilding = selectedBuildingNames.has(morador.building_nome)
+
+      if (includedByResident || includedByBuilding) {
+        selectedMap.set(id, morador)
+      }
+    })
+
+    return Array.from(selectedMap.values()).sort((a, b) => {
+      if (a.building_nome !== b.building_nome) {
+        return a.building_nome.localeCompare(b.building_nome)
+      }
+      if (a.flat_numero !== b.flat_numero) {
+        return a.flat_numero - b.flat_numero
+      }
+      return a.nome.localeCompare(b.nome)
+    })
+  }, [Residents, selectedResidentIds, selectedBuildingIds, buildingNameById])
+
+  const toggleBuilding = (buildingId: string) => {
+    setSelectedBuildingIds((prev) =>
+      prev.includes(buildingId)
+        ? prev.filter((id) => id !== buildingId)
+        : [...prev, buildingId],
+    )
+  }
+
+  const toggleResident = (residentId: string) => {
+    setSelectedResidentIds((prev) =>
+      prev.includes(residentId)
+        ? prev.filter((id) => id !== residentId)
+        : [...prev, residentId],
+    )
+  }
+
+  const selectAllFilteredResidents = () => {
+    const ids = filteredResidents.map((morador) => String(morador.id))
+    setSelectedResidentIds((prev) => Array.from(new Set([...prev, ...ids])))
+  }
+
+  const clearSelections = () => {
+    setSelectedBuildingIds([])
+    setSelectedResidentIds([])
+    setSendReport(null)
+  }
+
+  const sendBulkSms = async () => {
+    const body = messageBody.trim()
+    if (!body) {
+      showErrorToast("Escreva a Message antes de enviar.")
+      return
+    }
+
+    if (recipients.length === 0) {
+      showErrorToast("Select at least one resident or one building.")
+      return
+    }
+
+    setIsSending(true)
+    setSendReport(null)
+
+    const errors: string[] = []
+    let success = 0
+    let failed = 0
+    let skipped = 0
+
+    const base = OpenAPI.BASE || "http://localhost:8000"
+
+    for (const recipient of recipients) {
+      const phoneTo = normalizePhoneToE164(recipient.mobile)
+      if (!phoneTo) {
+        skipped += 1
+        errors.push(
+          `${recipient.nome} (${recipient.building_nome} ${recipient.flat_numero}): invalid phone number`,
+        )
+        continue
+      }
+
+      try {
+        const response = await fetch(`${base}/api/v1/utils/send-sms/`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${localStorage.getItem("access_token")}`,
+          },
+          body: JSON.stringify({
+            phone_to: phoneTo,
+            body,
+          }),
+        })
+
+        if (!response.ok) {
+          let detail = `Erro HTTP ${response.status}`
+          try {
+            const errorPayload = (await response.json()) as {
+              detail?: string
+              message?: string
+            }
+            detail = errorPayload.detail || errorPayload.message || detail
+          } catch (_error) {
+            // ignore parse errors and keep default detail
+          }
+          throw new Error(detail)
+        }
+
+        success += 1
+      } catch (error) {
+        failed += 1
+        errors.push(
+          `${recipient.nome} (${recipient.building_nome} ${recipient.flat_numero}): ${
+            error instanceof Error ? error.message : "erro ao enviar"
+          }`,
+        )
+      }
+    }
+
+    setIsSending(false)
+    setSendReport({ success, failed, skipped, errors })
+
+    if (success > 0) {
+      showSuccessToast(`${success} SMS enviado(s) com sucesso.`)
+    }
+    if (failed > 0 || skipped > 0) {
+      showErrorToast(
+        `Completed with failures: ${failed} failure(s), ${skipped} skipped.`,
+      )
+    }
+  }
+
+  if (buildingsLoading || ResidentsLoading) {
+    return (
+      <div className="mx-auto max-w-7xl">
+        <div className="rounded-lg bg-white p-8 shadow-md">
+          <p className="font-['Nunito',sans-serif] text-[#55311c]">
+            Loading Twilio data...
+          </p>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="mx-auto max-w-7xl space-y-6">
+      <div className="rounded-lg bg-white p-8 shadow-md">
+        <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
+          Twilio SMS
+        </h2>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <div className="rounded-lg bg-white p-6 shadow-md">
+          <div className="mb-4 flex items-center justify-between">
+            <h3 className="font-['Nunito',sans-serif] text-xl font-bold text-[#55311c]">
+              Buildings
+            </h3>
+            <button
+              type="button"
+              onClick={() => setSelectedBuildingIds([])}
+              className="rounded bg-gray-200 px-3 py-1 text-xs font-semibold text-[#55311c] hover:bg-gray-300"
+            >
+              Clear
+            </button>
+          </div>
+
+          <div className="space-y-2">
+            {buildings.map((building) => {
+              const id = String(building.id)
+              const checked = selectedBuildingIds.includes(id)
+              return (
+                <label
+                  key={id}
+                  className="flex cursor-pointer items-center gap-3 rounded border border-[#e8ddd6] px-3 py-2 hover:bg-[#f9f7f5]"
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggleBuilding(id)}
+                    className="h-4 w-4 cursor-pointer"
+                  />
+                  <span className="font-['Nunito',sans-serif] text-[#55311c]">
+                    {building.nome}
+                  </span>
+                </label>
+              )
+            })}
+          </div>
+        </div>
+
+        <div className="rounded-lg bg-white p-6 shadow-md">
+          <div className="mb-4 flex items-center justify-between gap-2">
+            <h3 className="font-['Nunito',sans-serif] text-xl font-bold text-[#55311c]">
+              Residents
+            </h3>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={selectAllFilteredResidents}
+                className="rounded bg-[#8c7569] px-3 py-1 text-xs font-semibold text-white hover:bg-[#55311c]"
+              >
+                Select filtered
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedResidentIds([])}
+                className="rounded bg-gray-200 px-3 py-1 text-xs font-semibold text-[#55311c] hover:bg-gray-300"
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+
+          <input
+            value={residentSearch}
+            onChange={(e) => setResidentSearch(e.target.value)}
+            placeholder="Buscar por nome, building, flat ou Phone"
+            className="mb-3 w-full rounded border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+          />
+
+          <div className="mb-3 grid gap-2 md:grid-cols-2">
+            <select
+              value={residentBuildingFilter}
+              onChange={(e) => setResidentBuildingFilter(e.target.value)}
+              className="w-full rounded border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+            >
+              <option value="all">All buildings</option>
+              {buildings
+                .map((building) => building.nome)
+                .sort((a, b) => a.localeCompare(b))
+                .map((buildingName) => (
+                  <option key={buildingName} value={buildingName}>
+                    {buildingName}
+                  </option>
+                ))}
+            </select>
+
+            <select
+              value={residentRoleFilter}
+              onChange={(e) => setResidentRoleFilter(e.target.value)}
+              className="w-full rounded border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+            >
+              <option value="all">All roles</option>
+              <option value="0">Owner 1</option>
+              <option value="1">Owner 2</option>
+              <option value="2">Tenant</option>
+              <option value="3">Agent</option>
+            </select>
+          </div>
+
+          <div className="max-h-64 space-y-2 overflow-y-auto pr-2">
+            {filteredResidents.map((morador) => {
+              const id = String(morador.id)
+              const checked = selectedResidentIds.includes(id)
+              return (
+                <label
+                  key={id}
+                  className="flex cursor-pointer items-center gap-3 rounded border border-[#e8ddd6] px-3 py-2 hover:bg-[#f9f7f5]"
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggleResident(id)}
+                    className="h-4 w-4 cursor-pointer"
+                  />
+                  <div className="min-w-0">
+                    <p className="truncate font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]">
+                      {morador.nome}
+                    </p>
+                    <p className="truncate text-xs text-[rgba(0,0,0,0.65)]">
+                      {getResidentRoleLabel(morador.cargo)} |{" "}
+                      {morador.building_nome} {morador.flat_numero} |{" "}
+                      {morador.mobile || "no phone"}
+                    </p>
+                  </div>
+                </label>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-lg bg-white p-6 shadow-md">
+        <div className="mb-4 grid gap-3 md:grid-cols-3">
+          <div className="rounded border border-[#e8ddd6] bg-[#f9f7f5] p-3">
+            <p className="text-xs uppercase tracking-wide text-[#8c7569]">
+              Buildings selecionados
+            </p>
+            <p className="text-2xl font-bold text-[#55311c]">
+              {selectedBuildingIds.length}
+            </p>
+          </div>
+          <div className="rounded border border-[#e8ddd6] bg-[#f9f7f5] p-3">
+            <p className="text-xs uppercase tracking-wide text-[#8c7569]">
+              Residents selecionados
+            </p>
+            <p className="text-2xl font-bold text-[#55311c]">
+              {selectedResidentIds.length}
+            </p>
+          </div>
+          <div className="rounded border border-[#e8ddd6] bg-[#f9f7f5] p-3">
+            <p className="text-xs uppercase tracking-wide text-[#8c7569]">
+              Final recipients
+            </p>
+            <p className="text-2xl font-bold text-[#55311c]">{recipients.length}</p>
+          </div>
+        </div>
+
+        <label
+          className="mb-1 block text-sm font-semibold text-[#55311c]"
+          htmlFor="twilio-message-body"
+        >
+          Message
+        </label>
+        <textarea
+          id="twilio-message-body"
+          value={messageBody}
+          onChange={(e) => setMessageBody(e.target.value)}
+          rows={5}
+          maxLength={1600}
+          placeholder="Digite sua Message..."
+          className="w-full rounded border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+        />
+        <p className="mt-1 text-xs text-[rgba(0,0,0,0.6)]">
+          {messageBody.length}/1600 caracteres
+        </p>
+
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={sendBulkSms}
+            disabled={isSending}
+            className="rounded bg-[#8c7569] px-5 py-2 font-semibold text-white transition-all duration-300 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isSending ? "Enviando..." : "Enviar SMS em lote"}
+          </button>
+          <button
+            type="button"
+            onClick={clearSelections}
+            disabled={isSending}
+            className="rounded bg-gray-200 px-5 py-2 font-semibold text-[#55311c] hover:bg-gray-300 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Clear selection
+          </button>
+        </div>
+
+        {sendReport && (
+          <div className="mt-6 rounded border border-[#e8ddd6] bg-[#f9f7f5] p-4">
+            <h4 className="font-['Nunito',sans-serif] text-lg font-bold text-[#55311c]">
+              Resultado do envio
+            </h4>
+            <p className="mt-1 text-sm text-[rgba(0,0,0,0.7)]">
+              {sendReport.success} sucesso(s), {sendReport.failed} falha(s),{" "}
+              {sendReport.skipped} ignorado(s).
+            </p>
+
+            {sendReport.errors.length > 0 && (
+              <div className="mt-3 max-h-40 overflow-y-auto rounded bg-white p-3">
+                <ul className="space-y-1 text-xs text-[#55311c]">
+                  {sendReport.errors.map((error, index) => (
+                    <li key={`${error}-${index}`}>- {error}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function BinsQrCodesContent() {
+  const { data: buildingsData, isLoading } = useQuery({
+    queryKey: ["buildings", "qr-bins"],
+    queryFn: () => apiCall("/api/v1/buildings/condominio"),
+  })
+
+  const buildings = useMemo(
+    () =>
+      ((buildingsData?.data || []) as Building[]).filter(
+        (building) => building.nome.trim().toLowerCase() !== "office",
+      ),
+    [buildingsData?.data],
+  )
+
+  const baseUrl = useMemo(() => {
+    if (typeof window === "undefined") return ""
+    return window.location.origin
+  }, [])
+
+  const [qrMap, setQrMap] = useState<
+    Record<string, { dataUrl: string; link: string }>
+  >({})
+  const [isGenerating, setIsGenerating] = useState(false)
+
+  useEffect(() => {
+    let isActive = true
+
+    const generateQRCodes = async () => {
+      if (!baseUrl || buildings.length === 0) {
+        setQrMap({})
+        setIsGenerating(false)
+        return
+      }
+
+      setIsGenerating(true)
+      const nextMap: Record<string, { dataUrl: string; link: string }> = {}
+
+      for (let index = 0; index < buildings.length; index += 1) {
+        const building = buildings[index]
+        const params = new URLSearchParams()
+        params.set("buildingId", String(building.id))
+        if (building.nome) {
+          params.set("buildingName", String(building.nome))
+        }
+        const link = `${baseUrl}/bins-access?${params.toString()}`
+        const dataUrl = await QRCode.toDataURL(link, {
+          width: 240,
+          margin: 1,
+        })
+
+        if (!isActive) return
+        nextMap[String(building.id)] = { dataUrl, link }
+
+        // Prevent long main-thread blocking when many buildings exist.
+        if (index % 4 === 3) {
+          setQrMap({ ...nextMap })
+          await new Promise((resolve) => setTimeout(resolve, 0))
+        }
+      }
+
+      if (!isActive) return
+      setQrMap(nextMap)
+      setIsGenerating(false)
+    }
+
+    generateQRCodes().catch(() => {
+      if (!isActive) return
+      setQrMap({})
+      setIsGenerating(false)
+    })
+
+    return () => {
+      isActive = false
+    }
+  }, [baseUrl, buildings])
+
+  return (
+    <div className="mx-auto max-w-7xl">
+      <div className="mb-6 rounded-lg bg-white p-6 shadow-md">
+        <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
+          QR Code - Bins
+        </h2>
+        <p className="mt-2 text-[rgba(0,0,0,0.7)]">
+          Use this QR only when the waste was not collected.
+        </p>
+      </div>
+
+      {(isLoading || isGenerating) && (
+        <div className="rounded-lg bg-white p-6 text-center text-sm text-[#55311c] shadow-md">
+          Generating QR codes...
+        </div>
+      )}
+
+      {!isLoading && buildings.length === 0 && (
+        <div className="rounded-lg bg-white p-6 text-center text-sm text-[rgba(0,0,0,0.7)] shadow-md">
+          No buildings found.
+        </div>
+      )}
+
+      <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+        {buildings.map((building) => {
+          const qr = qrMap[String(building.id)]
+          return (
+            <div
+              key={String(building.id)}
+              className="rounded-lg bg-white p-5 shadow-md transition-all duration-200 hover:shadow-lg"
+            >
+              <div className="mb-4">
+                <h3 className="font-['Nunito',sans-serif] text-xl font-bold text-[#55311c]">
+                  {building.nome}
+                </h3>
+              </div>
+
+              <div className="flex min-h-[260px] items-center justify-center rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-3">
+                {qr ? (
+                  <img
+                    src={qr.dataUrl}
+                    alt={`QR Code - Bins - ${building.nome}`}
+                    className="h-56 w-56"
+                  />
+                ) : (
+                  <p className="text-sm text-[rgba(0,0,0,0.6)]">Generating...</p>
+                )}
+              </div>
+
+              <div className="mt-4 space-y-2">
+                {qr && (
+                  <>
+                    <a
+                      href={qr.dataUrl}
+                      download={`bins-${building.nome.toLowerCase().replace(/\s+/g, "-")}.png`}
+                      className="block rounded-lg bg-[#8c7569] px-4 py-2 text-center text-sm font-semibold text-white transition-all duration-300 hover:bg-[#55311c]"
+                    >
+                      Download PNG
+                    </a>
+                    <a
+                      href={qr.link}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block rounded-lg border border-[#8c7569] px-4 py-2 text-center text-sm font-semibold text-[#55311c] transition-all duration-300 hover:bg-[#f3eeea]"
+                    >
+                      Open link
+                    </a>
+                  </>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function BinsContent() {
+  const [page, setPage] = useState(0)
+  const pageSize = 20
+
+  const { data, isLoading, error } = useQuery<
+    ApiListResponse<BinMissCollectionRecord>
+  >({
+    queryKey: ["bins", page, pageSize],
+    queryFn: () => apiCall("/api/v1/bins/", { skip: page * pageSize, limit: pageSize }),
+    placeholderData: keepPreviousData,
+  })
+
+  const items = data?.data || []
+  const count = data?.count || 0
+  const totalPages = Math.max(1, Math.ceil(count / pageSize))
+
+  const formatDate = (value: string) => {
+    const dt = new Date(value)
+    if (Number.isNaN(dt.getTime())) return "-"
+    return dt.toLocaleDateString()
+  }
+
+  const formatTime = (value: string) => {
+    const dt = new Date(value)
+    if (Number.isNaN(dt.getTime())) return "-"
+    return dt.toLocaleTimeString()
+  }
+
+  if (isLoading) {
+    return (
+      <div className="mx-auto max-w-7xl">
+        <div className="rounded-lg bg-white p-8 shadow-md text-center">
+          <p className="text-[#55311c]">Loading bins records...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="mx-auto max-w-7xl">
+        <div className="rounded-lg bg-white p-8 shadow-md text-center">
+          <p className="text-red-700">Error loading bins records.</p>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="mx-auto max-w-7xl">
+      <div className="mb-6 rounded-lg bg-white p-6 shadow-md">
+        <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
+          Bins
+        </h2>
+        <p className="mt-2 text-[rgba(0,0,0,0.7)]">
+          Log de eventos de miss collection por building.
+        </p>
+      </div>
+
+      <div className="rounded-lg bg-white p-6 shadow-md">
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse">
+            <thead>
+              <tr className="bg-[#8c7569]">
+                <th className="border border-gray-300 px-4 py-3 text-left text-sm font-semibold text-white">
+                  Data
+                </th>
+                <th className="border border-gray-300 px-4 py-3 text-left text-sm font-semibold text-white">
+                  Time
+                </th>
+                <th className="border border-gray-300 px-4 py-3 text-left text-sm font-semibold text-white">
+                  Building
+                </th>
+                <th className="border border-gray-300 px-4 py-3 text-left text-sm font-semibold text-white">
+                  Miss Collection
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item) => (
+                <tr key={String(item.id)} className="hover:bg-[#f5f1ee]">
+                  <td className="border border-gray-300 px-4 py-3 text-[#55311c]">
+                    {formatDate(item.data)}
+                  </td>
+                  <td className="border border-gray-300 px-4 py-3 text-[#55311c]">
+                    {formatTime(item.data)}
+                  </td>
+                  <td className="border border-gray-300 px-4 py-3 text-[#55311c]">
+                    {item.building_nome}
+                  </td>
+                  <td className="border border-gray-300 px-4 py-3 text-[#55311c]">
+                    {item.miss_collection ? "Yes" : "No"}
+                  </td>
+                </tr>
+              ))}
+              {items.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={4}
+                    className="border border-gray-300 px-4 py-8 text-center text-[rgba(0,0,0,0.65)]"
+                  >
+                    No miss collection records found.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="mt-6 flex items-center justify-between">
+          <p className="text-sm text-[#55311c]">
+            Mostrando {items.length} de {count} registro(s)
+          </p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setPage(Math.max(0, page - 1))}
+              disabled={page === 0}
+              className="rounded bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 hover:bg-[#55311c]"
+            >
+              Anterior
+            </button>
+            <span className="flex items-center px-3 text-sm text-[#55311c]">
+              {page + 1} / {totalPages}
+            </span>
+            <button
+              type="button"
+              onClick={() => setPage(Math.min(totalPages - 1, page + 1))}
+              disabled={page >= totalPages - 1}
+              className="rounded bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 hover:bg-[#55311c]"
+            >
+              Next
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   )
@@ -2904,7 +3714,7 @@ function CleanerQrCodesContent() {
 
       {!isLoading && buildings.length === 0 && (
         <div className="rounded-lg bg-white p-6 text-center text-sm text-[#55311c] shadow-md">
-          Nenhum building encontrado.
+          No building found.
         </div>
       )}
 
@@ -2933,7 +3743,7 @@ function CleanerQrCodesContent() {
               />
             ) : (
               <div className="flex h-48 w-48 items-center justify-center rounded-lg border border-dashed border-[#e5e0dc] text-xs text-[rgba(0,0,0,0.6)]">
-                QR Code indisponível
+                QR Code unavailable
               </div>
             )}
 
@@ -2953,9 +3763,14 @@ function CleanerQrCodesContent() {
                 Baixar QR Code
               </a>
               {qrItem?.link && (
-                <p className="break-all text-xs text-[rgba(0,0,0,0.5)]">
-            {qrItem.link}
-                </p>
+                <a
+                  href={qrItem.link}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block rounded-lg border border-[#8c7569] px-4 py-2 text-center text-sm font-semibold text-[#55311c] transition-all duration-300 hover:bg-[#f3eeea]"
+                >
+                  Open link
+                </a>
               )}
             </div>
           </div>
@@ -3048,7 +3863,7 @@ function CaretakerQrCodesContent() {
 
       {!isLoading && buildings.length === 0 && (
         <div className="rounded-lg bg-white p-6 text-center text-sm text-[#55311c] shadow-md">
-          Nenhum building encontrado.
+          No building found.
         </div>
       )}
 
@@ -3065,7 +3880,7 @@ function CaretakerQrCodesContent() {
                   {building.nome || "Building"}
                 </h3>
                 <p className="text-sm text-[rgba(0,0,0,0.6)]">
-                  Código: {building.id}
+                  Code: {building.id}
                 </p>
               </div>
 
@@ -3078,7 +3893,7 @@ function CaretakerQrCodesContent() {
                   />
                 ) : (
                   <div className="flex h-48 w-48 items-center justify-center rounded-lg border border-dashed border-[#e5e0dc] text-xs text-[rgba(0,0,0,0.6)]">
-                    QR Code indisponível
+                    QR Code unavailable
                   </div>
                 )}
 
@@ -3098,9 +3913,14 @@ function CaretakerQrCodesContent() {
                     Baixar QR Code
                   </a>
                   {qrItem?.link && (
-                    <p className="break-all text-xs text-[rgba(0,0,0,0.5)]">
-                      {qrItem.link}
-                    </p>
+                    <a
+                      href={qrItem.link}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block rounded-lg border border-[#8c7569] px-4 py-2 text-center text-sm font-semibold text-[#55311c] transition-all duration-300 hover:bg-[#f3eeea]"
+                    >
+                      Open link
+                    </a>
                   )}
                 </div>
               </div>
@@ -3126,7 +3946,7 @@ function CleanerContent() {
               Cleaner
             </h2>
             <p className="mt-1 text-[rgba(0,0,0,0.7)]">
-              Resumo de trabalho e cadastro de cleaners.
+              Work summary and cleaner registration.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -3176,7 +3996,7 @@ function CaretakerContent() {
               Caretaker
             </h2>
             <p className="mt-1 text-[rgba(0,0,0,0.7)]">
-              Resumo de trabalho e cadastro de caretakers.
+              Work summary and caretaker registration.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -3325,11 +4145,11 @@ function CleanerSummary() {
     <div className="rounded-lg bg-white p-6 shadow-md">
       <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <h3 className="font-['Nunito',sans-serif] text-xl font-bold text-[#55311c]">
-          Resumo de trabalho
+          Work summary
         </h3>
         {!activeCleanerId && (
           <span className="rounded-full bg-[#f5f1ee] px-3 py-1 text-xs font-semibold text-[#55311c]">
-            Selecione um cleaner ativo no cadastro
+            Select an active cleaner from registration
           </span>
         )}
       </div>
@@ -3362,7 +4182,7 @@ function CleanerSummary() {
                   className="border border-gray-400 px-3 py-3 text-center text-sm text-gray-600"
                   colSpan={5}
                 >
-                  Carregando...
+                  Loading...
                 </td>
               </tr>
             )}
@@ -3372,7 +4192,7 @@ function CleanerSummary() {
                   className="border border-gray-400 px-3 py-3 text-center text-sm text-gray-600"
                   colSpan={5}
                 >
-                  Nenhum registro encontrado.
+                  No records found.
                 </td>
               </tr>
             )}
@@ -3469,7 +4289,7 @@ function CleanerRegister() {
       setMobile("")
     },
     onError: () => {
-      showErrorToast("Não foi possível cadastrar o cleaner")
+      showErrorToast("Could not register cleaner")
     },
   })
 
@@ -3480,14 +4300,14 @@ function CleanerRegister() {
         body: { is_default: true },
       }),
     onSuccess: () => {
-      showSuccessToast("Cleaner padrão atualizado")
+      showSuccessToast("Default cleaner updated")
       queryClient.invalidateQueries({ queryKey: ["funcionarios", "cleaners"] })
       queryClient.invalidateQueries({
         queryKey: ["funcionarios", "cleaners-summary"],
       })
     },
     onError: () => {
-      showErrorToast("Não foi possível atualizar o cleaner padrão")
+      showErrorToast("Could not update default cleaner")
     },
   })
 
@@ -3502,7 +4322,7 @@ function CleanerRegister() {
     }
 
     if (!user?.condominio_id) {
-      showErrorToast("Usuário não está associado a um condomínio")
+      showErrorToast("User is not associated with a condominium")
       return
     }
 
@@ -3585,7 +4405,7 @@ function CleanerRegister() {
                 className="block text-sm font-semibold text-[#55311c] mb-1"
                 htmlFor="cleaner-mobile"
               >
-                Telefone
+                Phone
               </label>
               <input
                 type="tel"
@@ -3593,7 +4413,7 @@ function CleanerRegister() {
                 value={mobile}
                 onChange={(e) => setMobile(e.target.value)}
                 className="w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
-                placeholder="Telefone"
+                placeholder="Phone"
               />
             </div>
           </div>
@@ -3603,14 +4423,14 @@ function CleanerRegister() {
               onClick={() => setShowForm(false)}
               className="rounded-lg border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
             >
-              Cancelar
+              Cancel
             </button>
             <button
               type="button"
               onClick={handleCreateCleaner}
               className="rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c]"
             >
-              Salvar
+              Save
             </button>
           </div>
         </div>
@@ -3627,10 +4447,10 @@ function CleanerRegister() {
                 Email
               </th>
               <th className="border border-gray-400 px-3 py-2 text-left text-sm font-bold text-gray-700">
-                Telefone
+                Phone
               </th>
               <th className="border border-gray-400 px-3 py-2 text-left text-sm font-bold text-gray-700">
-                Ativo
+                Active
               </th>
             </tr>
           </thead>
@@ -3641,7 +4461,7 @@ function CleanerRegister() {
                   colSpan={4}
                   className="border border-gray-400 px-3 py-3 text-center text-sm text-gray-600"
                 >
-                  Carregando...
+                  Loading...
                 </td>
               </tr>
             )}
@@ -3651,7 +4471,7 @@ function CleanerRegister() {
                   colSpan={4}
                   className="border border-gray-400 px-3 py-3 text-center text-sm text-gray-600"
                 >
-                  Nenhum cleaner cadastrado.
+                  No cleaner registered.
                 </td>
               </tr>
             )}
@@ -3676,7 +4496,7 @@ function CleanerRegister() {
                         : "bg-[#f5f1ee] text-[#55311c] hover:bg-[#e8e1dc]"
                     }`}
                   >
-                    {activeCleanerId === cleaner.id ? "Ativo" : "Marcar ativo"}
+                    {activeCleanerId === cleaner.id ? "Active" : "Set active"}
                   </button>
                 </td>
               </tr>
@@ -3799,13 +4619,8 @@ function CaretakerSummary() {
     <div className="rounded-lg bg-white p-6 shadow-md">
       <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <h3 className="font-['Nunito',sans-serif] text-xl font-bold text-[#55311c]">
-          Resumo de trabalho
+          Work summary
         </h3>
-        {!activeCaretakerId && (
-          <span className="rounded-full bg-[#f5f1ee] px-3 py-1 text-xs font-semibold text-[#55311c]">
-            Selecione um caretaker ativo no cadastro
-          </span>
-        )}
       </div>
 
       <div className="overflow-x-auto">
@@ -3836,7 +4651,7 @@ function CaretakerSummary() {
                   className="border border-gray-400 px-3 py-3 text-center text-sm text-gray-600"
                   colSpan={5}
                 >
-                  Carregando...
+                  Loading...
                 </td>
               </tr>
             )}
@@ -3846,7 +4661,7 @@ function CaretakerSummary() {
                   className="border border-gray-400 px-3 py-3 text-center text-sm text-gray-600"
                   colSpan={5}
                 >
-                  Nenhum registro encontrado.
+                  No records found.
                 </td>
               </tr>
             )}
@@ -3943,7 +4758,7 @@ function CaretakerRegister() {
       setMobile("")
     },
     onError: () => {
-      showErrorToast("Não foi possível cadastrar o caretaker")
+      showErrorToast("Could not register caretaker")
     },
   })
 
@@ -3954,14 +4769,14 @@ function CaretakerRegister() {
         body: { is_default: true },
       }),
     onSuccess: () => {
-      showSuccessToast("Caretaker padrão atualizado")
+      showSuccessToast("Default caretaker updated")
       queryClient.invalidateQueries({ queryKey: ["funcionarios", "caretakers"] })
       queryClient.invalidateQueries({
         queryKey: ["funcionarios", "caretakers-summary"],
       })
     },
     onError: () => {
-      showErrorToast("Não foi possível atualizar o caretaker padrão")
+      showErrorToast("Could not update default caretaker")
     },
   })
 
@@ -3976,7 +4791,7 @@ function CaretakerRegister() {
     }
 
     if (!user?.condominio_id) {
-      showErrorToast("Usuário não está associado a um condomínio")
+      showErrorToast("User is not associated with a condominium")
       return
     }
 
@@ -4059,7 +4874,7 @@ function CaretakerRegister() {
                 className="block text-sm font-semibold text-[#55311c] mb-1"
                 htmlFor="caretaker-mobile"
               >
-                Telefone
+                Phone
               </label>
               <input
                 type="tel"
@@ -4067,7 +4882,7 @@ function CaretakerRegister() {
                 value={mobile}
                 onChange={(e) => setMobile(e.target.value)}
                 className="w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
-                placeholder="Telefone"
+                placeholder="Phone"
               />
             </div>
           </div>
@@ -4077,14 +4892,14 @@ function CaretakerRegister() {
               onClick={() => setShowForm(false)}
               className="rounded-lg border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
             >
-              Cancelar
+              Cancel
             </button>
             <button
               type="button"
               onClick={handleCreateCaretaker}
               className="rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c]"
             >
-              Salvar
+              Save
             </button>
           </div>
         </div>
@@ -4101,10 +4916,10 @@ function CaretakerRegister() {
                 Email
               </th>
               <th className="border border-gray-400 px-3 py-2 text-left text-sm font-bold text-gray-700">
-                Telefone
+                Phone
               </th>
               <th className="border border-gray-400 px-3 py-2 text-left text-sm font-bold text-gray-700">
-                Ativo
+                Active
               </th>
             </tr>
           </thead>
@@ -4115,7 +4930,7 @@ function CaretakerRegister() {
                   colSpan={4}
                   className="border border-gray-400 px-3 py-3 text-center text-sm text-gray-600"
                 >
-                  Carregando...
+                  Loading...
                 </td>
               </tr>
             )}
@@ -4125,7 +4940,7 @@ function CaretakerRegister() {
                   colSpan={4}
                   className="border border-gray-400 px-3 py-3 text-center text-sm text-gray-600"
                 >
-                  Nenhum caretaker cadastrado.
+                  No caretaker registered.
                 </td>
               </tr>
             )}
@@ -4151,8 +4966,8 @@ function CaretakerRegister() {
                     }`}
                   >
                     {activeCaretakerId === caretaker.id
-                      ? "Ativo"
-                      : "Marcar ativo"}
+                      ? "Active"
+                      : "Set active"}
                   </button>
                 </td>
               </tr>
@@ -4177,14 +4992,14 @@ function ResidentsContent() {
 
   const pageSize = 20
 
-  const { data: moradoresData, isLoading } = useQuery<
+  const { data: ResidentsData, isLoading } = useQuery<
     ApiListResponse<Morador> & { count?: number }
   >({
-    queryKey: ["moradores", selectedBuilding, searchTerm],
+    queryKey: ["Residents", selectedBuilding, searchTerm],
     placeholderData: keepPreviousData,
     queryFn: async () => {
       const pageLimit = 100
-      const allMoradores: Morador[] = []
+      const allResidents: Morador[] = []
       let skip = 0
       let totalCount: number | undefined
 
@@ -4202,18 +5017,18 @@ function ResidentsContent() {
 
         const pageData = page.data || []
         totalCount = page.count
-        allMoradores.push(...pageData)
+        allResidents.push(...pageData)
 
         if (pageData.length < pageLimit) break
-        if (typeof totalCount === "number" && allMoradores.length >= totalCount)
+        if (typeof totalCount === "number" && allResidents.length >= totalCount)
           break
 
         skip += pageLimit
       }
 
       return {
-        data: allMoradores,
-        count: totalCount ?? allMoradores.length,
+        data: allResidents,
+        count: totalCount ?? allResidents.length,
       }
     },
   })
@@ -4223,40 +5038,40 @@ function ResidentsContent() {
     queryFn: () => apiCall("/api/v1/buildings/condominio"),
   })
 
-  const moradores = moradoresData?.data || []
+  const Residents = ResidentsData?.data || []
   const buildings = buildingsData?.data || []
 
-  const sortedMoradores = useMemo(
+  const sortedResidents = useMemo(
     () =>
-      [...moradores].sort((a, b) => {
+      [...Residents].sort((a, b) => {
         const buildingCompare = a.building_nome.localeCompare(b.building_nome)
         if (buildingCompare !== 0) return buildingCompare
         if (a.flat_numero !== b.flat_numero) return a.flat_numero - b.flat_numero
         return a.nome.localeCompare(b.nome)
       }),
-    [moradores],
+    [Residents],
   )
 
-  const cargoFilterMap: Record<Exclude<ResidentTypeFilter, "all">, number> = {
+  const RoleFilterMap: Record<Exclude<ResidentTypeFilter, "all">, number> = {
     owner_1: 0,
     owner_2: 1,
     tenant: 2,
     agent: 3,
   }
 
-  const filteredMoradores = useMemo(() => {
-    if (residentTypeFilter === "all") return sortedMoradores
-    return sortedMoradores.filter(
-      (morador) => morador.cargo === cargoFilterMap[residentTypeFilter],
+  const filteredResidents = useMemo(() => {
+    if (residentTypeFilter === "all") return sortedResidents
+    return sortedResidents.filter(
+      (morador) => morador.cargo === RoleFilterMap[residentTypeFilter],
     )
-  }, [sortedMoradores, residentTypeFilter])
+  }, [sortedResidents, residentTypeFilter])
 
   const groupedFlatRows = useMemo<FlatResidentRow[]>(() => {
     if (residentTypeFilter !== "all") return []
 
     const groups = new Map<string, FlatResidentRow>()
 
-    filteredMoradores.forEach((morador) => {
+    filteredResidents.forEach((morador) => {
       const key = `${morador.building_nome}::${morador.flat_numero}::${morador.flat_id}`
       const current = groups.get(key) ?? {
         key,
@@ -4286,12 +5101,12 @@ function ResidentsContent() {
       if (buildingCompare !== 0) return buildingCompare
       return a.flat_numero - b.flat_numero
     })
-  }, [filteredMoradores, residentTypeFilter])
+  }, [filteredResidents, residentTypeFilter])
 
   const isAllTypeView = residentTypeFilter === "all"
   const totalCount = isAllTypeView
     ? groupedFlatRows.length
-    : filteredMoradores.length
+    : filteredResidents.length
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
 
   useEffect(() => {
@@ -4304,11 +5119,11 @@ function ResidentsContent() {
     }
   }, [currentPage, totalPages])
 
-  const paginatedMoradores = useMemo(() => {
+  const paginatedResidents = useMemo(() => {
     if (isAllTypeView) return []
     const start = currentPage * pageSize
-    return filteredMoradores.slice(start, start + pageSize)
-  }, [filteredMoradores, currentPage, pageSize, isAllTypeView])
+    return filteredResidents.slice(start, start + pageSize)
+  }, [filteredResidents, currentPage, pageSize, isAllTypeView])
 
   const paginatedFlatRows = useMemo(() => {
     if (!isAllTypeView) return []
@@ -4331,14 +5146,14 @@ function ResidentsContent() {
       return response
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["moradores"] })
-      showSuccessToast("Tipos de leitura atualizados com sucesso!")
+      queryClient.invalidateQueries({ queryKey: ["Residents"] })
+      showSuccessToast("Reading types updated successfully!")
     },
     onError: (error) => {
       const message =
         error instanceof Error
           ? error.message
-          : "Erro ao atualizar tipos de leitura"
+          : "Error updating reading types"
       showErrorToast(message)
     },
   })
@@ -4374,11 +5189,11 @@ function ResidentsContent() {
     setCurrentPage(0)
   }
 
-  if (isLoading && moradores.length === 0) {
+  if (isLoading && Residents.length === 0) {
     return (
       <div className="mx-auto max-w-7xl">
         <div className="rounded-lg bg-white p-8 shadow-md text-center">
-          <p className="text-[#55311c]">Carregando moradores...</p>
+          <p className="text-[#55311c]">Loading residents...</p>
         </div>
       </div>
     )
@@ -4417,7 +5232,7 @@ function ResidentsContent() {
               stroke="currentColor"
               viewBox="0 0 24 24"
             >
-              <title>Adicionar morador</title>
+              <title>Add resident</title>
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -4425,7 +5240,7 @@ function ResidentsContent() {
                 d="M12 4v16m8-8H4"
               />
             </svg>
-            Novo Morador
+            New Resident
           </button>
         </div>
 
@@ -4436,7 +5251,7 @@ function ResidentsContent() {
               className="block text-sm font-semibold text-[#55311c] mb-2"
               htmlFor="residents-search"
             >
-              Buscar por Nome, Telefone, Email ou Flat
+              Buscar por Nome, Phone, Email ou Flat
             </label>
             <input
               type="text"
@@ -4460,7 +5275,7 @@ function ResidentsContent() {
               onChange={(e) => handleBuildingChange(e.target.value || null)}
               className="w-full text-[#000000] rounded-lg border border-gray-300 px-3 py-2 font-['Nunito',sans-serif] text-sm focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
             >
-              <option value="">Todos os Buildings</option>
+              <option value="">All buildings</option>
               {buildings.map((building) => (
                 <option key={building.id} value={building.nome}>
                   {building.nome}
@@ -4498,8 +5313,8 @@ function ResidentsContent() {
           <div className="rounded-lg bg-[#f5f1ee] p-8 text-center">
             <p className="text-[#55311c] font-['Nunito',sans-serif]">
               {searchTerm || selectedBuilding
-                ? "Nenhum morador encontrado"
-                : "Nenhum morador cadastrado"}
+                ? "No resident found"
+                : "No resident registered"}
             </p>
           </div>
         ) : (
@@ -4514,31 +5329,31 @@ function ResidentsContent() {
                           Building
                         </th>
                         <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
-                          Número
+                          Number
                         </th>
                         <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
                           Owner 1
                         </th>
                         <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
-                          Telefone 1
+                          Phone 1
                         </th>
                         <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
                           Owner 2
                         </th>
                         <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
-                          Telefone 2
+                          Phone 2
                         </th>
                         <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
                           Tenant
                         </th>
                         <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
-                          Telefone
+                          Phone
                         </th>
                         <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
                           Agent
                         </th>
                         <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
-                          Telefone
+                          Phone
                         </th>
                         <th className="border border-gray-400 px-4 py-3 text-center font-['Nunito',sans-serif] font-semibold text-white">
                           Normal
@@ -4550,7 +5365,7 @@ function ResidentsContent() {
                           Gas
                         </th>
                         <th className="border border-gray-400 px-4 py-3 text-center font-['Nunito',sans-serif] font-semibold text-white">
-                          Ações
+                          Actions
                         </th>
                       </tr>
                     </thead>
@@ -4655,7 +5470,7 @@ function ResidentsContent() {
                               type="button"
                               disabled={row.edit_target_id === null}
                             >
-                              Editar
+                              Edit
                             </button>
                           </td>
                         </tr>
@@ -4670,13 +5485,13 @@ function ResidentsContent() {
                           Building
                         </th>
                         <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
-                          Número
+                          Number
                         </th>
                         <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
                           Nome
                         </th>
                         <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
-                          Telefone
+                          Phone
                         </th>
                         <th className="border border-gray-400 px-4 py-3 text-center font-['Nunito',sans-serif] font-semibold text-white">
                           Normal
@@ -4688,12 +5503,12 @@ function ResidentsContent() {
                           Gas
                         </th>
                         <th className="border border-gray-400 px-4 py-3 text-center font-['Nunito',sans-serif] font-semibold text-white">
-                          Ações
+                          Actions
                         </th>
                       </tr>
                     </thead>
                     <tbody>
-                      {paginatedMoradores.map((morador) => (
+                      {paginatedResidents.map((morador) => (
                         <tr key={morador.id} className="hover:bg-[#f5f1ee]">
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
                             {morador.building_nome}
@@ -4761,7 +5576,7 @@ function ResidentsContent() {
                               className="mr-2 rounded-lg bg-[#8c7569] px-3 py-1 font-['Nunito',sans-serif] text-xs font-semibold text-white transition-all duration-300 hover:bg-[#55311c]"
                               type="button"
                             >
-                              Editar
+                              Edit
                             </button>
                           </td>
                         </tr>
@@ -4777,7 +5592,7 @@ function ResidentsContent() {
               <div className="text-sm font-['Nunito',sans-serif] text-[#55311c]">
                 Mostrando {Math.min(currentPage * pageSize + 1, totalCount)} a{" "}
                 {Math.min((currentPage + 1) * pageSize, totalCount)} de{" "}
-                {totalCount} moradores
+                {totalCount} Residents
               </div>
               <div className="flex gap-2">
                 <button
@@ -4815,7 +5630,7 @@ function ResidentsContent() {
                   type="button"
                   className="rounded-lg bg-[#8c7569] px-4 py-2 font-['Nunito',sans-serif] text-sm font-semibold text-white transition-all duration-200 disabled:opacity-50 hover:bg-[#55311c]"
                 >
-                  Próximo
+                  Next
                 </button>
               </div>
             </div>
@@ -4876,7 +5691,7 @@ function AddResidentForm({
             flat_id: String(morador.flat_id),
           })
         } catch (error) {
-          console.error("Error loading morador:", error)
+          console.error("Error loading resident:", error)
         }
       }
       loadMorador()
@@ -4949,20 +5764,20 @@ function AddResidentForm({
       })
 
       if (!response.ok) {
-        throw new Error("Failed to save morador")
+        throw new Error("Failed to save resident")
       }
 
       alert(
         editingId
-          ? "Morador atualizado com sucesso!"
-          : "Morador cadastrado com sucesso!",
+          ? "Resident updated successfully!"
+          : "Resident created successfully!",
       )
       onBack()
-      // Refetch moradores
+      // Refetch Residents
       window.location.reload()
     } catch (error) {
       console.error("Error submitting form:", error)
-      alert("Erro ao salvar morador")
+      alert("Error saving resident")
     } finally {
       setIsSubmitting(false)
     }
@@ -4973,7 +5788,7 @@ function AddResidentForm({
       <div className="rounded-lg bg-white p-8 shadow-md">
         <div className="mb-6 flex items-center justify-between">
           <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
-            {editingId ? "Editar Morador" : "Novo Morador"}
+            {editingId ? "Edit Resident" : "New Resident"}
           </h2>
           <button
             onClick={onBack}
@@ -5001,7 +5816,7 @@ function AddResidentForm({
                 onChange={handleInputChange}
                 required
                 className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
-                placeholder="Nome do morador"
+                placeholder="Resident name"
               />
             </div>
 
@@ -5028,7 +5843,7 @@ function AddResidentForm({
                 className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
                 htmlFor="resident-mobile"
               >
-                Telefone
+                Phone
               </label>
               <input
                 type="tel"
@@ -5037,7 +5852,7 @@ function AddResidentForm({
                 value={formData.mobile}
                 onChange={handleInputChange}
                 className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
-                placeholder="Número de telefone"
+                placeholder="Phone number"
               />
             </div>
 
@@ -5056,7 +5871,7 @@ function AddResidentForm({
                 required
                 className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
               >
-                <option value="">Selecione um flat</option>
+                <option value="">Select a flat</option>
                 {flats.map((flat) => (
                   <option key={flat.id} value={flat.id}>
                     {flat.label}
@@ -5124,7 +5939,7 @@ function AddResidentForm({
                 className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
                 htmlFor="resident-cargo"
               >
-                Cargo
+                cargo
               </label>
               <select
                 id="resident-cargo"
@@ -5133,8 +5948,8 @@ function AddResidentForm({
                 onChange={handleInputChange}
                 className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
               >
-                <option value="0">Morador</option>
-                <option value="1">Proprietário</option>
+                <option value="0">Resident</option>
+                <option value="1">Owner</option>
                 <option value="2">Inquilino</option>
               </select>
             </div>
@@ -5146,7 +5961,7 @@ function AddResidentForm({
               onClick={onBack}
               className="rounded-lg bg-gray-500 px-6 py-3 font-['Nunito',sans-serif] text-white transition-all duration-300 hover:bg-gray-600"
             >
-              Cancelar
+              Cancel
             </button>
             <button
               type="submit"
@@ -5154,10 +5969,10 @@ function AddResidentForm({
               className="rounded-lg bg-[#8c7569] px-6 py-3 font-['Nunito',sans-serif] text-white transition-all duration-300 hover:bg-[#55311c] disabled:opacity-50"
             >
               {isSubmitting
-                ? "Salvando..."
+                ? "Saving..."
                 : editingId
-                  ? "Atualizar Morador"
-                  : "Criar Morador"}
+                  ? "Update Resident"
+                  : "Create Resident"}
             </button>
           </div>
         </form>

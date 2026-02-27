@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.routes import (
     acess,
+    bins,
     buildings,
     condominios,
     flat_readings,
@@ -11,6 +12,7 @@ from app.api.routes import (
     moradores,
     private,
     readings,
+    tasks,
     users,
     utils,
 )
@@ -26,8 +28,10 @@ api_router.include_router(flats.router)
 api_router.include_router(moradores.router)
 api_router.include_router(funcionarios.router)
 api_router.include_router(acess.router)
+api_router.include_router(bins.router)
 api_router.include_router(readings.router)
 api_router.include_router(flat_readings.router)
+api_router.include_router(tasks.router)
 
 
 if settings.ENVIRONMENT == "local":

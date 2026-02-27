@@ -72,17 +72,17 @@ function Admin() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Admin</h1>
         <p className="text-muted-foreground">
-          Gerencie usuários e os novos cadastros do condomínio.
+          Manage users and new condo registrations.
         </p>
       </div>
       <Tabs defaultValue="users">
         <TabsList className="flex flex-wrap">
           <TabsTrigger value="users">Users</TabsTrigger>
-          <TabsTrigger value="condominios">Condomínios</TabsTrigger>
+          <TabsTrigger value="condominios">Condominiums</TabsTrigger>
           <TabsTrigger value="buildings">Buildings</TabsTrigger>
           <TabsTrigger value="flats">Flats</TabsTrigger>
-          <TabsTrigger value="moradores">Moradores</TabsTrigger>
-          <TabsTrigger value="funcionarios">Funcionários</TabsTrigger>
+          <TabsTrigger value="moradores">Residents</TabsTrigger>
+          <TabsTrigger value="funcionarios">Staff</TabsTrigger>
           <TabsTrigger value="acess">Acess</TabsTrigger>
           <TabsTrigger value="readings">Readings</TabsTrigger>
         </TabsList>
@@ -104,8 +104,8 @@ function Admin() {
 
         <TabsContent value="condominios" className="mt-4">
           <CrudSection
-            title="Condomínios"
-            description="CRUD permitido apenas para cargo 3."
+            title="Condominiums"
+            description="CRUD allowed only for role 3."
             queryKey={["condominios"]}
             listFn={CondominiosService.readCondominios}
             createFn={(payload) =>
@@ -127,7 +127,7 @@ function Admin() {
         <TabsContent value="buildings" className="mt-4">
           <CrudSection
             title="Buildings"
-            description="CRUD permitido para cargo 0, 1 e 2."
+            description="CRUD allowed for roles 0, 1 and 2."
             queryKey={["buildings"]}
             listFn={BuildingsService.readBuildings}
             createFn={(payload) =>
@@ -149,7 +149,7 @@ function Admin() {
             }
             deleteFn={(id) => BuildingsService.deleteBuilding({ id })}
             defaultCreatePayload={{
-              nome: "Bloco A",
+              nome: "Block A",
               condominio_id: "",
             }}
           />
@@ -158,7 +158,7 @@ function Admin() {
         <TabsContent value="flats" className="mt-4">
           <CrudSection
             title="Flats"
-            description="CRUD permitido para cargo 0, 1 e 2."
+            description="CRUD allowed for roles 0, 1 and 2."
             queryKey={["flats"]}
             listFn={FlatsService.readFlats}
             createFn={(payload) =>
@@ -191,8 +191,8 @@ function Admin() {
 
         <TabsContent value="moradores" className="mt-4">
           <CrudSection
-            title="Moradores"
-            description="CRUD permitido para cargo 0, 1 e 2."
+            title="Residents"
+            description="CRUD allowed for roles 0, 1 and 2."
             queryKey={["moradores"]}
             listFn={MoradoresService.readMoradores}
             createFn={(payload) =>
@@ -227,7 +227,7 @@ function Admin() {
             deleteFn={(id) => MoradoresService.deleteMorador({ id })}
             defaultCreatePayload={{
               cargo: 0,
-              nome: "Morador",
+              nome: "Resident",
               email: "",
               mobile: 0,
               car1: null,
@@ -240,7 +240,7 @@ function Admin() {
 
         <TabsContent value="funcionarios" className="mt-4">
           <CrudSection
-            title="Funcionários"
+            title="Staff"
             description="CRUD permitido para cargo 0, 1 e 2."
             queryKey={["funcionarios"]}
             listFn={FuncionariosService.readFuncionarios}
@@ -272,7 +272,7 @@ function Admin() {
             deleteFn={(id) => FuncionariosService.deleteFuncionario({ id })}
             defaultCreatePayload={{
               status: true,
-              nome: "Funcionário",
+              nome: "Staff member",
               mobile: 0,
               cargo: 1,
               email: "",
@@ -284,7 +284,7 @@ function Admin() {
         <TabsContent value="acess" className="mt-4">
           <CrudSection
             title="Acess"
-            description="Create permitido para cargo 0. CRUD para cargo 0 e 1."
+            description="Create allowed for role 0. CRUD for roles 0 and 1."
             queryKey={["acess"]}
             listFn={AcessService.readAcesses}
             createFn={(payload) =>
@@ -320,7 +320,7 @@ function Admin() {
         <TabsContent value="readings" className="mt-4">
           <CrudSection
             title="Readings"
-            description="CRUD permitido para cargo 0, 1 e 2."
+            description="CRUD allowed for roles 0, 1 and 2."
             queryKey={["readings"]}
             listFn={ReadingsService.readReadings}
             createFn={(payload) =>

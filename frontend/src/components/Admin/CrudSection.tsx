@@ -123,7 +123,7 @@ const CrudSection = <T extends { id: string }>({
     try {
       return JSON.parse(raw) as Record<string, unknown>
     } catch {
-      showErrorToast("JSON inválido")
+      showErrorToast("Invalid JSON")
       return null
     }
   }
@@ -196,13 +196,13 @@ const CrudSection = <T extends { id: string }>({
             />
             <DialogFooter>
               <DialogClose asChild>
-                <Button variant="outline">Cancelar</Button>
+                <Button variant="outline">Cancel</Button>
               </DialogClose>
               <Button
                 onClick={handleCreate}
                 disabled={createMutation.isPending}
               >
-                Salvar
+                Save
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -217,17 +217,17 @@ const CrudSection = <T extends { id: string }>({
             <TableRow>
               <TableHead>ID</TableHead>
               <TableHead>Dados</TableHead>
-              <TableHead className="text-right">Ações</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={3}>Carregando...</TableCell>
+                <TableCell colSpan={3}>Loading...</TableCell>
               </TableRow>
             ) : rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={3}>Nenhum registro encontrado.</TableCell>
+                <TableCell colSpan={3}>No records found.</TableCell>
               </TableRow>
             ) : (
               rows.map((item) => (
@@ -247,14 +247,14 @@ const CrudSection = <T extends { id: string }>({
                         size="sm"
                         onClick={() => openEdit(item)}
                       >
-                        Editar
+                        Edit
                       </Button>
                       <Button
                         variant="destructive"
                         size="sm"
                         onClick={() => openDelete(item)}
                       >
-                        Excluir
+                        Delete
                       </Button>
                     </div>
                   </TableCell>
@@ -268,7 +268,7 @@ const CrudSection = <T extends { id: string }>({
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>
-            <DialogTitle>Editar {title}</DialogTitle>
+            <DialogTitle>Edit {title}</DialogTitle>
             <DialogDescription>
               Atualize o JSON do registro selecionado.
             </DialogDescription>
@@ -284,10 +284,10 @@ const CrudSection = <T extends { id: string }>({
           />
           <DialogFooter>
             <DialogClose asChild>
-              <Button variant="outline">Cancelar</Button>
+              <Button variant="outline">Cancel</Button>
             </DialogClose>
             <Button onClick={handleEdit} disabled={updateMutation.isPending}>
-              Salvar
+              Save
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -296,21 +296,21 @@ const CrudSection = <T extends { id: string }>({
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Excluir {title}</DialogTitle>
+            <DialogTitle>Delete {title}</DialogTitle>
             <DialogDescription>
-              Confirma a exclusão do registro selecionado?
+              Confirm deletion of the selected record?
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <DialogClose asChild>
-              <Button variant="outline">Cancelar</Button>
+              <Button variant="outline">Cancel</Button>
             </DialogClose>
             <Button
               variant="destructive"
               onClick={handleDelete}
               disabled={deleteMutation.isPending}
             >
-              Excluir
+              Delete
             </Button>
           </DialogFooter>
         </DialogContent>

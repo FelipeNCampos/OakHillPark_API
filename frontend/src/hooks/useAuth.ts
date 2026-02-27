@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+﻿import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 
 import {
@@ -43,15 +43,11 @@ const useAuth = () => {
       formData: data,
     })
     localStorage.setItem("access_token", response.access_token)
-    // Fetch user data immediately after login
     const userData = await UsersService.readUserMe()
 
-    // Verify user has permission to login (cargo >= 1 or is_superuser)
     if ((userData.cargo ?? 0) < 1 && !userData.is_superuser) {
       localStorage.removeItem("access_token")
-      throw new Error(
-        "Acesso negado. Apenas gerentes e administradores podem acessar.",
-      )
+      throw new Error("Access denied.")
     }
 
     return userData
@@ -60,19 +56,14 @@ const useAuth = () => {
   const loginMutation = useMutation({
     mutationFn: login,
     onSuccess: async (userData) => {
-      // Invalida o cache de usuário atual para forçar refetch
       await queryClient.invalidateQueries({ queryKey: ["currentUser"] })
-      // Redireciona baseado no tipo de usuário
-      // is_superuser = admin -> vai para /admin
-      // cargo >= 1 = gerente -> vai para /dashboard
       if (userData.is_superuser) {
-        // Admin - go to admin page
         navigate({ to: "/admin" })
-      } else if ((userData.cargo ?? 0) >= 1) {
-        // Manager - go to dashboard
+      } else if ((userData.cargo ?? 0) >= 2) {
         navigate({ to: "/dashboard" })
+      } else if ((userData.cargo ?? 0) === 1) {
+        navigate({ to: "/caretaker-tasks" as any })
       } else {
-        // Should not happen due to validation above
         navigate({ to: "/" })
       }
     },

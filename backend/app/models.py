@@ -83,6 +83,7 @@ class Condominio(SQLModel, table=True):
     funcionarios: list["Funcionario"] = Relationship(
         back_populates="condominio", cascade_delete=True
     )
+    tasks: list["Task"] = Relationship(back_populates="condominio", cascade_delete=True)
 
 
 class Building(SQLModel, table=True):
@@ -102,6 +103,9 @@ class Building(SQLModel, table=True):
         back_populates="building", cascade_delete=True
     )
     readings: list["Readings"] = Relationship(
+        back_populates="building", cascade_delete=True
+    )
+    bins: list["BinMissCollection"] = Relationship(
         back_populates="building", cascade_delete=True
     )
 
@@ -180,6 +184,59 @@ class Acess(SQLModel, table=True):
         foreign_key="funcionario.id", nullable=False, ondelete="CASCADE"
     )
     funcionario: Funcionario | None = Relationship(back_populates="acessos")
+
+
+class BinMissCollection(SQLModel, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    data: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    miss_collection: bool = Field(default=True)
+    building_id: uuid.UUID = Field(
+        foreign_key="building.id", nullable=False, ondelete="CASCADE"
+    )
+    building: Building | None = Relationship(back_populates="bins")
+
+
+class Task(SQLModel, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    title: str = Field(max_length=255)
+    description: str = Field(default="")
+    status: str = Field(default="todo", max_length=20)  # todo | in_progress | paused | done
+    condominio_id: uuid.UUID = Field(
+        foreign_key="condominio.id", nullable=False, ondelete="CASCADE"
+    )
+    created_by_user_id: uuid.UUID = Field(foreign_key="user.id", nullable=False)
+    assigned_to_user_id: uuid.UUID = Field(foreign_key="user.id", nullable=False)
+    created_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    updated_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    condominio: Condominio | None = Relationship(back_populates="tasks")
+    messages: list["TaskMessage"] = Relationship(
+        back_populates="task", cascade_delete=True
+    )
+
+
+class TaskMessage(SQLModel, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    task_id: uuid.UUID = Field(
+        foreign_key="task.id", nullable=False, ondelete="CASCADE"
+    )
+    sender_user_id: uuid.UUID = Field(foreign_key="user.id", nullable=False)
+    sender_role: str = Field(max_length=20)  # manager | caretaker
+    text: str | None = Field(default=None)
+    image_data: str | None = Field(default=None)
+    created_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    task: Task | None = Relationship(back_populates="messages")
 
 
 class Readings(SQLModel, table=True):
@@ -468,6 +525,85 @@ class AcessesPublic(SQLModel):
 class AcessActiveStatus(SQLModel):
     has_open_session: bool
     building_id: uuid.UUID | None = None
+
+
+class BinMissCollectionCreate(SQLModel):
+    building_id: uuid.UUID
+    miss_collection: bool = True
+
+
+class BinMissCollectionPublic(SQLModel):
+    id: uuid.UUID
+    data: datetime
+    miss_collection: bool
+    building_id: uuid.UUID
+    building_nome: str
+
+
+class BinMissCollectionsPublic(SQLModel):
+    data: list[BinMissCollectionPublic]
+    count: int
+
+
+class CaretakerPublic(SQLModel):
+    id: uuid.UUID
+    email: EmailStr
+    full_name: str | None = None
+
+
+class CaretakersPublic(SQLModel):
+    data: list[CaretakerPublic]
+    count: int
+
+
+class TaskCreate(SQLModel):
+    title: str = Field(min_length=1, max_length=255)
+    description: str = Field(default="")
+    assigned_to_user_id: uuid.UUID | None = None
+
+
+class TaskStatusUpdate(SQLModel):
+    status: str = Field(min_length=1, max_length=20)  # todo | in_progress | paused | done
+
+
+class TaskPublic(SQLModel):
+    id: uuid.UUID
+    title: str
+    description: str
+    status: str
+    condominio_id: uuid.UUID
+    created_by_user_id: uuid.UUID
+    assigned_to_user_id: uuid.UUID
+    assigned_to_name: str
+    spent_seconds: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+
+class TasksPublic(SQLModel):
+    data: list[TaskPublic]
+    count: int
+
+
+class TaskMessageCreate(SQLModel):
+    text: str | None = None
+    image_data: str | None = None
+
+
+class TaskMessagePublic(SQLModel):
+    id: uuid.UUID
+    task_id: uuid.UUID
+    sender_user_id: uuid.UUID
+    sender_name: str
+    sender_role: str
+    text: str | None
+    image_data: str | None
+    created_at: datetime
+
+
+class TaskMessagesPublic(SQLModel):
+    data: list[TaskMessagePublic]
+    count: int
 
 
 class ReadingsBase(SQLModel):

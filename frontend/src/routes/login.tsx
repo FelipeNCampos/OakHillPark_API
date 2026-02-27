@@ -75,8 +75,8 @@ function Login() {
 
   return (
     <AuthLayoutModal
-      title="Bem-vindo!"
-      description="Acesso para Gerentes do Condomínio"
+      title="Welcome!"
+      description="Access for Condo Managers"
     >
       <Form {...form}>
         <form
@@ -133,13 +133,21 @@ function Login() {
             >
               Forgot your password?
             </RouterLink>
-            <LoadingButton
-              type="submit"
-              loading={loginMutation.isPending}
-              className="cursor-pointer rounded border-0 bg-[#8c7569] px-3 py-2 font-['Nunito',sans-serif] text-white outline-none transition-all duration-300 hover:bg-[#55311c]"
-            >
-              Log in
-            </LoadingButton>
+            <div className="flex items-center gap-2">
+              <RouterLink
+                to={"/caretaker-login" as any}
+                className="text-sm text-[#8c7569] hover:underline"
+              >
+                Caretaker login
+              </RouterLink>
+              <LoadingButton
+                type="submit"
+                loading={loginMutation.isPending}
+                className="cursor-pointer rounded border-0 bg-[#8c7569] px-3 py-2 font-['Nunito',sans-serif] text-white outline-none transition-all duration-300 hover:bg-[#55311c]"
+              >
+                Log in
+              </LoadingButton>
+            </div>
           </div>
 
           <p className="invisible mt-15 text-center text-sm">

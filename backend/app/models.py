@@ -215,6 +215,15 @@ class Message(SQLModel):
     message: str
 
 
+class SMSNotificationCreate(SQLModel):
+    phone_to: str = Field(
+        min_length=9,
+        max_length=20,
+        description="Phone number in E.164 format, e.g. +15551234567",
+    )
+    body: str = Field(min_length=1, max_length=1600)
+
+
 # JSON payload containing access token
 class Token(SQLModel):
     access_token: str

@@ -1,4 +1,5 @@
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -8,12 +9,15 @@ import emails  # type: ignore
 import jwt
 from jinja2 import Template
 from jwt.exceptions import InvalidTokenError
+from twilio.base.exceptions import TwilioRestException
+from twilio.rest import Client
 
 from app.core import security
 from app.core.config import settings
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+E164_PHONE_REGEX = re.compile(r"^\+[1-9]\d{8,19}$")
 
 
 @dataclass
@@ -53,6 +57,47 @@ def send_email(
         smtp_options["password"] = settings.SMTP_PASSWORD
     response = message.send(to=email_to, smtp=smtp_options)
     logger.info(f"send email result: {response}")
+
+
+def send_sms_notification(*, phone_to: str, body: str) -> str:
+    if not settings.twilio_enabled:
+        error_message = "Twilio configuration is missing"
+        logger.error(
+            f"twilio sms skipped - reason='{error_message}' phone_to='{phone_to}'"
+        )
+        raise ValueError(error_message)
+
+    if not body.strip():
+        error_message = "SMS body cannot be empty"
+        logger.error(
+            f"twilio sms skipped - reason='{error_message}' phone_to='{phone_to}'"
+        )
+        raise ValueError(error_message)
+
+    if not E164_PHONE_REGEX.fullmatch(phone_to):
+        error_message = "Phone number must be in E.164 format"
+        logger.error(
+            f"twilio sms skipped - reason='{error_message}' phone_to='{phone_to}'"
+        )
+        raise ValueError(error_message)
+
+    logger.info(f"twilio sms sending - to='{phone_to}'")
+    try:
+        client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+        message = client.messages.create(
+            body=body,
+            from_=settings.TWILIO_FROM_NUMBER,
+            to=phone_to,
+        )
+        logger.info(
+            f"twilio sms sent - sid='{message.sid}' status='{message.status}' to='{phone_to}'"
+        )
+        return message.sid
+    except TwilioRestException as exc:
+        logger.exception(
+            f"twilio sms failed - to='{phone_to}' code='{exc.code}' message='{exc.msg}'"
+        )
+        raise
 
 
 def generate_test_email(email_to: str) -> EmailData:

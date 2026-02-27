@@ -22,7 +22,32 @@ def create_initial_data() -> None:
             select(Condominio).where(Condominio.nome == "Oak Hill Park")
         ).first()
         if condominio:
-            logger.info("Initial data already exists, skipping creation")
+            cleaner = session.exec(
+                select(Funcionario).where(
+                    Funcionario.condominio_id == condominio.id,
+                    Funcionario.cargo == 0,
+                    Funcionario.nome == "Cleaner",
+                )
+            ).first()
+            if cleaner:
+                cleaner.status = True
+                cleaner.is_default = True
+                session.add(cleaner)
+
+            caretaker = session.exec(
+                select(Funcionario).where(
+                    Funcionario.condominio_id == condominio.id,
+                    Funcionario.cargo == 1,
+                    Funcionario.nome == "Caretaker",
+                )
+            ).first()
+            if caretaker:
+                caretaker.status = True
+                caretaker.is_default = True
+                session.add(caretaker)
+
+            session.commit()
+            logger.info("Initial data already exists, ensured default staff are active")
             return
         # Create condominio
         condominio = Condominio(nome="Oak Hill Park")
@@ -42,8 +67,15 @@ def create_initial_data() -> None:
         # Create buildings
         for building_name, num_flats in buildings_data.items():
             # Set reading_types based on building
-            # Office has only Normal (2), others have Low + Normal (1 + 2 = 3)
-            reading_types = 2 if building_name == "Office" else 3
+            # Office has only Normal (2)
+            # Merlin, Northwood and Oak Lodge start with all reading types enabled (7)
+            # Others have Low + Normal (1 + 2 = 3)
+            if building_name == "Office":
+                reading_types = 2
+            elif building_name in {"Merlin", "Northwood", "Oak Lodge"}:
+                reading_types = 7
+            else:
+                reading_types = 3
 
             building = Building(
                 nome=building_name,
@@ -81,7 +113,7 @@ def create_initial_data() -> None:
                 "nome": "Caretaker",
                 "cargo": 1,
                 "status": True,
-                "is_default": False,
+                "is_default": True,
                 "mobile": 0,
                 "email": None,
             },

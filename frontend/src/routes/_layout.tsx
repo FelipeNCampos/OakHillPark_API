@@ -22,6 +22,7 @@ export const Route = createFileRoute("/_layout")({
     try {
       await UsersService.readUserMe()
     } catch (_error) {
+      localStorage.removeItem("access_token")
       throw redirect({
         to: "/login",
       })

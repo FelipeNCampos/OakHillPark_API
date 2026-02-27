@@ -2,8 +2,8 @@ from fastapi import APIRouter, Depends
 from pydantic.networks import EmailStr
 
 from app.api.deps import get_current_active_superuser
-from app.models import Message
-from app.utils import generate_test_email, send_email
+from app.models import Message, SMSNotificationCreate
+from app.utils import generate_test_email, send_email, send_sms_notification
 
 router = APIRouter(prefix="/utils", tags=["utils"])
 
@@ -24,6 +24,19 @@ def test_email(email_to: EmailStr) -> Message:
         html_content=email_data.html_content,
     )
     return Message(message="Test email sent")
+
+
+@router.post(
+    "/test-sms/",
+    dependencies=[Depends(get_current_active_superuser)],
+    status_code=201,
+)
+def test_sms(payload: SMSNotificationCreate) -> Message:
+    """
+    Test SMS notifications using Twilio.
+    """
+    sid = send_sms_notification(phone_to=payload.phone_to, body=payload.body)
+    return Message(message=f"Test SMS sent (sid={sid})")
 
 
 @router.get("/health-check/")

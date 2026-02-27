@@ -93,6 +93,16 @@ class Settings(BaseSettings):
     EMAIL_TEST_USER: EmailStr = "test@example.com"
     FIRST_SUPERUSER: EmailStr
     FIRST_SUPERUSER_PASSWORD: str
+    TWILIO_ACCOUNT_SID: str | None = None
+    TWILIO_AUTH_TOKEN: str | None = None
+    TWILIO_FROM_NUMBER: str | None = None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def twilio_enabled(self) -> bool:
+        return bool(
+            self.TWILIO_ACCOUNT_SID and self.TWILIO_AUTH_TOKEN and self.TWILIO_FROM_NUMBER
+        )
 
     def _check_default_secret(self, var_name: str, value: str | None) -> None:
         if value == "changethis":

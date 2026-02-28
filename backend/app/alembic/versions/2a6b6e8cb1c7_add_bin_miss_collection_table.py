@@ -8,6 +8,7 @@ Create Date: 2026-02-27 00:00:00.000000
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy import inspect
 
 # revision identifiers, used by Alembic.
 revision = "2a6b6e8cb1c7"
@@ -17,6 +18,11 @@ depends_on = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    inspector = inspect(bind)
+    if inspector.has_table("binmisscollection"):
+        return
+
     op.create_table(
         "binmisscollection",
         sa.Column("id", sa.Uuid(), nullable=False),
@@ -29,4 +35,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_table("binmisscollection")
+    bind = op.get_bind()
+    inspector = inspect(bind)
+    if inspector.has_table("binmisscollection"):
+        op.drop_table("binmisscollection")

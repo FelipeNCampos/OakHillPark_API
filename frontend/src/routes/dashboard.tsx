@@ -6,6 +6,15 @@
 } from "@tanstack/react-query"
 import { createFileRoute, redirect } from "@tanstack/react-router"
 import QRCode from "qrcode"
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts"
 import { useEffect, useMemo, useState } from "react"
 import { OpenAPI } from "@/client"
 import { TasksBoard } from "@/components/Tasks/TasksBoard"
@@ -3494,17 +3503,42 @@ function BinsQrCodesContent() {
 }
 
 function BinsContent() {
+  const { showErrorToast, showSuccessToast } = useCustomToast()
   const [page, setPage] = useState(0)
+  const [buildingFilter, setBuildingFilter] = useState("")
+  const [dateFrom, setDateFrom] = useState("")
+  const [dateTo, setDateTo] = useState("")
+  const [isDownloadingReport, setIsDownloadingReport] = useState(false)
   const pageSize = 20
+
+  const { data: buildingsData } = useQuery<ApiListResponse<Building>>({
+    queryKey: ["buildings", "bins-filter"],
+    queryFn: () => apiCall("/api/v1/buildings/condominio", { skip: 0, limit: 500 }),
+  })
+
+  const filterParams = useMemo(
+    () => ({
+      building_id: buildingFilter || undefined,
+      date_from: dateFrom || undefined,
+      date_to: dateTo || undefined,
+    }),
+    [buildingFilter, dateFrom, dateTo],
+  )
 
   const { data, isLoading, error } = useQuery<
     ApiListResponse<BinMissCollectionRecord>
   >({
-    queryKey: ["bins", page, pageSize],
-    queryFn: () => apiCall("/api/v1/bins/", { skip: page * pageSize, limit: pageSize }),
+    queryKey: ["bins", page, pageSize, filterParams],
+    queryFn: () =>
+      apiCall("/api/v1/bins/", {
+        skip: page * pageSize,
+        limit: pageSize,
+        ...filterParams,
+      }),
     placeholderData: keepPreviousData,
   })
 
+  const buildings = (buildingsData?.data || []) as Building[]
   const items = data?.data || []
   const count = data?.count || 0
   const totalPages = Math.max(1, Math.ceil(count / pageSize))
@@ -3519,6 +3553,62 @@ function BinsContent() {
     const dt = new Date(value)
     if (Number.isNaN(dt.getTime())) return "-"
     return dt.toLocaleTimeString()
+  }
+
+  const formatCsvValue = (value: string | number | boolean) => {
+    const text = String(value).replace(/"/g, '""')
+    return `"${text}"`
+  }
+
+  const handleDownloadReport = async () => {
+    setIsDownloadingReport(true)
+    try {
+      const firstPage = (await apiCall("/api/v1/bins/", {
+        skip: 0,
+        limit: 1,
+        ...filterParams,
+      })) as ApiListResponse<BinMissCollectionRecord>
+
+      const total = firstPage.count || 0
+      if (!total) {
+        showErrorToast("Nenhum resultado para gerar relatório.")
+        return
+      }
+
+      const fullResult = (await apiCall("/api/v1/bins/", {
+        skip: 0,
+        limit: total,
+        ...filterParams,
+      })) as ApiListResponse<BinMissCollectionRecord>
+
+      const lines = [
+        ["Date", "Time", "Building", "Miss Collection"].join(","),
+        ...fullResult.data.map((item) =>
+          [
+            formatCsvValue(formatDate(item.data)),
+            formatCsvValue(formatTime(item.data)),
+            formatCsvValue(item.building_nome),
+            formatCsvValue(item.miss_collection ? "Yes" : "No"),
+          ].join(","),
+        ),
+      ]
+      const csv = `\uFEFF${lines.join("\n")}`
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
+      const href = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      const day = new Date().toISOString().slice(0, 10)
+      link.href = href
+      link.download = `bins-report-${day}.csv`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(href)
+      showSuccessToast("Relatório gerado com sucesso.")
+    } catch {
+      showErrorToast("Erro ao gerar relatório.")
+    } finally {
+      setIsDownloadingReport(false)
+    }
   }
 
   if (isLoading) {
@@ -3553,6 +3643,83 @@ function BinsContent() {
       </div>
 
       <div className="rounded-lg bg-white p-6 shadow-md">
+        <div className="mb-4 grid gap-4 md:grid-cols-4">
+          <div>
+            <label
+              htmlFor="bins-building-filter"
+              className="mb-1 block text-sm font-semibold text-[#55311c]"
+            >
+              Build
+            </label>
+            <select
+              id="bins-building-filter"
+              value={buildingFilter}
+              onChange={(e) => {
+                setBuildingFilter(e.target.value)
+                setPage(0)
+              }}
+              className="w-full rounded border border-[#d9d0ca] px-3 py-2 text-[#55311c] focus:border-[#8c7569] focus:outline-none"
+            >
+              <option value="">Todos</option>
+              {buildings.map((building) => (
+                <option key={String(building.id)} value={String(building.id)}>
+                  {building.nome}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label
+              htmlFor="bins-date-from"
+              className="mb-1 block text-sm font-semibold text-[#55311c]"
+            >
+              Data inicial
+            </label>
+            <input
+              id="bins-date-from"
+              type="date"
+              value={dateFrom}
+              onChange={(e) => {
+                setDateFrom(e.target.value)
+                setPage(0)
+              }}
+              className="w-full rounded border border-[#d9d0ca] px-3 py-2 text-[#55311c] focus:border-[#8c7569] focus:outline-none"
+            />
+          </div>
+
+          <div>
+            <label
+              htmlFor="bins-date-to"
+              className="mb-1 block text-sm font-semibold text-[#55311c]"
+            >
+              Data final
+            </label>
+            <input
+              id="bins-date-to"
+              type="date"
+              value={dateTo}
+              min={dateFrom || undefined}
+              onChange={(e) => {
+                setDateTo(e.target.value)
+                setPage(0)
+              }}
+              className="w-full rounded border border-[#d9d0ca] px-3 py-2 text-[#55311c] focus:border-[#8c7569] focus:outline-none"
+            />
+          </div>
+
+          <div className="flex items-end">
+            <button
+              type="button"
+              onClick={handleDownloadReport}
+              disabled={isDownloadingReport}
+              className="w-full rounded bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 hover:bg-[#55311c]"
+            >
+              {isDownloadingReport ? "Gerando..." : "Baixar relatório"}
+            </button>
+          </div>
+        </div>
+
         <div className="overflow-x-auto">
           <table className="w-full border-collapse">
             <thead>
@@ -4108,7 +4275,7 @@ function CleanerSummary() {
 
     if (openRecord) result.push({ inRecord: openRecord })
 
-    return result.reverse().slice(0, 20)
+    return result.reverse()
   }, [acesses, activeCleanerId])
 
   const formatDate = (dateValue?: string | null) => {
@@ -4141,6 +4308,106 @@ function CleanerSummary() {
     return `${hours}h ${minutes}m`
   }
 
+  const getDurationMinutes = (
+    inValue?: string | null,
+    outValue?: string | null,
+  ) => {
+    if (!inValue || !outValue) return 0
+    const start = new Date(inValue).getTime()
+    const end = new Date(outValue).getTime()
+    if (Number.isNaN(start) || Number.isNaN(end) || end < start) return 0
+    const diffMinutes = Math.floor((end - start) / 60000)
+    if (diffMinutes >= 1440) return 0
+    return diffMinutes
+  }
+
+  const formatTotalMinutes = (totalMinutes: number) => {
+    const hours = Math.floor(totalMinutes / 60)
+    const minutes = totalMinutes % 60
+    return `${hours}h ${minutes}m`
+  }
+
+  const enrichedSessions = useMemo(() => {
+    return sessions.map((session) => {
+      const buildingId =
+        session.inRecord?.building_id || session.outRecord?.building_id
+      const buildingLabel =
+        (buildingId && buildingMap.get(buildingId)) ||
+        session.inRecord?.building_nome ||
+        session.outRecord?.building_nome ||
+        "-"
+      const durationMinutes = getDurationMinutes(
+        session.inRecord?.data,
+        session.outRecord?.data,
+      )
+      const startDate = session.inRecord?.data
+        ? new Date(session.inRecord.data)
+        : null
+
+      return {
+        ...session,
+        buildingLabel,
+        durationMinutes,
+        startDate,
+      }
+    })
+  }, [sessions, buildingMap])
+
+  const tableSessions = useMemo(
+    () => enrichedSessions.slice(0, 20),
+    [enrichedSessions],
+  )
+
+  const buildingHoursData = useMemo(() => {
+    const hoursByBuilding = new Map<string, number>()
+
+    enrichedSessions.forEach((session) => {
+      if (!session.durationMinutes || !session.buildingLabel) return
+      const current = hoursByBuilding.get(session.buildingLabel) || 0
+      hoursByBuilding.set(
+        session.buildingLabel,
+        current + session.durationMinutes,
+      )
+    })
+
+    return [...hoursByBuilding.entries()]
+      .map(([building, minutes]) => ({
+        building,
+        hours: Number((minutes / 60).toFixed(2)),
+      }))
+      .sort((a, b) => b.hours - a.hours)
+  }, [enrichedSessions])
+
+  const workloadCards = useMemo(() => {
+    const now = new Date()
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    const weekStart = new Date(todayStart)
+    const dayOfWeek = weekStart.getDay()
+    const diffToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1
+    weekStart.setDate(weekStart.getDate() - diffToMonday)
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+
+    let todayMinutes = 0
+    let weekMinutes = 0
+    let monthMinutes = 0
+
+    enrichedSessions.forEach((session) => {
+      if (!session.startDate || !session.durationMinutes) return
+      const startTime = session.startDate.getTime()
+      if (startTime >= todayStart.getTime())
+        todayMinutes += session.durationMinutes
+      if (startTime >= weekStart.getTime()) weekMinutes += session.durationMinutes
+      if (startTime >= monthStart.getTime())
+        monthMinutes += session.durationMinutes
+    })
+
+    return [
+      { label: "Hoje", value: formatTotalMinutes(todayMinutes) },
+      { label: "Semana", value: formatTotalMinutes(weekMinutes) },
+      { label: "Mês", value: formatTotalMinutes(monthMinutes) },
+    ]
+  }, [enrichedSessions])
+
   return (
     <div className="rounded-lg bg-white p-6 shadow-md">
       <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -4151,6 +4418,60 @@ function CleanerSummary() {
           <span className="rounded-full bg-[#f5f1ee] px-3 py-1 text-xs font-semibold text-[#55311c]">
             Select an active cleaner from registration
           </span>
+        )}
+      </div>
+
+      <div className="mb-6 grid gap-3 sm:grid-cols-3">
+        {workloadCards.map((card) => (
+          <div
+            key={card.label}
+            className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4"
+          >
+            <p className="text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]">
+              {card.label}
+            </p>
+            <p className="mt-1 text-2xl font-bold text-[#55311c]">
+              {card.value}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      <div className="mb-6 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
+        <h4 className="mb-3 text-sm font-semibold text-[#55311c]">
+          Horas por building
+        </h4>
+        <div className="h-72 w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={buildingHoursData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#d9d0ca" />
+              <XAxis
+                dataKey="building"
+                stroke="#55311c"
+                tick={{ fill: "#55311c", fontSize: 12 }}
+              />
+              <YAxis stroke="#55311c" tick={{ fill: "#55311c", fontSize: 12 }} />
+              <Tooltip
+                formatter={(value: number) => [`${value}h`, "Horas"]}
+                contentStyle={{
+                  borderRadius: "10px",
+                  border: "1px solid #e5e0dc",
+                  backgroundColor: "#fff",
+                }}
+              />
+              <Bar
+                dataKey="hours"
+                fill="#8c7569"
+                radius={[6, 6, 0, 0]}
+                maxBarSize={56}
+              />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+        {!isLoadingAcess && buildingHoursData.length === 0 && (
+          <p className="mt-3 text-sm text-[rgba(0,0,0,0.6)]">
+            Sem sessoes fechadas para gerar grafico.
+          </p>
         )}
       </div>
 
@@ -4186,7 +4507,7 @@ function CleanerSummary() {
                 </td>
               </tr>
             )}
-            {!isLoadingAcess && sessions.length === 0 && (
+            {!isLoadingAcess && tableSessions.length === 0 && (
               <tr>
                 <td
                   className="border border-gray-400 px-3 py-3 text-center text-sm text-gray-600"
@@ -4196,14 +4517,7 @@ function CleanerSummary() {
                 </td>
               </tr>
             )}
-            {sessions.map((session, index) => {
-              const buildingId =
-                session.inRecord?.building_id || session.outRecord?.building_id
-              const buildingLabel =
-                (buildingId && buildingMap.get(buildingId)) ||
-                session.inRecord?.building_nome ||
-                session.outRecord?.building_nome ||
-                "-"
+            {tableSessions.map((session, index) => {
               const dateLabel = formatDate(
                 session.inRecord?.data || session.outRecord?.data,
               )
@@ -4217,7 +4531,7 @@ function CleanerSummary() {
                     {dateLabel}
                   </td>
                   <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
-                    {buildingLabel}
+                    {session.buildingLabel}
                   </td>
                   <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
                     {formatTime(session.inRecord?.data)}

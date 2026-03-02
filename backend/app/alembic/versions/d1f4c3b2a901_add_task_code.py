@@ -51,12 +51,20 @@ def upgrade() -> None:
     )
 
     op.alter_column("task", "code", existing_type=sa.String(length=32), nullable=False)
-    op.create_index("ix_task_code", "task", ["code"], unique=False)
-    op.create_unique_constraint(
-        "uq_task_condominio_code",
-        "task",
-        ["condominio_id", "code"],
-    )
+
+    indexes = {index["name"] for index in inspector.get_indexes("task")}
+    if "ix_task_code" not in indexes:
+        op.create_index("ix_task_code", "task", ["code"], unique=False)
+
+    unique_constraints = {
+        constraint["name"] for constraint in inspector.get_unique_constraints("task")
+    }
+    if "uq_task_condominio_code" not in unique_constraints:
+        op.create_unique_constraint(
+            "uq_task_condominio_code",
+            "task",
+            ["condominio_id", "code"],
+        )
 
 
 def downgrade() -> None:

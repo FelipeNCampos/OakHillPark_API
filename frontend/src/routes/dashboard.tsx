@@ -390,6 +390,9 @@ const weekdayLabelsFromMask = (mask: number) =>
     .filter((option) => (mask & (1 << option.value)) !== 0)
     .map((option) => option.label)
 
+const REMINDS_EXECUTE_DUE_LAST_RUN_KEY = "ohp_reminds_execute_due_last_run_v1"
+const REMINDS_EXECUTE_DUE_COOLDOWN_MS = 60 * 1000
+
 const FIRE_ALARM_ANCHOR_DATE = "2026-02-26"
 const FIRE_ALARM_ANCHOR_REPETITION = 14
 const FIRE_ALARM_STORAGE_KEY = "ohp_fire_alarm_schedule_v1"
@@ -537,7 +540,373 @@ const FIRE_ALARM_INITIAL_LOGS: FireAlarmLogByDate = {
     oak_lodge: { time: "11:50", actionRequired: false, comment: "" },
     northwood: { time: "12:00", actionRequired: false, comment: "" },
   },
+  "2025-05-15": {
+    falcon_1_6: { time: "11:10", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:20", actionRequired: false, comment: "" },
+    martlett: { time: "11:30", actionRequired: false, comment: "" },
+    merlin: { time: "11:40", actionRequired: false, comment: "" },
+    oak_lodge: { time: "11:50", actionRequired: false, comment: "" },
+    northwood: { time: "12:00", actionRequired: false, comment: "" },
+  },
+  "2025-05-08": {
+    falcon_1_6: { time: "11:00", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:10", actionRequired: false, comment: "" },
+    martlett: { time: "11:20", actionRequired: false, comment: "" },
+    merlin: { time: "11:30", actionRequired: false, comment: "" },
+    oak_lodge: { time: "11:40", actionRequired: false, comment: "" },
+    northwood: { time: "11:50", actionRequired: false, comment: "" },
+  },
+  "2025-05-01": {
+    falcon_1_6: { time: "11:00", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:10", actionRequired: false, comment: "" },
+    martlett: { time: "11:20", actionRequired: false, comment: "" },
+    merlin: { time: "11:30", actionRequired: false, comment: "" },
+    oak_lodge: { time: "11:40", actionRequired: false, comment: "" },
+    northwood: { time: "11:50", actionRequired: false, comment: "" },
+  },
+  "2025-04-24": {
+    falcon_1_6: { time: "12:00", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "12:10", actionRequired: false, comment: "" },
+    martlett: { time: "12:20", actionRequired: false, comment: "" },
+    merlin: { time: "12:30", actionRequired: false, comment: "" },
+    oak_lodge: { time: "12:40", actionRequired: false, comment: "" },
+    northwood: { time: "12:50", actionRequired: false, comment: "" },
+  },
+  "2025-04-17": {
+    falcon_1_6: { time: "11:20", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:30", actionRequired: false, comment: "" },
+    martlett: { time: "11:40", actionRequired: false, comment: "" },
+    merlin: { time: "11:50", actionRequired: false, comment: "" },
+    oak_lodge: { time: "12:00", actionRequired: false, comment: "" },
+    northwood: { time: "12:10", actionRequired: false, comment: "" },
+  },
+  "2025-04-10": {
+    falcon_1_6: { time: "11:10", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:20", actionRequired: false, comment: "" },
+    martlett: { time: "11:30", actionRequired: false, comment: "" },
+    merlin: { time: "11:40", actionRequired: false, comment: "" },
+    oak_lodge: { time: "11:50", actionRequired: false, comment: "" },
+    northwood: { time: "12:00", actionRequired: false, comment: "" },
+  },
+  "2025-04-03": {
+    falcon_1_6: { time: "11:10", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:20", actionRequired: false, comment: "" },
+    martlett: { time: "11:30", actionRequired: false, comment: "" },
+    merlin: { time: "11:40", actionRequired: false, comment: "" },
+    oak_lodge: { time: "11:50", actionRequired: false, comment: "" },
+    northwood: { time: "12:00", actionRequired: false, comment: "" },
+  },
+  "2025-03-27": {
+    falcon_1_6: { time: "11:20", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:30", actionRequired: false, comment: "" },
+    martlett: { time: "11:40", actionRequired: false, comment: "" },
+    merlin: { time: "11:50", actionRequired: false, comment: "" },
+    oak_lodge: { time: "12:00", actionRequired: false, comment: "" },
+    northwood: { time: "12:10", actionRequired: false, comment: "" },
+  },
+  "2025-03-20": {
+    falcon_1_6: { time: "13:00", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "13:10", actionRequired: false, comment: "" },
+    martlett: { time: "13:20", actionRequired: false, comment: "" },
+    merlin: { time: "13:30", actionRequired: false, comment: "" },
+    oak_lodge: { time: "13:40", actionRequired: false, comment: "" },
+    northwood: { time: "13:50", actionRequired: false, comment: "" },
+  },
+  "2025-03-13": {
+    falcon_1_6: { time: "11:00", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:10", actionRequired: false, comment: "" },
+    martlett: { time: "11:20", actionRequired: false, comment: "" },
+    merlin: { time: "11:30", actionRequired: false, comment: "" },
+    oak_lodge: { time: "11:40", actionRequired: false, comment: "" },
+    northwood: { time: "11:50", actionRequired: false, comment: "" },
+  },
+  "2025-03-06": {
+    falcon_1_6: { time: "11:00", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:10", actionRequired: false, comment: "" },
+    martlett: { time: "11:20", actionRequired: false, comment: "" },
+    merlin: { time: "11:30", actionRequired: false, comment: "" },
+    oak_lodge: { time: "11:40", actionRequired: false, comment: "" },
+    northwood: { time: "11:50", actionRequired: false, comment: "" },
+  },
+  "2025-02-27": {
+    falcon_1_6: { time: "11:20", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:30", actionRequired: false, comment: "" },
+    martlett: { time: "11:40", actionRequired: false, comment: "" },
+    merlin: { time: "11:50", actionRequired: false, comment: "" },
+    oak_lodge: { time: "12:00", actionRequired: false, comment: "" },
+    northwood: { time: "12:10", actionRequired: false, comment: "" },
+  },
+  "2025-02-20": {
+    falcon_1_6: { time: "11:00", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:10", actionRequired: false, comment: "" },
+    martlett: { time: "11:20", actionRequired: false, comment: "" },
+    merlin: { time: "11:30", actionRequired: false, comment: "" },
+    oak_lodge: { time: "11:40", actionRequired: false, comment: "" },
+    northwood: { time: "11:40", actionRequired: false, comment: "" },
+  },
+  "2025-02-13": {
+    falcon_1_6: { time: "11:00", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:20", actionRequired: false, comment: "" },
+    martlett: { time: "11:30", actionRequired: false, comment: "" },
+    merlin: { time: "11:40", actionRequired: false, comment: "" },
+    oak_lodge: { time: "11:50", actionRequired: false, comment: "" },
+    northwood: { time: "12:00", actionRequired: false, comment: "" },
+  },
+  "2025-02-06": {
+    falcon_1_6: { time: "11:00", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:10", actionRequired: false, comment: "" },
+    martlett: { time: "11:20", actionRequired: false, comment: "" },
+    merlin: { time: "11:30", actionRequired: false, comment: "" },
+    oak_lodge: { time: "11:40", actionRequired: false, comment: "" },
+    northwood: { time: "11:50", actionRequired: false, comment: "" },
+  },
+  "2025-02-01": {
+    falcon_1_6: { time: "11:00", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:10", actionRequired: false, comment: "" },
+    martlett: { time: "11:20", actionRequired: false, comment: "" },
+    merlin: { time: "11:30", actionRequired: false, comment: "" },
+    oak_lodge: { time: "11:40", actionRequired: false, comment: "" },
+    northwood: { time: "11:50", actionRequired: false, comment: "" },
+  },
+  "2025-01-30": {
+    falcon_1_6: { time: "11:40", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:50", actionRequired: false, comment: "" },
+    martlett: { time: "12:00", actionRequired: false, comment: "" },
+    merlin: { time: "12:10", actionRequired: false, comment: "" },
+    oak_lodge: { time: "12:20", actionRequired: false, comment: "" },
+    northwood: { time: "12:30", actionRequired: false, comment: "" },
+  },
+  "2025-01-23": {
+    falcon_1_6: { time: "11:20", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:30", actionRequired: false, comment: "" },
+    martlett: { time: "11:40", actionRequired: false, comment: "" },
+    merlin: { time: "11:50", actionRequired: false, comment: "" },
+    oak_lodge: { time: "12:00", actionRequired: false, comment: "" },
+    northwood: { time: "12:10", actionRequired: false, comment: "" },
+  },
+  "2025-01-16": {
+    falcon_1_6: { time: "11:40", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:50", actionRequired: false, comment: "" },
+    martlett: { time: "12:00", actionRequired: false, comment: "" },
+    merlin: { time: "12:15", actionRequired: false, comment: "" },
+    oak_lodge: { time: "12:25", actionRequired: false, comment: "" },
+    northwood: { time: "12:35", actionRequired: false, comment: "" },
+  },
+  "2025-01-09": {
+    falcon_1_6: { time: "11:10", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:20", actionRequired: false, comment: "" },
+    martlett: { time: "11:30", actionRequired: false, comment: "" },
+    merlin: { time: "11:40", actionRequired: false, comment: "" },
+    oak_lodge: { time: "11:50", actionRequired: false, comment: "" },
+    northwood: { time: "12:00", actionRequired: false, comment: "" },
+  },
+  "2024-12-26": {
+    falcon_1_6: { time: "11:00", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:10", actionRequired: false, comment: "" },
+    martlett: { time: "11:25", actionRequired: false, comment: "" },
+    merlin: { time: "11:40", actionRequired: false, comment: "" },
+    oak_lodge: { time: "11:50", actionRequired: false, comment: "" },
+    northwood: { time: "12:00", actionRequired: false, comment: "" },
+  },
+  "2024-12-19": {
+    falcon_1_6: { time: "11:30", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:40", actionRequired: false, comment: "" },
+    martlett: { time: "11:50", actionRequired: false, comment: "" },
+    merlin: { time: "12:00", actionRequired: false, comment: "" },
+    oak_lodge: { time: "12:10", actionRequired: false, comment: "" },
+    northwood: { time: "12:20", actionRequired: false, comment: "" },
+  },
+  "2024-12-12": {
+    falcon_1_6: { time: "11:40", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:50", actionRequired: false, comment: "" },
+    martlett: { time: "12:00", actionRequired: false, comment: "" },
+    merlin: { time: "12:15", actionRequired: false, comment: "" },
+    oak_lodge: { time: "12:25", actionRequired: false, comment: "" },
+    northwood: { time: "12:35", actionRequired: false, comment: "" },
+  },
+  "2024-12-05": {
+    falcon_1_6: { time: "11:30", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:40", actionRequired: false, comment: "" },
+    martlett: { time: "11:50", actionRequired: false, comment: "" },
+    merlin: { time: "12:00", actionRequired: false, comment: "" },
+    oak_lodge: { time: "12:15", actionRequired: false, comment: "" },
+    northwood: { time: "12:25", actionRequired: false, comment: "" },
+  },
+  "2024-11-28": {
+    falcon_1_6: { time: "11:10", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:20", actionRequired: false, comment: "" },
+    martlett: { time: "11:35", actionRequired: false, comment: "" },
+    merlin: { time: "11:45", actionRequired: false, comment: "" },
+    oak_lodge: { time: "11:55", actionRequired: false, comment: "" },
+    northwood: { time: "12:10", actionRequired: false, comment: "" },
+  },
+  "2024-11-21": {
+    falcon_1_6: { time: "11:10", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:20", actionRequired: false, comment: "" },
+    martlett: { time: "11:30", actionRequired: false, comment: "" },
+    merlin: { time: "11:40", actionRequired: false, comment: "" },
+    oak_lodge: { time: "11:50", actionRequired: false, comment: "" },
+    northwood: { time: "12:00", actionRequired: false, comment: "" },
+  },
+  "2024-11-14": {
+    falcon_1_6: { time: "11:10", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:25", actionRequired: false, comment: "" },
+    martlett: { time: "11:40", actionRequired: false, comment: "" },
+    merlin: { time: "11:50", actionRequired: false, comment: "" },
+    oak_lodge: { time: "12:10", actionRequired: false, comment: "" },
+    northwood: { time: "12:20", actionRequired: false, comment: "" },
+  },
+  "2024-11-07": {
+    falcon_1_6: { time: "11:40", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:50", actionRequired: false, comment: "" },
+    martlett: { time: "12:30", actionRequired: false, comment: "" },
+    merlin: { time: "12:10", actionRequired: false, comment: "" },
+    oak_lodge: { time: "12:15", actionRequired: false, comment: "" },
+    northwood: { time: "12:20", actionRequired: false, comment: "" },
+  },
+  "2024-10-31": {
+    falcon_1_6: { time: "11:30", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:40", actionRequired: false, comment: "" },
+    martlett: { time: "11:50", actionRequired: false, comment: "" },
+    merlin: { time: "12:00", actionRequired: false, comment: "" },
+    oak_lodge: { time: "12:10", actionRequired: false, comment: "" },
+    northwood: { time: "12:20", actionRequired: false, comment: "" },
+  },
+  "2024-10-24": {
+    falcon_1_6: { time: "11:40", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:50", actionRequired: false, comment: "" },
+    martlett: { time: "12:00", actionRequired: false, comment: "" },
+    merlin: { time: "12:10", actionRequired: false, comment: "" },
+    oak_lodge: { time: "12:20", actionRequired: false, comment: "" },
+    northwood: { time: "12:30", actionRequired: false, comment: "" },
+  },
+  "2024-10-17": {
+    falcon_1_6: { time: "11:00", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:10", actionRequired: false, comment: "" },
+    martlett: { time: "11:20", actionRequired: false, comment: "" },
+    merlin: { time: "11:30", actionRequired: false, comment: "" },
+    oak_lodge: { time: "11:40", actionRequired: false, comment: "" },
+    northwood: { time: "11:50", actionRequired: false, comment: "" },
+  },
+  "2024-10-10": {
+    falcon_1_6: { time: "11:20", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:30", actionRequired: false, comment: "" },
+    martlett: { time: "11:40", actionRequired: false, comment: "" },
+    merlin: { time: "11:50", actionRequired: false, comment: "" },
+    oak_lodge: { time: "12:00", actionRequired: false, comment: "" },
+    northwood: { time: "12:10", actionRequired: false, comment: "" },
+  },
+  "2024-10-03": {
+    falcon_1_6: { time: "11:00", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:10", actionRequired: false, comment: "" },
+    martlett: { time: "11:20", actionRequired: false, comment: "" },
+    merlin: { time: "11:30", actionRequired: false, comment: "" },
+    oak_lodge: { time: "11:40", actionRequired: false, comment: "" },
+    northwood: { time: "11:50", actionRequired: false, comment: "" },
+  },
+  "2024-09-26": {
+    falcon_1_6: { time: "11:30", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:40", actionRequired: false, comment: "" },
+    martlett: { time: "11:50", actionRequired: false, comment: "" },
+    merlin: { time: "12:00", actionRequired: false, comment: "" },
+    oak_lodge: { time: "12:10", actionRequired: false, comment: "" },
+    northwood: { time: "12:20", actionRequired: false, comment: "" },
+  },
+  "2024-09-19": {
+    falcon_1_6: { time: "11:40", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:50", actionRequired: false, comment: "" },
+    martlett: { time: "12:00", actionRequired: false, comment: "" },
+    merlin: { time: "12:10", actionRequired: false, comment: "" },
+    oak_lodge: { time: "12:20", actionRequired: false, comment: "" },
+    northwood: { time: "12:30", actionRequired: false, comment: "" },
+  },
 }
+
+const LIFT_SCHEDULE_INITIAL_LOGS: FireAlarmLogByDate = {
+  "2025-02-01": {
+    falcon_1_6: { time: "", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "", actionRequired: false, comment: "" },
+    martlett: { time: "11:00", actionRequired: false, comment: "" },
+    merlin: { time: "11:10", actionRequired: false, comment: "" },
+    oak_lodge: { time: "11:20", actionRequired: false, comment: "" },
+    northwood: { time: "", actionRequired: false, comment: "" },
+  },
+  "2025-01-01": {
+    falcon_1_6: { time: "", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "", actionRequired: false, comment: "" },
+    martlett: { time: "11:00", actionRequired: false, comment: "" },
+    merlin: { time: "11:10", actionRequired: false, comment: "" },
+    oak_lodge: { time: "11:20", actionRequired: false, comment: "" },
+    northwood: { time: "", actionRequired: false, comment: "" },
+  },
+}
+
+const LIGHT_SCHEDULE_INITIAL_LOGS: FireAlarmLogByDate = {
+  "2025-06-03": {
+    falcon_1_6: { time: "12:00", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "12:20", actionRequired: false, comment: "" },
+    martlett: { time: "12:50", actionRequired: false, comment: "" },
+    merlin: { time: "13:10", actionRequired: false, comment: "" },
+    oak_lodge: { time: "13:30", actionRequired: false, comment: "" },
+    northwood: { time: "14:00", actionRequired: false, comment: "" },
+  },
+  "2025-05-03": {
+    falcon_1_6: { time: "11:20", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:40", actionRequired: false, comment: "" },
+    martlett: { time: "12:00", actionRequired: false, comment: "" },
+    merlin: { time: "12:20", actionRequired: false, comment: "" },
+    oak_lodge: { time: "12:40", actionRequired: false, comment: "" },
+    northwood: { time: "13:00", actionRequired: false, comment: "" },
+  },
+  "2025-04-03": {
+    falcon_1_6: { time: "11:00", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:20", actionRequired: false, comment: "" },
+    martlett: { time: "11:40", actionRequired: false, comment: "" },
+    merlin: { time: "12:00", actionRequired: false, comment: "" },
+    oak_lodge: { time: "12:20", actionRequired: false, comment: "" },
+    northwood: { time: "12:40", actionRequired: false, comment: "" },
+  },
+  "2025-03-03": {
+    falcon_1_6: { time: "11:00", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:10", actionRequired: false, comment: "" },
+    martlett: { time: "12:00", actionRequired: false, comment: "" },
+    merlin: { time: "12:10", actionRequired: false, comment: "" },
+    oak_lodge: { time: "12:30", actionRequired: false, comment: "" },
+    northwood: { time: "13:00", actionRequired: false, comment: "" },
+  },
+  "2025-02-03": {
+    falcon_1_6: { time: "12:00", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "12:20", actionRequired: false, comment: "" },
+    martlett: { time: "12:50", actionRequired: false, comment: "" },
+    merlin: { time: "13:20", actionRequired: false, comment: "" },
+    oak_lodge: { time: "13:45", actionRequired: false, comment: "" },
+    northwood: { time: "14:00", actionRequired: false, comment: "" },
+  },
+}
+
+const mergeLogsWithInitialSeed = (
+  logs: FireAlarmLogByDate,
+  initialSeed: FireAlarmLogByDate,
+) => {
+  const merged: FireAlarmLogByDate = { ...logs }
+  Object.entries(initialSeed).forEach(([date, seedRows]) => {
+    merged[date] = {
+      ...seedRows,
+      ...(merged[date] || {}),
+    }
+  })
+  return merged
+}
+
+const mergeFireAlarmLogsWithInitialSeed = (logs: FireAlarmLogByDate) =>
+  mergeLogsWithInitialSeed(logs, FIRE_ALARM_INITIAL_LOGS)
+
+const getInitialLogsByScheduleId = (
+  scheduleId: "lift" | "light",
+): FireAlarmLogByDate =>
+  scheduleId === "lift"
+    ? LIFT_SCHEDULE_INITIAL_LOGS
+    : LIGHT_SCHEDULE_INITIAL_LOGS
 
 const FIRE_ALARM_BUILDINGS: FireAlarmBuildingConfig[] = [
   {
@@ -758,6 +1127,28 @@ const shiftFireAlarmCycleDate = (isoDate: string, weeks: number) => {
   const current = parseIsoDateToUtc(snapToFireAlarmCycleDate(isoDate))
   if (Number.isNaN(current)) return FIRE_ALARM_ANCHOR_DATE
   return formatUtcMsToIsoDate(current + weeks * 7 * 24 * 60 * 60 * 1000)
+}
+
+const snapToMonthDayDate = (isoDate: string, dayOfMonth: number) => {
+  const [yearRaw, monthRaw] = isoDate.split("-")
+  const year = Number(yearRaw)
+  const month = Number(monthRaw)
+  if (!year || !month) return isoDate
+  const day = String(dayOfMonth).padStart(2, "0")
+  return `${year}-${String(month).padStart(2, "0")}-${day}`
+}
+
+const shiftMonthDate = (isoDate: string, months: number, dayOfMonth: number) => {
+  const normalized = snapToMonthDayDate(isoDate, dayOfMonth)
+  const [yearRaw, monthRaw] = normalized.split("-")
+  const year = Number(yearRaw)
+  const month = Number(monthRaw)
+  if (!year || !month) return normalized
+  const base = new Date(Date.UTC(year, month - 1 + months, 1))
+  const nextYear = base.getUTCFullYear()
+  const nextMonth = String(base.getUTCMonth() + 1).padStart(2, "0")
+  const day = String(dayOfMonth).padStart(2, "0")
+  return `${nextYear}-${nextMonth}-${day}`
 }
 
 const getCallPointIndex = (callPoints: string[], anchorCallPoint: string) => {
@@ -4164,9 +4555,19 @@ function RemindsContent() {
   })
 
   useEffect(() => {
-    if (executeDueMutation.isPending) return
-    executeDueMutation.mutate()
-  }, [executeDueMutation.isPending, executeDueMutation.mutate])
+    try {
+      const now = Date.now()
+      const rawLastRun = localStorage.getItem(REMINDS_EXECUTE_DUE_LAST_RUN_KEY)
+      const lastRun = rawLastRun ? Number(rawLastRun) : 0
+      if (Number.isFinite(lastRun) && now - lastRun < REMINDS_EXECUTE_DUE_COOLDOWN_MS) {
+        return
+      }
+      localStorage.setItem(REMINDS_EXECUTE_DUE_LAST_RUN_KEY, String(now))
+      executeDueMutation.mutate()
+    } catch {
+      executeDueMutation.mutate()
+    }
+  }, [])
 
   const createMutation = useMutation({
     mutationFn: (payload: Record<string, unknown>) =>
@@ -6174,8 +6575,10 @@ function FireAlarmSchedulePage() {
         return
       }
       const parsed = JSON.parse(raw) as FireAlarmLogByDate
-      setAllLogs(parsed)
-      setRows(parsed[selectedDate] || getDefaultFireAlarmRows())
+      const merged = mergeFireAlarmLogsWithInitialSeed(parsed)
+      localStorage.setItem(FIRE_ALARM_STORAGE_KEY, JSON.stringify(merged))
+      setAllLogs(merged)
+      setRows(merged[selectedDate] || getDefaultFireAlarmRows())
     } catch {
       setAllLogs({})
       setRows(getDefaultFireAlarmRows())
@@ -6694,8 +7097,18 @@ function BuildingSchedulePage({
   storageKey: string
 }) {
   const { showSuccessToast, showErrorToast } = useCustomToast()
+  const monthlyDay = scheduleId === "lift" ? 1 : scheduleId === "light" ? 3 : null
+  const isMonthlySchedule = monthlyDay !== null
+  const snapScheduleDate = (date: string) =>
+    isMonthlySchedule
+      ? snapToMonthDayDate(date, monthlyDay)
+      : snapToFireAlarmCycleDate(date)
+  const shiftScheduleDate = (date: string, step: number) =>
+    isMonthlySchedule
+      ? shiftMonthDate(date, step, monthlyDay)
+      : shiftFireAlarmCycleDate(date, step)
   const [selectedDate, setSelectedDate] = useState(() =>
-    snapToFireAlarmCycleDate(toDateInputValue()),
+    snapScheduleDate(toDateInputValue()),
   )
   const [allLogs, setAllLogs] = useState<FireAlarmLogByDate>({})
   const [rows, setRows] = useState<
@@ -6708,23 +7121,27 @@ function BuildingSchedulePage({
   const [reportDateTo, setReportDateTo] = useState("")
   const [reportEmail, setReportEmail] = useState("")
   const [isSendingReport, setIsSendingReport] = useState(false)
+  const initialLogs = getInitialLogsByScheduleId(scheduleId)
 
   useEffect(() => {
     try {
       const raw = localStorage.getItem(storageKey)
       if (!raw) {
-        setAllLogs({})
-        setRows(getDefaultFireAlarmRows())
+        localStorage.setItem(storageKey, JSON.stringify(initialLogs))
+        setAllLogs(initialLogs)
+        setRows(initialLogs[selectedDate] || getDefaultFireAlarmRows())
         return
       }
       const parsed = JSON.parse(raw) as FireAlarmLogByDate
-      setAllLogs(parsed)
-      setRows(parsed[selectedDate] || getDefaultFireAlarmRows())
+      const merged = mergeLogsWithInitialSeed(parsed, initialLogs)
+      localStorage.setItem(storageKey, JSON.stringify(merged))
+      setAllLogs(merged)
+      setRows(merged[selectedDate] || getDefaultFireAlarmRows())
     } catch {
       setAllLogs({})
       setRows(getDefaultFireAlarmRows())
     }
-  }, [selectedDate, storageKey])
+  }, [initialLogs, selectedDate, storageKey])
 
   const repetition = useMemo(
     () => getFireAlarmRepetition(selectedDate),
@@ -7017,7 +7434,7 @@ function BuildingSchedulePage({
                       <button
                         type="button"
                         onClick={() => {
-                          setSelectedDate(snapToFireAlarmCycleDate(date))
+                          setSelectedDate(snapScheduleDate(date))
                           setActiveView("schedule")
                         }}
                         className="rounded border border-[#8c7569] px-3 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
@@ -7041,7 +7458,11 @@ function BuildingSchedulePage({
         <div>
           <h3 className="text-lg font-bold text-[#55311c]">{title}</h3>
           <p className="text-sm text-[rgba(0,0,0,0.65)]">
-            Synced weekly with 26/02/2026 (repetition 14).
+            {scheduleId === "lift"
+              ? "Occurs on day 1 of each month."
+              : scheduleId === "light"
+                ? "Occurs on day 3 of each month."
+              : "Synced weekly with 26/02/2026 (repetition 14)."}
           </p>
         </div>
         <button
@@ -7054,16 +7475,19 @@ function BuildingSchedulePage({
       </div>
 
       <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] px-4 py-3 text-sm text-[#55311c]">
-        Date: <strong>{formatDateToGb(selectedDate)}</strong> | Repetition:{" "}
-        <strong>{repetition}</strong>
+        Date: <strong>{formatDateToGb(selectedDate)}</strong>
+        {!isMonthlySchedule && (
+          <>
+            {" "}
+            | Repetition: <strong>{repetition}</strong>
+          </>
+        )}
       </div>
 
       <div className="flex flex-wrap items-end justify-center gap-2 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-3">
         <button
           type="button"
-          onClick={() =>
-            setSelectedDate((previous) => shiftFireAlarmCycleDate(previous, -1))
-          }
+          onClick={() => setSelectedDate((previous) => shiftScheduleDate(previous, -1))}
           className="rounded-lg border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
         >
           Back
@@ -7079,17 +7503,13 @@ function BuildingSchedulePage({
             id={`${idPrefix}-date`}
             type="date"
             value={selectedDate}
-            onChange={(event) =>
-              setSelectedDate(snapToFireAlarmCycleDate(event.target.value))
-            }
+            onChange={(event) => setSelectedDate(snapScheduleDate(event.target.value))}
             className="rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
           />
         </div>
         <button
           type="button"
-          onClick={() =>
-            setSelectedDate((previous) => shiftFireAlarmCycleDate(previous, 1))
-          }
+          onClick={() => setSelectedDate((previous) => shiftScheduleDate(previous, 1))}
           className="rounded-lg border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
         >
           Next

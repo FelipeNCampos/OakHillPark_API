@@ -162,11 +162,24 @@ def send_sms_notification(*, phone_to: str, body: str) -> str:
     logger.info(f"twilio sms sending - to='{phone_to}'")
     try:
         client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
-        message = client.messages.create(
-            body=body,
-            from_=settings.TWILIO_FROM_NUMBER,
-            to=phone_to,
-        )
+        message_payload: dict[str, Any] = {
+            "body": body,
+            "to": phone_to,
+        }
+        if settings.TWILIO_MESSAGING_SERVICE_SID:
+            message_payload["messaging_service_sid"] = (
+                settings.TWILIO_MESSAGING_SERVICE_SID
+            )
+        else:
+            message_payload["from_"] = settings.TWILIO_FROM_NUMBER
+
+        if settings.TWILIO_STATUS_CALLBACK_URL:
+            message_payload["status_callback"] = str(
+                settings.TWILIO_STATUS_CALLBACK_URL
+            )
+            message_payload["status_callback_method"] = "POST"
+
+        message = client.messages.create(**message_payload)
         logger.info(
             f"twilio sms sent - sid='{message.sid}' status='{message.status}' to='{phone_to}'"
         )

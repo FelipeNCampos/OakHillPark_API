@@ -10,6 +10,7 @@ from app.api.routes import (
     funcionarios,
     login,
     moradores,
+    reminds,
     private,
     readings,
     tasks,
@@ -27,6 +28,7 @@ api_router.include_router(buildings.router)
 api_router.include_router(flats.router)
 api_router.include_router(moradores.router)
 api_router.include_router(funcionarios.router)
+api_router.include_router(reminds.router)
 api_router.include_router(acess.router)
 api_router.include_router(bins.router)
 api_router.include_router(readings.router)

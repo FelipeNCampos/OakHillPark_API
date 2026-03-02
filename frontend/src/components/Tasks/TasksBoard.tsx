@@ -9,6 +9,7 @@ type BoardMode = "manager" | "caretaker"
 
 type Task = {
   id: string
+  code: string
   title: string
   description: string
   status: TaskStatus
@@ -44,7 +45,21 @@ const apiCall = async (
   endpoint: string,
   options?: { method?: string; body?: unknown },
 ) => {
-  const base = OpenAPI.BASE || "http://localhost:8000"
+  const resolveApiBase = () => {
+    if (OpenAPI.BASE) return OpenAPI.BASE
+    if (typeof window !== "undefined") {
+      const { protocol, hostname, port } = window.location
+      if (hostname.startsWith("dashboard.")) {
+        return `${protocol}//api.${hostname.slice("dashboard.".length)}`
+      }
+      if (hostname === "localhost" && port === "5173") {
+        return "http://localhost:8000"
+      }
+      return `${protocol}//${hostname}${port ? `:${port}` : ""}`
+    }
+    return "http://localhost:8000"
+  }
+  const base = resolveApiBase()
   const response = await fetch(`${base}${endpoint}`, {
     method: options?.method || "GET",
     headers: {
@@ -62,7 +77,10 @@ const apiCall = async (
   if (!response.ok) {
     let message = `HTTP ${response.status}`
     try {
-      const payload = (await response.json()) as { detail?: string; message?: string }
+      const payload = (await response.json()) as {
+        detail?: string
+        message?: string
+      }
       message = payload.detail || payload.message || message
     } catch {
       // ignore parse errors
@@ -103,11 +121,12 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
 
   const isManager = mode === "manager"
 
-  const { data: tasksData, isLoading: tasksLoading } = useQuery<TaskListResponse>({
-    queryKey: ["tasks", mode],
-    queryFn: () => apiCall("/api/v1/tasks/"),
-    refetchInterval: selectedTaskId ? 10000 : 15000,
-  })
+  const { data: tasksData, isLoading: tasksLoading } =
+    useQuery<TaskListResponse>({
+      queryKey: ["tasks", mode],
+      queryFn: () => apiCall("/api/v1/tasks/"),
+      refetchInterval: selectedTaskId ? 10000 : 15000,
+    })
 
   const tasks = tasksData?.data || []
   const selectedTask = tasks.find((t) => t.id === selectedTaskId) || null
@@ -138,7 +157,8 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
   const statusEvents = useMemo(
     () =>
       allMessages.filter(
-        (msg) => Boolean(msg.text) && String(msg.text).startsWith(STATUS_EVENT_PREFIX),
+        (msg) =>
+          Boolean(msg.text) && String(msg.text).startsWith(STATUS_EVENT_PREFIX),
       ),
     [allMessages],
   )
@@ -146,8 +166,7 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
   const chatMessages = useMemo(
     () =>
       allMessages.filter(
-        (msg) =>
-          !msg.text || !String(msg.text).startsWith(STATUS_EVENT_PREFIX),
+        (msg) => !msg.text || !String(msg.text).startsWith(STATUS_EVENT_PREFIX),
       ),
     [allMessages],
   )
@@ -168,7 +187,9 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
       queryClient.invalidateQueries({ queryKey: ["tasks"] })
     },
     onError: (error: unknown) => {
-      showErrorToast(error instanceof Error ? error.message : "Error creating task")
+      showErrorToast(
+        error instanceof Error ? error.message : "Error creating task",
+      )
     },
   })
 
@@ -181,7 +202,9 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tasks"] })
       if (selectedTaskId) {
-        queryClient.invalidateQueries({ queryKey: ["task-messages", selectedTaskId] })
+        queryClient.invalidateQueries({
+          queryKey: ["task-messages", selectedTaskId],
+        })
       }
     },
     onError: (error: unknown) => {
@@ -203,11 +226,15 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
     onSuccess: () => {
       setChatText("")
       setChatImageData(null)
-      queryClient.invalidateQueries({ queryKey: ["task-messages", selectedTaskId] })
+      queryClient.invalidateQueries({
+        queryKey: ["task-messages", selectedTaskId],
+      })
       queryClient.invalidateQueries({ queryKey: ["tasks"] })
     },
     onError: (error: unknown) => {
-      showErrorToast(error instanceof Error ? error.message : "Error sending message")
+      showErrorToast(
+        error instanceof Error ? error.message : "Error sending message",
+      )
     },
   })
 
@@ -233,7 +260,7 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
   const handleSendMessage = () => {
     if (!selectedTaskId) return
     if (!chatText.trim() && !chatImageData) {
-      showErrorToast("Digite mensagem ou anexe imagem")
+      showErrorToast("Type a message or attach an image")
       return
     }
     sendMessageMutation.mutate()
@@ -244,7 +271,10 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
     updateStatusMutation.mutate({ taskId: task.id, status: nextStatus })
   }
 
-  const handleDropOnColumn = (targetStatus: TaskStatus, taskIdFromDrop?: string) => {
+  const handleDropOnColumn = (
+    targetStatus: TaskStatus,
+    taskIdFromDrop?: string,
+  ) => {
     const droppedTaskId = taskIdFromDrop || draggingTaskId
     if (!droppedTaskId) return
     const task = tasks.find((item) => item.id === droppedTaskId)
@@ -309,15 +339,15 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
   }
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6">
-      <div className="rounded-lg bg-white p-6 shadow-md">
+    <div className="mx-auto w-full max-w-7xl space-y-4 sm:space-y-6">
+      <div className="rounded-lg bg-white p-4 shadow-md sm:p-6">
         <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
           Tasks
         </h2>
       </div>
 
       {isManager && (
-        <div className="rounded-lg bg-white p-6 shadow-md">
+        <div className="rounded-lg bg-white p-4 shadow-md sm:p-6">
           <h3 className="mb-3 text-lg font-bold text-[#55311c]">Create task</h3>
           <div className="grid gap-3 md:grid-cols-2">
             <input
@@ -344,7 +374,7 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
         </div>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {(Object.keys(groupedTasks) as TaskStatus[]).map((status) => (
           <div
             key={status}
@@ -387,6 +417,9 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
                   <p className="text-[11px] font-semibold uppercase tracking-wide text-[#8c7569]">
                     Spent: {formatSpentTime(task.spent_seconds)}
                   </p>
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-[#8c7569]">
+                    {task.code}
+                  </p>
                   <p className="font-semibold text-[#55311c]">{task.title}</p>
                   <p className="mt-1 line-clamp-2 text-xs text-[rgba(0,0,0,0.65)]">
                     {task.description || "No description"}
@@ -398,7 +431,7 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
                 </div>
               ))}
               {groupedTasks[status].length === 0 && (
-                <p className="text-xs text-[rgba(0,0,0,0.55)]">Sem tasks</p>
+                <p className="text-xs text-[rgba(0,0,0,0.55)]">No tasks</p>
               )}
             </div>
           </div>
@@ -406,12 +439,12 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
       </div>
 
       {selectedTask && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-lg bg-white shadow-xl">
-            <div className="flex items-start justify-between border-b border-[#e6ddd7] px-6 py-4">
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-2 sm:items-center sm:p-4">
+          <div className="max-h-[95vh] w-full max-w-5xl overflow-hidden rounded-lg bg-white shadow-xl sm:max-h-[90vh]">
+            <div className="flex flex-col items-start justify-between gap-3 border-b border-[#e6ddd7] px-4 py-4 sm:flex-row sm:px-6">
               <div>
                 <h3 className="text-lg font-bold text-[#55311c]">
-                  {selectedTask.title}
+                  {selectedTask.code} - {selectedTask.title}
                 </h3>
                 <p className="text-sm text-[rgba(0,0,0,0.7)]">
                   {selectedTask.description || "No description"}
@@ -420,13 +453,13 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
               <button
                 type="button"
                 onClick={closeTaskPopup}
-                className="rounded bg-gray-200 px-3 py-1 text-sm font-semibold text-[#55311c] hover:bg-gray-300"
+                className="w-full rounded bg-gray-200 px-3 py-2 text-sm font-semibold text-[#55311c] hover:bg-gray-300 sm:w-auto sm:py-1"
               >
                 Close
               </button>
             </div>
 
-            <div className="grid max-h-[calc(90vh-78px)] gap-4 overflow-y-auto p-6 lg:grid-cols-3">
+            <div className="grid max-h-[calc(95vh-96px)] gap-4 overflow-y-auto p-3 sm:max-h-[calc(90vh-78px)] sm:p-6 lg:grid-cols-3">
               <div className="rounded border border-[#e6ddd7] bg-[#f9f6f3] p-4 lg:col-span-1">
                 <h4 className="mb-3 text-sm font-bold uppercase tracking-wide text-[#8c7569]">
                   Status History
@@ -439,7 +472,7 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
                       </p>
                       <p className="mt-1 text-xs text-[rgba(0,0,0,0.55)]">
                         {event.sender_name} •{" "}
-                        {new Date(event.created_at).toLocaleString()}
+                        {new Date(event.created_at).toLocaleString("en-GB")}
                       </p>
                     </div>
                   ))}
@@ -456,20 +489,24 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
 
                 <div className="max-h-[40vh] space-y-3 overflow-y-auto rounded border border-[#e6ddd7] p-3">
                   {messagesLoading && (
-                    <p className="text-sm text-[rgba(0,0,0,0.6)]">Loading chat...</p>
+                    <p className="text-sm text-[rgba(0,0,0,0.6)]">
+                      Loading chat...
+                    </p>
                   )}
                   {chatMessages.map((msg) => (
                     <div key={msg.id} className="rounded bg-[#f7f2ee] p-3">
-                      <div className="mb-1 flex items-center justify-between">
+                      <div className="mb-1 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                         <span className="text-xs font-semibold text-[#55311c]">
                           {msg.sender_name} ({msg.sender_role})
                         </span>
                         <span className="text-xs text-[rgba(0,0,0,0.55)]">
-                          {new Date(msg.created_at).toLocaleString()}
+                          {new Date(msg.created_at).toLocaleString("en-GB")}
                         </span>
                       </div>
                       {msg.text && (
-                        <p className="text-sm text-[rgba(0,0,0,0.78)]">{msg.text}</p>
+                        <p className="text-sm text-[rgba(0,0,0,0.78)]">
+                          {msg.text}
+                        </p>
                       )}
                       {msg.image_data && (
                         <img
@@ -481,7 +518,9 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
                     </div>
                   ))}
                   {chatMessages.length === 0 && !messagesLoading && (
-                    <p className="text-sm text-[rgba(0,0,0,0.6)]">Sem mensagens ainda.</p>
+                    <p className="text-sm text-[rgba(0,0,0,0.6)]">
+                      No messages yet.
+                    </p>
                   )}
                 </div>
 
@@ -506,7 +545,9 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
                       id="task-chat-image-input"
                       type="file"
                       accept="image/*"
-                      onChange={(e) => handleSelectImage(e.target.files?.[0] || null)}
+                      onChange={(e) =>
+                        handleSelectImage(e.target.files?.[0] || null)
+                      }
                       className="hidden"
                     />
                     <label
@@ -541,7 +582,9 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
                     disabled={sendMessageMutation.isPending}
                     className="rounded bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white hover:bg-[#55311c] disabled:opacity-60"
                   >
-                    {sendMessageMutation.isPending ? "Sending..." : "Send message"}
+                    {sendMessageMutation.isPending
+                      ? "Sending..."
+                      : "Send message"}
                   </button>
                 </div>
               </div>

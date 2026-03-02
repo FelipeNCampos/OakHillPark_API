@@ -1,7 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod"
 import { createFileRoute, redirect } from "@tanstack/react-router"
-import { useForm } from "react-hook-form"
 import { useState } from "react"
+import { useForm } from "react-hook-form"
 import { z } from "zod"
 
 import { OpenAPI, UsersService } from "@/client"
@@ -17,8 +17,8 @@ import {
 import { Input } from "@/components/ui/input"
 import { LoadingButton } from "@/components/ui/loading-button"
 import { PasswordInput } from "@/components/ui/password-input"
-import useCustomToast from "@/hooks/useCustomToast"
 import { isLoggedIn } from "@/hooks/useAuth"
+import useCustomToast from "@/hooks/useCustomToast"
 
 const formSchema = z.object({
   username: z.email(),
@@ -34,7 +34,8 @@ export const Route = createFileRoute("/caretaker-login" as any)({
   component: CaretakerLogin,
   beforeLoad: async () => {
     if (isLoggedIn()) {
-      let current: Awaited<ReturnType<typeof UsersService.readUserMe>> | null = null
+      let current: Awaited<ReturnType<typeof UsersService.readUserMe>> | null =
+        null
       try {
         current = await UsersService.readUserMe()
       } catch {
@@ -76,13 +77,16 @@ function CaretakerLogin() {
       body.set("username", data.username)
       body.set("password", data.password)
       const base = OpenAPI.BASE || "http://localhost:8000"
-      const response = await fetch(`${base}/api/v1/login/caretaker-access-token`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
+      const response = await fetch(
+        `${base}/api/v1/login/caretaker-access-token`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body,
         },
-        body,
-      })
+      )
 
       if (!response.ok) {
         let message = "Login failed"
@@ -166,7 +170,7 @@ function CaretakerLogin() {
             <LoadingButton
               type="submit"
               loading={isSubmitting}
-              className="cursor-pointer rounded border-0 bg-[#8c7569] px-3 py-2 font-['Nunito',sans-serif] text-white outline-none transition-all duration-300 hover:bg-[#55311c]"
+              className="w-full cursor-pointer rounded border-0 bg-[#8c7569] px-3 py-2 font-['Nunito',sans-serif] text-white outline-none transition-all duration-300 hover:bg-[#55311c] sm:w-auto"
             >
               Log in as Caretaker
             </LoadingButton>

@@ -1,11 +1,14 @@
-﻿import {
+import {
   keepPreviousData,
   useMutation,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query"
 import { createFileRoute, redirect } from "@tanstack/react-router"
+import jsPDF from "jspdf"
+import autoTable from "jspdf-autotable"
 import QRCode from "qrcode"
+import { useEffect, useMemo, useState } from "react"
 import {
   Bar,
   BarChart,
@@ -15,7 +18,6 @@ import {
   XAxis,
   YAxis,
 } from "recharts"
-import { useEffect, useMemo, useState } from "react"
 import { OpenAPI } from "@/client"
 import { TasksBoard } from "@/components/Tasks/TasksBoard"
 import useAuth, { isLoggedIn } from "@/hooks/useAuth"
@@ -80,8 +82,28 @@ interface BinMissCollectionRecord {
   id: EntityId
   data: string
   miss_collection: boolean
+  collection_type: "general" | "recycle"
+  collection_status: "miss" | "late"
   building_id: EntityId
   building_nome: string
+}
+
+interface BinSessionRecord {
+  id: EntityId
+  status: boolean
+  data: string
+  operacao: number
+  building_id: EntityId
+  building_nome: string
+  funcionario_id: EntityId
+}
+
+interface WorkTimeSessionRecord {
+  id: EntityId
+  status: boolean
+  data: string
+  operacao: number
+  funcionario_id: EntityId
 }
 
 interface Morador {
@@ -98,6 +120,55 @@ interface Morador {
   car3?: string | null
   reading_types: number
 }
+
+interface ReminderItem {
+  id: EntityId
+  name: string
+  weekday_mask: number
+  is_active: boolean
+  action_sms: boolean
+  sms_to?: string | null
+  sms_message?: string | null
+  action_task: boolean
+  task_title?: string | null
+  task_description?: string | null
+  last_triggered_on?: string | null
+  updated_at: string
+}
+
+interface ReminderExecutionInfo {
+  checked: number
+  triggered: number
+  sms_sent: number
+  tasks_created: number
+}
+
+type FireAlarmBuildingId =
+  | "falcon_1_6"
+  | "falcon_7_12"
+  | "martlett"
+  | "merlin"
+  | "oak_lodge"
+  | "northwood"
+
+interface FireAlarmBuildingConfig {
+  id: FireAlarmBuildingId
+  label: string
+  callPoints: string[]
+  locations: string[]
+  anchorCallPoint: string
+}
+
+interface FireAlarmLogRow {
+  time: string
+  actionRequired: boolean
+  comment: string
+}
+
+type FireAlarmLogByDate = Record<
+  string,
+  Record<FireAlarmBuildingId, FireAlarmLogRow>
+>
 
 type ResidentTypeFilter = "owner_1" | "owner_2" | "tenant" | "agent" | "all"
 
@@ -150,7 +221,22 @@ const apiCall = async (
   endpoint: string,
   params?: ApiQueryParams | ApiRequestOptions,
 ) => {
-  const url = new URL(`${OpenAPI.BASE || "http://localhost:8000"}${endpoint}`)
+  const resolveApiBase = () => {
+    if (OpenAPI.BASE) return OpenAPI.BASE
+    if (typeof window !== "undefined") {
+      const { protocol, hostname, port } = window.location
+      if (hostname.startsWith("dashboard.")) {
+        return `${protocol}//api.${hostname.slice("dashboard.".length)}`
+      }
+      if (hostname === "localhost" && port === "5173") {
+        return "http://localhost:8000"
+      }
+      return `${protocol}//${hostname}${port ? `:${port}` : ""}`
+    }
+    return "http://localhost:8000"
+  }
+
+  const url = new URL(`${resolveApiBase()}${endpoint}`)
   const requestOptions = isRequestOptions(params) ? params : undefined
 
   if (!requestOptions && params) {
@@ -175,8 +261,589 @@ const apiCall = async (
   }
 
   const response = await fetch(url.toString(), options)
-  if (!response.ok) throw new Error("API call failed")
+  if (!response.ok) {
+    let message = "API call failed"
+    try {
+      const payload = (await response.json()) as {
+        detail?: string
+        message?: string
+      }
+      message = payload.detail || payload.message || message
+    } catch {
+      // ignore parse errors
+    }
+    throw new Error(message)
+  }
   return response.json()
+}
+
+const formatDateToBr = (value: string) => {
+  const datePart = value.includes("T") ? value.split("T")[0] : value
+  const [y, m, d] = datePart.split("-")
+  if (!y || !m || !d) return value
+  return `${d}/${m}/${y}`
+}
+
+const isDateWithinRange = (
+  value: string,
+  dateFrom?: string,
+  dateTo?: string,
+) => {
+  const datePart = value.includes("T") ? value.split("T")[0] : value
+  if (dateFrom && datePart < dateFrom) return false
+  if (dateTo && datePart > dateTo) return false
+  return true
+}
+
+const buildDateRangeLabel = (dateFrom?: string, dateTo?: string) => {
+  if (dateFrom && dateTo)
+    return `${formatDateToBr(dateFrom)} - ${formatDateToBr(dateTo)}`
+  if (dateFrom) return `From ${formatDateToBr(dateFrom)}`
+  if (dateTo) return `Until ${formatDateToBr(dateTo)}`
+  return "All period"
+}
+
+const escapeHtml = (value: string) =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+
+const buildReadingsReportEmailHtml = ({
+  reportType,
+  locationLabel,
+  periodLabel,
+}: {
+  reportType: "Building" | "Flat"
+  locationLabel: string
+  periodLabel: string
+}) => {
+  const safeType = escapeHtml(reportType)
+  const safeLocation = escapeHtml(locationLabel)
+  const safePeriod = escapeHtml(periodLabel)
+
+  return `
+  <div style="font-family:Arial,Helvetica,sans-serif;color:#2f2f2f;line-height:1.5;">
+    <h2 style="margin:0 0 12px;color:#55311c;">Hello,</h2>
+    <p style="margin:0 0 10px;">
+      Please find attached your readings report.
+    </p>
+    <p style="margin:0 0 6px;"><strong>Type:</strong> ${safeType}</p>
+    <p style="margin:0 0 6px;"><strong>${safeType}:</strong> ${safeLocation}</p>
+    <p style="margin:0 0 16px;"><strong>Period:</strong> ${safePeriod}</p>
+    <p style="margin:0 0 8px;">
+      If you have any questions, please reply to this email.
+    </p>
+    <p style="margin:0;color:#666;">OakHill Park Team</p>
+  </div>
+  `.trim()
+}
+
+const buildScheduleReportEmailHtml = ({
+  scheduleName,
+  periodLabel,
+}: {
+  scheduleName: string
+  periodLabel: string
+}) => {
+  const safeSchedule = escapeHtml(scheduleName)
+  const safePeriod = escapeHtml(periodLabel)
+
+  return `
+  <div style="font-family:Arial,Helvetica,sans-serif;color:#2f2f2f;line-height:1.5;">
+    <h2 style="margin:0 0 12px;color:#55311c;">Hello,</h2>
+    <p style="margin:0 0 10px;">
+      Please find attached your schedule report.
+    </p>
+    <p style="margin:0 0 6px;"><strong>Schedule:</strong> ${safeSchedule}</p>
+    <p style="margin:0 0 16px;"><strong>Period:</strong> ${safePeriod}</p>
+    <p style="margin:0 0 8px;">
+      If you have any questions, please reply to this email.
+    </p>
+    <p style="margin:0;color:#666;">OakHill Park Team</p>
+  </div>
+  `.trim()
+}
+
+const weekdayOptions = [
+  { value: 0, label: "Monday" },
+  { value: 1, label: "Tuesday" },
+  { value: 2, label: "Wednesday" },
+  { value: 3, label: "Thursday" },
+  { value: 4, label: "Friday" },
+  { value: 5, label: "Saturday" },
+  { value: 6, label: "Sunday" },
+]
+
+const weekdayMaskFromList = (days: number[]) =>
+  days.reduce((mask, day) => mask | (1 << day), 0)
+
+const weekdayListFromMask = (mask: number) =>
+  weekdayOptions
+    .filter((option) => (mask & (1 << option.value)) !== 0)
+    .map((option) => option.value)
+
+const weekdayLabelsFromMask = (mask: number) =>
+  weekdayOptions
+    .filter((option) => (mask & (1 << option.value)) !== 0)
+    .map((option) => option.label)
+
+const FIRE_ALARM_ANCHOR_DATE = "2026-02-26"
+const FIRE_ALARM_ANCHOR_REPETITION = 14
+const FIRE_ALARM_STORAGE_KEY = "ohp_fire_alarm_schedule_v1"
+const LIFT_SCHEDULE_STORAGE_KEY = "ohp_lift_schedule_v1"
+const LIGHT_SCHEDULE_STORAGE_KEY = "ohp_emergency_light_schedule_v1"
+const FIRE_ALARM_ANCHOR_CALL_POINTS: Record<FireAlarmBuildingId, string> = {
+  falcon_1_6: "014",
+  falcon_7_12: "014",
+  martlett: "055",
+  merlin: "020",
+  oak_lodge: "063",
+  northwood: "021",
+}
+
+const FIRE_ALARM_INITIAL_LOGS: FireAlarmLogByDate = {
+  "2026-02-19": {
+    falcon_1_6: { time: "11:00", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:10", actionRequired: false, comment: "" },
+    martlett: { time: "11:20", actionRequired: false, comment: "" },
+    merlin: { time: "11:30", actionRequired: false, comment: "" },
+    oak_lodge: { time: "11:40", actionRequired: false, comment: "" },
+    northwood: { time: "11:50", actionRequired: false, comment: "" },
+  },
+  "2026-02-12": {
+    falcon_1_6: { time: "11:00", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:10", actionRequired: false, comment: "" },
+    martlett: { time: "11:20", actionRequired: false, comment: "" },
+    merlin: { time: "11:30", actionRequired: false, comment: "" },
+    oak_lodge: { time: "11:40", actionRequired: false, comment: "" },
+    northwood: { time: "11:50", actionRequired: false, comment: "" },
+  },
+  "2026-02-05": {
+    falcon_1_6: { time: "11:00", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:10", actionRequired: false, comment: "" },
+    martlett: { time: "11:20", actionRequired: false, comment: "" },
+    merlin: { time: "11:30", actionRequired: false, comment: "" },
+    oak_lodge: { time: "11:40", actionRequired: false, comment: "" },
+    northwood: { time: "11:50", actionRequired: false, comment: "" },
+  },
+  "2026-01-29": {
+    falcon_1_6: { time: "11:00", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:10", actionRequired: false, comment: "" },
+    martlett: { time: "11:20", actionRequired: false, comment: "" },
+    merlin: { time: "11:30", actionRequired: false, comment: "" },
+    oak_lodge: { time: "11:40", actionRequired: false, comment: "" },
+    northwood: { time: "11:50", actionRequired: false, comment: "" },
+  },
+  "2026-01-22": {
+    falcon_1_6: { time: "11:00", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:10", actionRequired: false, comment: "" },
+    martlett: { time: "11:20", actionRequired: false, comment: "" },
+    merlin: { time: "11:30", actionRequired: false, comment: "" },
+    oak_lodge: { time: "11:40", actionRequired: false, comment: "" },
+    northwood: { time: "11:50", actionRequired: false, comment: "" },
+  },
+  "2026-01-15": {
+    falcon_1_6: { time: "11:00", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:10", actionRequired: false, comment: "" },
+    martlett: { time: "11:20", actionRequired: false, comment: "" },
+    merlin: { time: "11:30", actionRequired: false, comment: "" },
+    oak_lodge: { time: "11:40", actionRequired: false, comment: "" },
+    northwood: { time: "11:50", actionRequired: false, comment: "" },
+  },
+  "2026-01-08": {
+    falcon_1_6: { time: "11:00", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:10", actionRequired: false, comment: "" },
+    martlett: { time: "11:20", actionRequired: false, comment: "" },
+    merlin: { time: "11:30", actionRequired: false, comment: "" },
+    oak_lodge: { time: "11:40", actionRequired: false, comment: "" },
+    northwood: { time: "11:50", actionRequired: false, comment: "" },
+  },
+  "2025-12-18": {
+    falcon_1_6: { time: "11:00", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:10", actionRequired: false, comment: "" },
+    martlett: { time: "11:20", actionRequired: false, comment: "" },
+    merlin: { time: "11:30", actionRequired: false, comment: "" },
+    oak_lodge: { time: "11:40", actionRequired: false, comment: "" },
+    northwood: { time: "11:50", actionRequired: false, comment: "" },
+  },
+  "2025-12-11": {
+    falcon_1_6: { time: "11:00", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:10", actionRequired: false, comment: "" },
+    martlett: { time: "11:20", actionRequired: false, comment: "" },
+    merlin: { time: "11:30", actionRequired: false, comment: "" },
+    oak_lodge: { time: "11:40", actionRequired: false, comment: "" },
+    northwood: { time: "11:50", actionRequired: false, comment: "" },
+  },
+  "2025-12-04": {
+    falcon_1_6: { time: "11:00", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:10", actionRequired: false, comment: "" },
+    martlett: { time: "11:20", actionRequired: false, comment: "" },
+    merlin: { time: "11:30", actionRequired: false, comment: "" },
+    oak_lodge: { time: "11:40", actionRequired: false, comment: "" },
+    northwood: { time: "11:50", actionRequired: false, comment: "" },
+  },
+  "2025-11-27": {
+    falcon_1_6: { time: "11:10", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:20", actionRequired: false, comment: "" },
+    martlett: { time: "11:30", actionRequired: false, comment: "" },
+    merlin: { time: "11:40", actionRequired: false, comment: "" },
+    oak_lodge: { time: "11:50", actionRequired: false, comment: "" },
+    northwood: { time: "12:00", actionRequired: false, comment: "" },
+  },
+  "2025-11-20": {
+    falcon_1_6: { time: "11:00", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:20", actionRequired: false, comment: "" },
+    martlett: { time: "11:30", actionRequired: false, comment: "" },
+    merlin: { time: "11:40", actionRequired: false, comment: "" },
+    oak_lodge: { time: "11:50", actionRequired: false, comment: "" },
+    northwood: { time: "12:00", actionRequired: false, comment: "" },
+  },
+  "2025-11-13": {
+    falcon_1_6: { time: "11:20", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:30", actionRequired: false, comment: "" },
+    martlett: { time: "11:40", actionRequired: false, comment: "" },
+    merlin: { time: "11:50", actionRequired: false, comment: "" },
+    oak_lodge: { time: "12:00", actionRequired: false, comment: "" },
+    northwood: { time: "12:10", actionRequired: false, comment: "" },
+  },
+  "2025-11-06": {
+    falcon_1_6: { time: "11:00", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:10", actionRequired: false, comment: "" },
+    martlett: { time: "11:20", actionRequired: false, comment: "" },
+    merlin: { time: "11:30", actionRequired: false, comment: "" },
+    oak_lodge: { time: "11:40", actionRequired: false, comment: "" },
+    northwood: { time: "11:50", actionRequired: false, comment: "" },
+  },
+  "2025-10-30": {
+    falcon_1_6: { time: "11:00", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:10", actionRequired: false, comment: "" },
+    martlett: { time: "11:20", actionRequired: false, comment: "" },
+    merlin: { time: "11:30", actionRequired: false, comment: "" },
+    oak_lodge: { time: "11:40", actionRequired: false, comment: "" },
+    northwood: { time: "11:50", actionRequired: false, comment: "" },
+  },
+  "2025-05-22": {
+    falcon_1_6: { time: "11:10", actionRequired: false, comment: "" },
+    falcon_7_12: { time: "11:20", actionRequired: false, comment: "" },
+    martlett: { time: "11:30", actionRequired: false, comment: "" },
+    merlin: {
+      time: "11:40",
+      actionRequired: true,
+      comment: "Device P4/L1 064 Faulty",
+    },
+    oak_lodge: { time: "11:50", actionRequired: false, comment: "" },
+    northwood: { time: "12:00", actionRequired: false, comment: "" },
+  },
+}
+
+const FIRE_ALARM_BUILDINGS: FireAlarmBuildingConfig[] = [
+  {
+    id: "falcon_1_6",
+    label: "Falcon 1-6",
+    callPoints: ["003", "014", "021"],
+    locations: ["GF", "1F", "2F"],
+    anchorCallPoint: "014",
+  },
+  {
+    id: "falcon_7_12",
+    label: "Falcon 7-12",
+    callPoints: ["003", "014", "021"],
+    locations: ["GF", "1F", "2F"],
+    anchorCallPoint: "014",
+  },
+  {
+    id: "martlett",
+    label: "Martlett",
+    callPoints: [
+      "007",
+      "019",
+      "026",
+      "032",
+      "039",
+      "044",
+      "048",
+      "055",
+      "060",
+      "064",
+      "071",
+      "076",
+    ],
+    locations: ["GF", "1F", "2F", "GF", "1F", "2F"],
+    anchorCallPoint: "055",
+  },
+  {
+    id: "merlin",
+    label: "Merlin",
+    callPoints: [
+      "009",
+      "025",
+      "033",
+      "041",
+      "049",
+      "057",
+      "063",
+      "020",
+      "008",
+      "016",
+      "026",
+      "034",
+      "042",
+      "050",
+      "058",
+      "064",
+    ],
+    locations: [
+      "GF | 1-6",
+      "1F | 1-6",
+      "2F | 1-6",
+      "GF | 7-9",
+      "1F | 7-9",
+      "2F | 7-9",
+      "GF | 10-12",
+      "1F | 10-12",
+      "2F | 10-12",
+      "GF | 13-16",
+      "1F | 13-16",
+      "2F | 13-16",
+    ],
+    anchorCallPoint: "020",
+  },
+  {
+    id: "oak_lodge",
+    label: "Oak Lodge",
+    callPoints: [
+      "026",
+      "039",
+      "047",
+      "055",
+      "063",
+      "071",
+      "079",
+      "012",
+      "009",
+      "031",
+      "023",
+      "L1/40",
+      "048",
+      "056",
+      "064",
+      "072",
+      "080",
+    ],
+    locations: [
+      "GF",
+      "1F",
+      "2F",
+      "3F",
+      "4F",
+      "5F",
+      "6F",
+      "BOILER",
+      "LIFT ROOM",
+      "GF REAR",
+      "1F REAR",
+      "2F REAR",
+      "3F REAR",
+      "4F REAR",
+      "5F REAR",
+      "6F REAR",
+    ],
+    anchorCallPoint: "063",
+  },
+  {
+    id: "northwood",
+    label: "NorthWood",
+    callPoints: [
+      "013",
+      "029",
+      "037",
+      "045",
+      "053",
+      "061",
+      "069",
+      "021",
+      "008",
+      "020",
+      "030",
+      "038",
+      "046",
+      "054",
+      "062",
+      "070",
+    ],
+    locations: [
+      "GF",
+      "1F",
+      "2F",
+      "3F",
+      "4F",
+      "5F",
+      "6F",
+      "BOILER",
+      "LIFT BASEMENT",
+      "GF REAR",
+      "1F REAR",
+      "2F REAR",
+      "3F REAR",
+      "4F REAR",
+      "5F REAR",
+      "6F REAR",
+    ],
+    anchorCallPoint: "021",
+  },
+]
+
+const toDateInputValue = (date = new Date()) => {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
+}
+
+const formatDateToGb = (isoDate: string) => {
+  const [year, month, day] = isoDate.split("-")
+  if (!year || !month || !day) return isoDate
+  return `${day}/${month}/${year}`
+}
+
+const parseIsoDateToUtc = (isoDate: string) => {
+  const [yearRaw, monthRaw, dayRaw] = isoDate.split("-")
+  const year = Number(yearRaw)
+  const month = Number(monthRaw)
+  const day = Number(dayRaw)
+  if (!year || !month || !day) return Number.NaN
+  return Date.UTC(year, month - 1, day)
+}
+
+const formatUtcMsToIsoDate = (utcMs: number) => {
+  const date = new Date(utcMs)
+  const year = date.getUTCFullYear()
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0")
+  const day = String(date.getUTCDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
+}
+
+const positiveModulo = (value: number, mod: number) =>
+  ((value % mod) + mod) % mod
+
+const normalizeCallPoint = (value: string) =>
+  value
+    .trim()
+    .toUpperCase()
+    .replace(/^0+(\d)/, "$1")
+
+const getFireAlarmRepetition = (isoDate: string) => {
+  const current = parseIsoDateToUtc(isoDate)
+  const anchor = parseIsoDateToUtc(FIRE_ALARM_ANCHOR_DATE)
+  if (Number.isNaN(current) || Number.isNaN(anchor))
+    return FIRE_ALARM_ANCHOR_REPETITION
+  const diffDays = Math.floor((current - anchor) / (24 * 60 * 60 * 1000))
+  const diffWeeks = Math.floor(diffDays / 7)
+  return FIRE_ALARM_ANCHOR_REPETITION + diffWeeks
+}
+
+const snapToFireAlarmCycleDate = (isoDate: string) => {
+  const current = parseIsoDateToUtc(isoDate)
+  const anchor = parseIsoDateToUtc(FIRE_ALARM_ANCHOR_DATE)
+  if (Number.isNaN(current) || Number.isNaN(anchor)) return FIRE_ALARM_ANCHOR_DATE
+  const diffDays = Math.floor((current - anchor) / (24 * 60 * 60 * 1000))
+  const diffWeeks = Math.floor(diffDays / 7)
+  return formatUtcMsToIsoDate(anchor + diffWeeks * 7 * 24 * 60 * 60 * 1000)
+}
+
+const shiftFireAlarmCycleDate = (isoDate: string, weeks: number) => {
+  const current = parseIsoDateToUtc(snapToFireAlarmCycleDate(isoDate))
+  if (Number.isNaN(current)) return FIRE_ALARM_ANCHOR_DATE
+  return formatUtcMsToIsoDate(current + weeks * 7 * 24 * 60 * 60 * 1000)
+}
+
+const getCallPointIndex = (callPoints: string[], anchorCallPoint: string) => {
+  const anchorNormalized = normalizeCallPoint(anchorCallPoint)
+  const index = callPoints.findIndex(
+    (callPoint) => normalizeCallPoint(callPoint) === anchorNormalized,
+  )
+  return index >= 0 ? index : 0
+}
+
+const getFireAlarmScheduleRowsForDate = (isoDate: string) => {
+  const repetition = getFireAlarmRepetition(isoDate)
+  const offset = repetition - FIRE_ALARM_ANCHOR_REPETITION
+  return FIRE_ALARM_BUILDINGS.map((building) => {
+    const anchorCallPoint =
+      FIRE_ALARM_ANCHOR_CALL_POINTS[building.id] || building.anchorCallPoint
+    const anchorIndex = getCallPointIndex(building.callPoints, anchorCallPoint)
+    const currentIndex = positiveModulo(anchorIndex + offset, building.callPoints.length)
+    const callPoint = building.callPoints[currentIndex]
+    const location =
+      building.locations[positiveModulo(currentIndex, building.locations.length)]
+    return {
+      buildingId: building.id,
+      buildingLabel: building.label,
+      callPoint,
+      location,
+      repetition,
+    }
+  })
+}
+
+const getDefaultFireAlarmRows = (): Record<
+  FireAlarmBuildingId,
+  FireAlarmLogRow
+> => ({
+  falcon_1_6: { time: "", actionRequired: false, comment: "" },
+  falcon_7_12: { time: "", actionRequired: false, comment: "" },
+  martlett: { time: "", actionRequired: false, comment: "" },
+  merlin: { time: "", actionRequired: false, comment: "" },
+  oak_lodge: { time: "", actionRequired: false, comment: "" },
+  northwood: { time: "", actionRequired: false, comment: "" },
+})
+
+const generatePdfTableReportBase64 = ({
+  title,
+  dateRange,
+  headers,
+  rows,
+}: {
+  title: string
+  dateRange: string
+  headers: string[]
+  rows: (string | number)[][]
+}) => {
+  const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" })
+  doc.setFontSize(14)
+  doc.text(title, 40, 34)
+  doc.setFontSize(10)
+  doc.text(`Period: ${dateRange}`, 40, 52)
+  doc.text(`Generated: ${new Date().toLocaleString("en-GB")}`, 40, 66)
+
+  autoTable(doc, {
+    startY: 80,
+    head: [headers],
+    body: rows,
+    theme: "grid",
+    styles: {
+      fontSize: 8,
+      cellPadding: 4,
+      lineColor: [180, 180, 180],
+      lineWidth: 0.4,
+    },
+    headStyles: {
+      fillColor: [45, 134, 89],
+      textColor: 255,
+      fontStyle: "bold",
+    },
+    bodyStyles: {
+      textColor: [40, 40, 40],
+    },
+    alternateRowStyles: {
+      fillColor: [245, 245, 245],
+    },
+  })
+
+  return doc.output("datauristring").split(",")[1] || ""
 }
 
 export const Route = createFileRoute("/dashboard")({
@@ -205,6 +872,7 @@ function ClientDashboard() {
     {
       readings: true,
       qrCodes: true,
+      schedule: true,
     },
   )
 
@@ -254,13 +922,23 @@ function ClientDashboard() {
         { label: "Cleaner", id: "qr-cleaner" },
         { label: "Contractor", id: "qr-contractor" },
         { label: "Caretaker", id: "qr-caretaker" },
-        { label: "Bins", id: "qr-bins" },
+        { label: "Bin Report", id: "qr-bins" },
+      ],
+    },
+    {
+      name: "Schedule",
+      id: "schedule",
+      items: [
+        { label: "Alarm schedule", id: "schedule-alarm" },
+        { label: "Lift schedule", id: "schedule-lift" },
+        { label: "Emergency light", id: "schedule-light" },
       ],
     },
   ]
 
   const standaloneItems = [
     { label: "Tasks", id: "tasks" },
+    { label: "Reminders", id: "reminds" },
     { label: "Residents", id: "residents" },
     { label: "Cleaner", id: "cleaner" },
     { label: "Caretaker", id: "caretaker" },
@@ -284,10 +962,18 @@ function ClientDashboard() {
         return <CaretakerQrCodesContent />
       case "qr-bins":
         return <BinsQrCodesContent />
+      case "schedule-alarm":
+        return <CaretakerSchedules initialTab="alarm" />
+      case "schedule-lift":
+        return <CaretakerSchedules initialTab="lift" />
+      case "schedule-light":
+        return <CaretakerSchedules initialTab="light" />
       case "residents":
         return <ResidentsContent />
       case "tasks":
         return <TasksBoard mode="manager" />
+      case "reminds":
+        return <RemindsContent />
       case "cleaner":
         return <CleanerContent />
       case "caretaker":
@@ -302,7 +988,7 @@ function ClientDashboard() {
   }
 
   return (
-    <div className="flex min-h-screen bg-[#f5f1ee]">
+    <div className="dashboard-mobile-root flex min-h-screen bg-[#f5f1ee]">
       {/* Sidebar */}
       <aside
         className={`fixed left-0 top-0 h-screen bg-white shadow-lg transition-all duration-300 ease-in-out ${
@@ -418,7 +1104,7 @@ function ClientDashboard() {
       <div className="flex flex-1 flex-col">
         {/* Header */}
         <header className="bg-white shadow-md">
-          <div className="flex items-center justify-between px-6 py-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 px-3 py-3 sm:px-6 sm:py-4">
             {/* Left: Menu Button */}
             <button
               onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -443,15 +1129,15 @@ function ClientDashboard() {
             </button>
 
             {/* Center: Logo and Title */}
-            <div className="flex flex-1 items-center justify-center gap-3">
-              <h1 className="font-['Nunito',sans-serif] text-2xl font-bold text-[#55311c]">
+            <div className="order-3 flex w-full items-center justify-center gap-3 sm:order-2 sm:w-auto sm:flex-1">
+              <h1 className="font-['Nunito',sans-serif] text-xl font-bold text-[#55311c] sm:text-2xl">
                 OakHill Park
               </h1>
             </div>
 
             {/* Right: User Info and Logout */}
-            <div className="flex items-center gap-4">
-              <div className="text-right">
+            <div className="order-2 ml-auto flex items-center gap-2 sm:order-3 sm:gap-4">
+              <div className="hidden text-right sm:block">
                 <p className="text-sm font-semibold text-[#55311c]">
                   {user?.full_name || "Manager"}
                 </p>
@@ -459,7 +1145,7 @@ function ClientDashboard() {
               </div>
               <button
                 onClick={logout}
-                className="rounded bg-[#8c7569] px-4 py-2 font-['Nunito',sans-serif] text-sm text-white transition-all duration-300 hover:bg-[#55311c]"
+                className="rounded bg-[#8c7569] px-3 py-2 font-['Nunito',sans-serif] text-xs text-white transition-all duration-300 hover:bg-[#55311c] sm:px-4 sm:text-sm"
                 type="button"
               >
                 Sign out
@@ -469,7 +1155,7 @@ function ClientDashboard() {
         </header>
 
         {/* Page Content */}
-        <main className="flex-1 overflow-auto px-6 py-8">
+        <main className="flex-1 overflow-auto px-3 py-4 sm:px-6 sm:py-8">
           {renderContent()}
         </main>
       </div>
@@ -523,9 +1209,7 @@ function OverviewContent({ user }: { user: UserProfile }) {
             </svg>
           </div>
           <p className="text-3xl font-bold text-[#55311c]">--</p>
-          <p className="mt-1 text-sm text-[rgba(0,0,0,0.6)]">
-            Total de apartamentos
-          </p>
+          <p className="mt-1 text-sm text-[rgba(0,0,0,0.6)]">Total flats</p>
         </div>
 
         <div className="rounded-lg bg-white p-6 shadow-md transition-all duration-300 hover:shadow-lg">
@@ -609,6 +1293,7 @@ function BuildingsReadingsContent() {
     null,
   )
   const [showForm, setShowForm] = useState(false)
+  const [reportTrigger, setReportTrigger] = useState(0)
 
   const {
     data: buildingsData,
@@ -632,7 +1317,7 @@ function BuildingsReadingsContent() {
 
   if (buildingsLoading) {
     return (
-      <div className="mx-auto max-w-7xl">
+      <div className="mx-auto max-w-[125rem]">
         <div className="rounded-lg bg-white p-8 shadow-md text-center">
           <p className="text-[#55311c]">Loading buildings...</p>
         </div>
@@ -642,7 +1327,7 @@ function BuildingsReadingsContent() {
 
   if (buildingsError || !buildings.length) {
     return (
-      <div className="mx-auto max-w-7xl">
+      <div className="mx-auto max-w-[110rem]">
         <div className="rounded-lg bg-white p-8 shadow-md text-center">
           <p className="text-[#55311c]">No building found</p>
         </div>
@@ -664,33 +1349,43 @@ function BuildingsReadingsContent() {
   }
 
   return (
-    <div className="mx-auto max-w-7xl">
-      <div className="rounded-lg bg-white p-8 shadow-md">
-        <div className="mb-6 flex items-center justify-between">
+    <div className="mx-auto max-w-[125rem]">
+      <div className="rounded-lg bg-white p-4 shadow-md sm:p-8">
+        <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
             Buildings - Readings
           </h2>
-          <button
-            onClick={() => setShowForm(true)}
-            className="flex items-center gap-2 rounded-lg bg-[#8c7569] px-4 py-2 font-['Nunito',sans-serif] text-sm font-semibold text-white transition-all duration-300 hover:bg-[#55311c]"
-            type="button"
-          >
-            <svg
-              className="h-5 w-5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+            <button
+              type="button"
+              onClick={() => setReportTrigger((current) => current + 1)}
+              disabled={!selectedBuilding}
+              className="w-full rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
             >
-              <title>Add reading</title>
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M12 4v16m8-8H4"
-              />
-            </svg>
-            Reading
-          </button>
+              Generate report
+            </button>
+            <button
+              onClick={() => setShowForm(true)}
+              className="flex w-full items-center justify-center gap-2 rounded-lg bg-[#8c7569] px-4 py-2 font-['Nunito',sans-serif] text-sm font-semibold text-white transition-all duration-300 hover:bg-[#55311c] sm:w-auto"
+              type="button"
+            >
+              <svg
+                className="h-5 w-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <title>Add reading</title>
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 4v16m8-8H4"
+                />
+              </svg>
+              Reading
+            </button>
+          </div>
         </div>
 
         {/* Building Navigation */}
@@ -698,29 +1393,32 @@ function BuildingsReadingsContent() {
           <p className="block font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c] mb-3">
             Select a building:
           </p>
-          <div className="flex gap-3 w-full">
-            {[...buildings]
-              .sort((a, b) => a.nome.localeCompare(b.nome))
-              .map((building) => (
-                <button
-                  key={building.id}
-                  onClick={() => setSelectedBuildingId(building.id)}
-                  className={`flex-1 px-6 py-3 rounded-lg font-['Nunito',sans-serif] font-semibold transition-all duration-200 ${
-                    selectedBuildingId === building.id
-                      ? "bg-[#55311c] text-white shadow-lg"
-                      : "bg-[#e8e4e1] text-[#55311c] hover:bg-[#ddd8d5]"
-                  }`}
-                  type="button"
-                >
-                  {building.nome}
-                </button>
-              ))}
+          <div className="w-full overflow-x-auto pb-1">
+            <div className="flex min-w-max gap-3">
+              {[...buildings]
+                .sort((a, b) => a.nome.localeCompare(b.nome))
+                .map((building) => (
+                  <button
+                    key={building.id}
+                    onClick={() => setSelectedBuildingId(building.id)}
+                    className={`rounded-lg px-5 py-2.5 font-['Nunito',sans-serif] font-semibold whitespace-nowrap transition-all duration-200 ${
+                      selectedBuildingId === building.id
+                        ? "bg-[#55311c] text-white shadow-lg"
+                        : "bg-[#e8e4e1] text-[#55311c] hover:bg-[#ddd8d5]"
+                    }`}
+                    type="button"
+                  >
+                    {building.nome}
+                  </button>
+                ))}
+            </div>
           </div>
         </div>
 
         {selectedBuilding && (
           <BuildingReadingsTable
             building={selectedBuilding}
+            reportTrigger={reportTrigger}
             onPrevious={() => {
               const currentIndex = buildings.findIndex(
                 (building) => building.id === selectedBuildingId,
@@ -757,12 +1455,14 @@ function BuildingsReadingsContent() {
 
 function BuildingReadingsTable({
   building,
+  reportTrigger,
   onPrevious,
   onNext,
   hasPrevious,
   hasNext,
 }: {
   building: Building
+  reportTrigger: number
   onPrevious: () => void
   onNext: () => void
   hasPrevious: boolean
@@ -820,6 +1520,17 @@ function BuildingReadingsTable({
     normal?: string
     gas?: string
   }>({})
+  const [showReportModal, setShowReportModal] = useState(false)
+  const [reportDateFrom, setReportDateFrom] = useState("")
+  const [reportDateTo, setReportDateTo] = useState("")
+  const [reportEmail, setReportEmail] = useState("")
+  const [isSendingReport, setIsSendingReport] = useState(false)
+
+  useEffect(() => {
+    if (reportTrigger > 0) {
+      setShowReportModal(true)
+    }
+  }, [reportTrigger])
 
   if (isLoading) {
     return <p className="text-center text-[#55311c]">Loading readings...</p>
@@ -1080,15 +1791,101 @@ function BuildingReadingsTable({
     }
   }
 
+  const handleSendReport = async () => {
+    if (reportDateFrom && reportDateTo && reportDateFrom > reportDateTo) {
+      showErrorToast("Invalid date range")
+      return
+    }
+    if (!reportEmail.trim()) {
+      showErrorToast("Email is required")
+      return
+    }
+
+    const filteredRows = processedData
+      .slice(0, -1)
+      .filter((row) =>
+        isDateWithinRange(row.date, reportDateFrom, reportDateTo),
+      )
+
+    if (filteredRows.length === 0) {
+      showErrorToast("No readings found in the selected range")
+      return
+    }
+
+    const headers = ["Days", "Date"]
+    if (hasLow) headers.push("Low", "Low used", "Low %")
+    if (hasNormal) headers.push("Normal", "Normal used", "Normal %")
+    if (hasGas) headers.push("Gas", "Gas used", "Gas %")
+
+    const rows = filteredRows.map((row) => {
+      const values: (string | number)[] = [
+        row.days || "-",
+        formatDateToBr(row.date),
+      ]
+      if (hasLow)
+        values.push(row.low ?? "-", row.lowUsed ?? "-", row.lowPercent ?? "-")
+      if (hasNormal)
+        values.push(
+          row.normal ?? "-",
+          row.normalUsed ?? "-",
+          row.normalPercent ?? "-",
+        )
+      if (hasGas)
+        values.push(row.gas ?? "-", row.gasUsed ?? "-", row.gasPercent ?? "-")
+      return values
+    })
+
+    const reportTitle = `Readings Report - Building ${building.nome}`
+    const fileName = `readings-building-${building.nome.toLowerCase().replace(/\s+/g, "-")}-${new Date().toISOString().slice(0, 10)}.pdf`
+    const fileDataBase64 = generatePdfTableReportBase64({
+      title: reportTitle,
+      dateRange: buildDateRangeLabel(reportDateFrom, reportDateTo),
+      headers,
+      rows,
+    })
+    if (!fileDataBase64) {
+      showErrorToast("Failed to prepare report file")
+      return
+    }
+
+    try {
+      setIsSendingReport(true)
+      await apiCall("/api/v1/utils/send-report-email/", {
+        method: "POST",
+        body: {
+          email_to: reportEmail.trim(),
+          subject: reportTitle,
+          html_content: buildReadingsReportEmailHtml({
+            reportType: "Building",
+            locationLabel: building.nome,
+            periodLabel: buildDateRangeLabel(reportDateFrom, reportDateTo),
+          }),
+          file_name: fileName,
+          file_data_base64: fileDataBase64,
+        },
+      })
+      setShowReportModal(false)
+      showSuccessToast("Report sent successfully")
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to send report by email"
+      showErrorToast(message)
+    } finally {
+      setIsSendingReport(false)
+    }
+  }
+
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-x-hidden md:overflow-x-auto">
       {/* Building Header */}
-      <div className="mb-4 rounded-t-lg bg-[#2d8659] p-4 text-white relative">
+      <div className="relative mb-4 flex items-center justify-between gap-2 rounded-t-lg bg-[#2d8659] p-3 text-white md:p-4">
         {/* Previous Button */}
         <button
           onClick={onPrevious}
           disabled={!hasPrevious}
-          className={`absolute left-4 top-1/2 -translate-y-1/2 p-2 rounded-full transition-all duration-200 ${
+          className={`rounded-full p-2 transition-all duration-200 md:absolute md:left-4 md:top-1/2 md:-translate-y-1/2 ${
             hasPrevious
               ? "bg-white/20 hover:bg-white/30 cursor-pointer"
               : "bg-white/10 cursor-not-allowed opacity-50"
@@ -1112,11 +1909,11 @@ function BuildingReadingsTable({
         </button>
 
         {/* Building Info */}
-        <div className="text-center">
-          <h3 className="text-2xl font-bold font-['Nunito',sans-serif]">
+        <div className="flex-1 px-1 text-center md:px-0">
+          <h3 className="text-xl font-bold font-['Nunito',sans-serif] sm:text-2xl">
             {building.nome}
           </h3>
-          <div className="mt-2 flex items-center justify-center gap-6 text-sm">
+          <div className="mt-2 flex flex-col items-center justify-center gap-1 text-xs sm:flex-row sm:gap-6 sm:text-sm">
             <p>Electricity S/N: {building.electricity_sn || "N/A"}</p>
             {building.gas_sn && <p>Gas S/N: {building.gas_sn}</p>}
           </div>
@@ -1126,7 +1923,7 @@ function BuildingReadingsTable({
         <button
           onClick={onNext}
           disabled={!hasNext}
-          className={`absolute right-4 top-1/2 -translate-y-1/2 p-2 rounded-full transition-all duration-200 ${
+          className={`rounded-full p-2 transition-all duration-200 md:absolute md:right-4 md:top-1/2 md:-translate-y-1/2 ${
             hasNext
               ? "bg-white/20 hover:bg-white/30 cursor-pointer"
               : "bg-white/10 cursor-not-allowed opacity-50"
@@ -1139,7 +1936,7 @@ function BuildingReadingsTable({
             stroke="currentColor"
             viewBox="0 0 24 24"
           >
-            <title>Proximo building</title>
+            <title>Next building</title>
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -1150,7 +1947,101 @@ function BuildingReadingsTable({
         </button>
       </div>
 
-      <table className="w-full border-collapse">
+      <div className="space-y-3 md:hidden">
+        {processedData.slice(0, -1).map((row) => (
+          <div
+            key={`mobile-${row.date}-${row.lowId ?? ""}-${row.normalId ?? ""}-${row.gasId ?? ""}`}
+            className="rounded-lg border border-[#d9d0ca] bg-white p-3"
+          >
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-sm font-bold text-[#55311c]">
+                {formatDateToBr(row.date)}
+              </p>
+              <p className="text-xs text-[rgba(0,0,0,0.7)]">
+                Days: {row.days || "-"}
+              </p>
+            </div>
+            <div className="space-y-2 text-xs text-[#55311c]">
+              {hasLow && (
+                <div className="rounded-md bg-[#f7f2ee] p-2">
+                  <p className="font-semibold">Low: {row.low ?? "-"}</p>
+                  <p className="mt-1">Used: {row.lowUsed ?? "-"}</p>
+                  <p className={`mt-1 ${getPercentColor(row.lowPercent)}`}>
+                    %: {row.lowPercent ?? "no data"}
+                  </p>
+                </div>
+              )}
+              {hasNormal && (
+                <div className="rounded-md bg-[#f7f2ee] p-2">
+                  <p className="font-semibold">Normal: {row.normal ?? "-"}</p>
+                  <p className="mt-1">Used: {row.normalUsed ?? "-"}</p>
+                  <p className={`mt-1 ${getPercentColor(row.normalPercent)}`}>
+                    %: {row.normalPercent ?? "no data"}
+                  </p>
+                </div>
+              )}
+              {hasGas && (
+                <div className="rounded-md bg-[#f7f2ee] p-2">
+                  <p className="font-semibold">Gas: {row.gas ?? "-"}</p>
+                  <p className="mt-1">Used: {row.gasUsed ?? "-"}</p>
+                  <p className={`mt-1 ${getPercentColor(row.gasPercent)}`}>
+                    %: {row.gasPercent ?? "no data"}
+                  </p>
+                </div>
+              )}
+            </div>
+            <div className="mt-3">
+              <button
+                type="button"
+                onClick={() => handleOpenEdit(row)}
+                className="w-full rounded-lg bg-[#8c7569] px-3 py-2 text-xs font-semibold text-white transition-all duration-200 hover:bg-[#55311c]"
+              >
+                Edit
+              </button>
+            </div>
+          </div>
+        ))}
+
+        {processedData.length > 0 && (
+          <div className="rounded-lg border border-[#d9d0ca] bg-[#f7f2ee] p-3">
+            <p className="text-sm font-bold text-[#55311c]">
+              All (initial values)
+            </p>
+            <p className="mt-1 text-xs text-[rgba(0,0,0,0.7)]">
+              Date:{" "}
+              {formatDateToBr(processedData[processedData.length - 1].date)}
+            </p>
+            <div className="mt-2 space-y-1 text-xs text-[#55311c]">
+              {hasLow && (
+                <p>
+                  Low:{" "}
+                  {processedData[processedData.length - 1].low !== undefined
+                    ? processedData[processedData.length - 1].low
+                    : "All"}
+                </p>
+              )}
+              {hasNormal && (
+                <p>
+                  Normal:{" "}
+                  {processedData[processedData.length - 1].normal !== undefined
+                    ? processedData[processedData.length - 1].normal
+                    : "All"}
+                </p>
+              )}
+              {hasGas && (
+                <p>
+                  Gas:{" "}
+                  {processedData[processedData.length - 1].gas !== undefined
+                    ? processedData[processedData.length - 1].gas
+                    : "All"}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <table className="hidden w-full min-w-[840px] border-collapse md:table">
         <thead>
           <tr className="bg-gray-200">
             <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700">
@@ -1358,11 +2249,9 @@ function BuildingReadingsTable({
       </table>
 
       {editingRow && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
-            <h3 className="text-lg font-bold text-[#55311c]">
-              Edit readings
-            </h3>
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-3 sm:items-center sm:px-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-4 shadow-xl sm:p-6">
+            <h3 className="text-lg font-bold text-[#55311c]">Edit readings</h3>
             <p className="mt-1 text-sm text-[rgba(0,0,0,0.7)]">
               Data: {editingRow.date.split("T")[0]}
             </p>
@@ -1458,20 +2347,101 @@ function BuildingReadingsTable({
               )}
             </div>
 
-            <div className="mt-6 flex justify-end gap-2">
+            <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end">
               <button
                 type="button"
                 onClick={() => setEditingRow(null)}
-                className="rounded-lg border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+                className="w-full rounded-lg border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] sm:w-auto"
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={handleSaveEdit}
-                className="rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c]"
+                className="w-full rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] sm:w-auto"
               >
                 Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showReportModal && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-3 sm:items-center sm:px-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-4 shadow-xl sm:p-6">
+            <h3 className="text-lg font-bold text-[#55311c]">
+              Generate report
+            </h3>
+            <p className="mt-1 text-sm text-[rgba(0,0,0,0.7)]">
+              Enter email and date range to send the PDF report.
+            </p>
+
+            <div className="mt-4 grid gap-4">
+              <div>
+                <label
+                  className="block text-sm font-semibold text-[#55311c]"
+                  htmlFor="building-report-email"
+                >
+                  Email
+                </label>
+                <input
+                  id="building-report-email"
+                  type="email"
+                  value={reportEmail}
+                  onChange={(e) => setReportEmail(e.target.value)}
+                  placeholder="name@example.com"
+                  className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                />
+              </div>
+              <div>
+                <label
+                  className="block text-sm font-semibold text-[#55311c]"
+                  htmlFor="building-report-date-from"
+                >
+                  Start date
+                </label>
+                <input
+                  id="building-report-date-from"
+                  type="date"
+                  value={reportDateFrom}
+                  onChange={(e) => setReportDateFrom(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                />
+              </div>
+              <div>
+                <label
+                  className="block text-sm font-semibold text-[#55311c]"
+                  htmlFor="building-report-date-to"
+                >
+                  End date
+                </label>
+                <input
+                  id="building-report-date-to"
+                  type="date"
+                  min={reportDateFrom || undefined}
+                  value={reportDateTo}
+                  onChange={(e) => setReportDateTo(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                />
+              </div>
+            </div>
+
+            <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setShowReportModal(false)}
+                className="w-full rounded-lg border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] sm:w-auto"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSendReport}
+                disabled={isSendingReport}
+                className="w-full rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] sm:w-auto"
+              >
+                {isSendingReport ? "Sending..." : "Send by email"}
               </button>
             </div>
           </div>
@@ -1576,7 +2546,7 @@ function AddReadingsForm({
   }
 
   return (
-    <div className="mx-auto max-w-7xl">
+    <div className="mx-auto max-w-[110rem]">
       <div className="rounded-lg bg-white p-8 shadow-md">
         <div className="mb-6 flex items-center justify-between">
           <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
@@ -2064,14 +3034,14 @@ function FlatsReadingsContent() {
 
   return (
     <div className="mx-auto max-w-7xl">
-      <div className="rounded-lg bg-white p-8 shadow-md">
-        <div className="mb-6 flex items-center justify-between">
+      <div className="rounded-lg bg-white p-4 shadow-md sm:p-8">
+        <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
             Flats - Readings
           </h2>
           <button
             onClick={() => setShowForm(true)}
-            className="flex items-center gap-2 rounded-lg bg-[#8c7569] px-4 py-2 font-['Nunito',sans-serif] text-sm font-semibold text-white transition-all duration-300 hover:bg-[#55311c]"
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-[#8c7569] px-4 py-2 font-['Nunito',sans-serif] text-sm font-semibold text-white transition-all duration-300 hover:bg-[#55311c] sm:w-auto"
             type="button"
           >
             <svg
@@ -2097,23 +3067,25 @@ function FlatsReadingsContent() {
           <p className="block font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c] mb-3">
             Select a building:
           </p>
-          <div className="flex gap-3 w-full">
-            {[...buildings]
-              .sort((a, b) => a.nome.localeCompare(b.nome))
-              .map((building) => (
-                <button
-                  key={building.id}
-                  onClick={() => setSelectedBuildingId(building.id)}
-                  className={`flex-1 px-6 py-3 rounded-lg font-['Nunito',sans-serif] font-semibold transition-all duration-200 ${
-                    selectedBuildingId === building.id
-                      ? "bg-[#55311c] text-white shadow-lg"
-                      : "bg-[#e8e4e1] text-[#55311c] hover:bg-[#ddd8d5]"
-                  }`}
-                  type="button"
-                >
-                  {building.nome}
-                </button>
-              ))}
+          <div className="w-full overflow-x-auto pb-1">
+            <div className="flex min-w-max gap-3">
+              {[...buildings]
+                .sort((a, b) => a.nome.localeCompare(b.nome))
+                .map((building) => (
+                  <button
+                    key={building.id}
+                    onClick={() => setSelectedBuildingId(building.id)}
+                    className={`rounded-lg px-5 py-2.5 font-['Nunito',sans-serif] font-semibold whitespace-nowrap transition-all duration-200 ${
+                      selectedBuildingId === building.id
+                        ? "bg-[#55311c] text-white shadow-lg"
+                        : "bg-[#e8e4e1] text-[#55311c] hover:bg-[#ddd8d5]"
+                    }`}
+                    type="button"
+                  >
+                    {building.nome}
+                  </button>
+                ))}
+            </div>
           </div>
         </div>
 
@@ -2124,23 +3096,25 @@ function FlatsReadingsContent() {
               Select a flat:
             </p>
             {flats.length > 0 ? (
-              <div className="flex gap-3 w-full flex-wrap">
-                {[...flats]
-                  .sort((a, b) => a.numero - b.numero)
-                  .map((flat) => (
-                    <button
-                      key={flat.id}
-                      onClick={() => setSelectedFlatId(flat.id)}
-                      className={`px-6 py-3 rounded-lg font-['Nunito',sans-serif] font-semibold transition-all duration-200 ${
-                        selectedFlatId === flat.id
-                          ? "bg-[#55311c] text-white shadow-lg"
-                          : "bg-[#e8e4e1] text-[#55311c] hover:bg-[#ddd8d5]"
-                      }`}
-                      type="button"
-                    >
-                      Flat {flat.numero}
-                    </button>
-                  ))}
+              <div className="w-full overflow-x-auto pb-1">
+                <div className="flex min-w-max gap-3">
+                  {[...flats]
+                    .sort((a, b) => a.numero - b.numero)
+                    .map((flat) => (
+                      <button
+                        key={flat.id}
+                        onClick={() => setSelectedFlatId(flat.id)}
+                        className={`rounded-lg px-5 py-2.5 font-['Nunito',sans-serif] font-semibold whitespace-nowrap transition-all duration-200 ${
+                          selectedFlatId === flat.id
+                            ? "bg-[#55311c] text-white shadow-lg"
+                            : "bg-[#e8e4e1] text-[#55311c] hover:bg-[#ddd8d5]"
+                        }`}
+                        type="button"
+                      >
+                        Flat {flat.numero}
+                      </button>
+                    ))}
+                </div>
               </div>
             ) : (
               <div className="rounded-lg bg-[#f5f1ee] p-4">
@@ -2227,6 +3201,11 @@ function FlatReadingsTable({
     normal?: string
     gas?: string
   }>({})
+  const [showReportModal, setShowReportModal] = useState(false)
+  const [reportDateFrom, setReportDateFrom] = useState("")
+  const [reportDateTo, setReportDateTo] = useState("")
+  const [reportEmail, setReportEmail] = useState("")
+  const [isSendingReport, setIsSendingReport] = useState(false)
 
   if (isLoading) {
     return <p className="text-center text-[#55311c]">Loading readings...</p>
@@ -2509,15 +3488,104 @@ function FlatReadingsTable({
     }
   }
 
+  const handleSendReport = async () => {
+    if (reportDateFrom && reportDateTo && reportDateFrom > reportDateTo) {
+      showErrorToast("Invalid date range")
+      return
+    }
+    if (!reportEmail.trim()) {
+      showErrorToast("Email is required")
+      return
+    }
+
+    const filteredRows = processedData.filter((row) =>
+      isDateWithinRange(row.date, reportDateFrom, reportDateTo),
+    )
+
+    if (filteredRows.length === 0) {
+      showErrorToast("No readings found in the selected range")
+      return
+    }
+
+    const headers = ["Days", "Date"]
+    if (hasLow) headers.push("Low", "Low used", "Low %")
+    if (hasNormal) headers.push("Normal", "Normal used", "Normal %")
+    if (hasGas) headers.push("Gas", "Gas used", "Gas %")
+
+    const rows = filteredRows.map((row, index) => {
+      const values: (string | number)[] = [
+        index === 0 ? "All" : row.days || "-",
+        formatDateToBr(row.date),
+      ]
+      if (hasLow) {
+        values.push(row.low ?? "-")
+        values.push(index === 0 ? "All" : (row.lowUsed ?? "-"))
+        values.push(index === 0 ? "no data" : (row.lowPercent ?? "-"))
+      }
+      if (hasNormal) {
+        values.push(row.normal ?? "-")
+        values.push(index === 0 ? "All" : (row.normalUsed ?? "-"))
+        values.push(index === 0 ? "no data" : (row.normalPercent ?? "-"))
+      }
+      if (hasGas) {
+        values.push(row.gas ?? "-")
+        values.push(index === 0 ? "All" : (row.gasUsed ?? "-"))
+        values.push(index === 0 ? "no data" : (row.gasPercent ?? "-"))
+      }
+      return values
+    })
+
+    const reportTitle = `Readings Report - Flat ${flat.numero}`
+    const fileName = `readings-flat-${flat.numero}-${new Date().toISOString().slice(0, 10)}.pdf`
+    const fileDataBase64 = generatePdfTableReportBase64({
+      title: reportTitle,
+      dateRange: buildDateRangeLabel(reportDateFrom, reportDateTo),
+      headers,
+      rows,
+    })
+    if (!fileDataBase64) {
+      showErrorToast("Failed to prepare report file")
+      return
+    }
+
+    try {
+      setIsSendingReport(true)
+      await apiCall("/api/v1/utils/send-report-email/", {
+        method: "POST",
+        body: {
+          email_to: reportEmail.trim(),
+          subject: reportTitle,
+          html_content: buildReadingsReportEmailHtml({
+            reportType: "Flat",
+            locationLabel: `${flat.building?.nome || "Building"} - Flat ${flat.numero}`,
+            periodLabel: buildDateRangeLabel(reportDateFrom, reportDateTo),
+          }),
+          file_name: fileName,
+          file_data_base64: fileDataBase64,
+        },
+      })
+      setShowReportModal(false)
+      showSuccessToast("Report sent successfully")
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to send report by email"
+      showErrorToast(message)
+    } finally {
+      setIsSendingReport(false)
+    }
+  }
+
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-x-hidden md:overflow-x-auto">
       {/* Flat Header */}
-      <div className="mb-4 rounded-t-lg bg-[#2d8659] p-4 text-white relative">
+      <div className="relative mb-4 flex items-center justify-between gap-2 rounded-t-lg bg-[#2d8659] p-3 text-white md:p-4">
         {/* Previous Button */}
         <button
           onClick={onPrevious}
           disabled={!hasPrevious}
-          className={`absolute left-4 top-1/2 -translate-y-1/2 p-2 rounded-full transition-all duration-200 ${
+          className={`rounded-full p-2 transition-all duration-200 md:absolute md:left-4 md:top-1/2 md:-translate-y-1/2 ${
             hasPrevious
               ? "bg-white/20 hover:bg-white/30 cursor-pointer"
               : "bg-white/10 cursor-not-allowed opacity-50"
@@ -2541,11 +3609,11 @@ function FlatReadingsTable({
         </button>
 
         {/* Flat Info */}
-        <div className="text-center">
-          <h3 className="text-2xl font-bold font-['Nunito',sans-serif]">
+        <div className="flex-1 px-1 text-center md:px-0">
+          <h3 className="text-xl font-bold font-['Nunito',sans-serif] sm:text-2xl">
             Flat {flat.numero}
           </h3>
-          <p className="text-sm mt-1">
+          <p className="mt-1 text-xs sm:text-sm">
             Building: {flat.building?.nome || "N/A"}
           </p>
         </div>
@@ -2554,7 +3622,7 @@ function FlatReadingsTable({
         <button
           onClick={onNext}
           disabled={!hasNext}
-          className={`absolute right-4 top-1/2 -translate-y-1/2 p-2 rounded-full transition-all duration-200 ${
+          className={`rounded-full p-2 transition-all duration-200 md:absolute md:right-4 md:top-1/2 md:-translate-y-1/2 ${
             hasNext
               ? "bg-white/20 hover:bg-white/30 cursor-pointer"
               : "bg-white/10 cursor-not-allowed opacity-50"
@@ -2567,7 +3635,7 @@ function FlatReadingsTable({
             stroke="currentColor"
             viewBox="0 0 24 24"
           >
-            <title>Proximo flat</title>
+            <title>Next flat</title>
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -2578,7 +3646,79 @@ function FlatReadingsTable({
         </button>
       </div>
 
-      <table className="w-full border-collapse">
+      <div className="mb-3 flex justify-end">
+        <button
+          type="button"
+          onClick={() => setShowReportModal(true)}
+          className="w-full rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] sm:w-auto"
+        >
+          Generate report
+        </button>
+      </div>
+
+      <div className="space-y-3 md:hidden">
+        {processedData.map((row, index) => (
+          <div
+            key={`mobile-flat-${row.date}-${index}`}
+            className="rounded-lg border border-[#d9d0ca] bg-white p-3"
+          >
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-sm font-bold text-[#55311c]">
+                {formatDateToBr(row.date)}
+              </p>
+              <p className="text-xs text-[rgba(0,0,0,0.7)]">
+                {index === 0 ? "All" : `Days: ${row.days || "-"}`}
+              </p>
+            </div>
+            <div className="space-y-2 text-xs text-[#55311c]">
+              {hasLow && (
+                <div className="rounded-md bg-[#f7f2ee] p-2">
+                  <p className="font-semibold">Low: {row.low ?? "-"}</p>
+                  <p className="mt-1">
+                    Used: {index === 0 ? "All" : (row.lowUsed ?? "-")}
+                  </p>
+                  <p className={`mt-1 ${getPercentColor(row.lowPercent)}`}>
+                    %: {index === 0 ? "no data" : (row.lowPercent ?? "-")}
+                  </p>
+                </div>
+              )}
+              {hasNormal && (
+                <div className="rounded-md bg-[#f7f2ee] p-2">
+                  <p className="font-semibold">Normal: {row.normal ?? "-"}</p>
+                  <p className="mt-1">
+                    Used: {index === 0 ? "All" : (row.normalUsed ?? "-")}
+                  </p>
+                  <p className={`mt-1 ${getPercentColor(row.normalPercent)}`}>
+                    %: {index === 0 ? "no data" : (row.normalPercent ?? "-")}
+                  </p>
+                </div>
+              )}
+              {hasGas && (
+                <div className="rounded-md bg-[#f7f2ee] p-2">
+                  <p className="font-semibold">Gas: {row.gas ?? "-"}</p>
+                  <p className="mt-1">
+                    Used: {index === 0 ? "All" : (row.gasUsed ?? "-")}
+                  </p>
+                  <p className={`mt-1 ${getPercentColor(row.gasPercent)}`}>
+                    %: {index === 0 ? "no data" : (row.gasPercent ?? "-")}
+                  </p>
+                </div>
+              )}
+            </div>
+            <div className="mt-3">
+              <button
+                type="button"
+                onClick={() => handleOpenEdit(row)}
+                className="w-full rounded-lg bg-[#8c7569] px-3 py-2 text-xs font-semibold text-white transition-all duration-200 hover:bg-[#55311c]"
+              >
+                Edit
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <table className="hidden w-full min-w-[840px] border-collapse md:table">
         <thead>
           <tr className="bg-gray-200">
             <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700">
@@ -2704,11 +3844,9 @@ function FlatReadingsTable({
       </table>
 
       {editingRow && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
-            <h3 className="text-lg font-bold text-[#55311c]">
-              Edit readings
-            </h3>
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-3 sm:items-center sm:px-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-4 shadow-xl sm:p-6">
+            <h3 className="text-lg font-bold text-[#55311c]">Edit readings</h3>
             <p className="mt-1 text-sm text-[rgba(0,0,0,0.7)]">
               Data: {editingRow.date.split("T")[0]}
             </p>
@@ -2805,20 +3943,101 @@ function FlatReadingsTable({
               )}
             </div>
 
-            <div className="mt-6 flex justify-end gap-2">
+            <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end">
               <button
                 type="button"
                 onClick={() => setEditingRow(null)}
-                className="rounded-lg border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+                className="w-full rounded-lg border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] sm:w-auto"
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={handleSaveEdit}
-                className="rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c]"
+                className="w-full rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] sm:w-auto"
               >
                 Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showReportModal && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-3 sm:items-center sm:px-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-4 shadow-xl sm:p-6">
+            <h3 className="text-lg font-bold text-[#55311c]">
+              Generate report
+            </h3>
+            <p className="mt-1 text-sm text-[rgba(0,0,0,0.7)]">
+              Enter email and date range to send the PDF report.
+            </p>
+
+            <div className="mt-4 grid gap-4">
+              <div>
+                <label
+                  className="block text-sm font-semibold text-[#55311c]"
+                  htmlFor="flat-report-email"
+                >
+                  Email
+                </label>
+                <input
+                  id="flat-report-email"
+                  type="email"
+                  value={reportEmail}
+                  onChange={(e) => setReportEmail(e.target.value)}
+                  placeholder="name@example.com"
+                  className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                />
+              </div>
+              <div>
+                <label
+                  className="block text-sm font-semibold text-[#55311c]"
+                  htmlFor="flat-report-date-from"
+                >
+                  Start date
+                </label>
+                <input
+                  id="flat-report-date-from"
+                  type="date"
+                  value={reportDateFrom}
+                  onChange={(e) => setReportDateFrom(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                />
+              </div>
+              <div>
+                <label
+                  className="block text-sm font-semibold text-[#55311c]"
+                  htmlFor="flat-report-date-to"
+                >
+                  End date
+                </label>
+                <input
+                  id="flat-report-date-to"
+                  type="date"
+                  min={reportDateFrom || undefined}
+                  value={reportDateTo}
+                  onChange={(e) => setReportDateTo(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                />
+              </div>
+            </div>
+
+            <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setShowReportModal(false)}
+                className="w-full rounded-lg border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] sm:w-auto"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSendReport}
+                disabled={isSendingReport}
+                className="w-full rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] sm:w-auto"
+              >
+                {isSendingReport ? "Sending..." : "Send by email"}
               </button>
             </div>
           </div>
@@ -2852,7 +4071,9 @@ function normalizePhoneToE164(
 ): string | null {
   const defaultCountryCode = "+44"
   if (rawPhone === null || rawPhone === undefined) return null
-  const cleaned = String(rawPhone).trim().replace(/[^\d+]/g, "")
+  const cleaned = String(rawPhone)
+    .trim()
+    .replace(/[^\d+]/g, "")
   if (!cleaned) return null
 
   let normalized = cleaned
@@ -2881,6 +4102,547 @@ function getResidentRoleLabel(cargo: number): string {
   }
 }
 
+function RemindsContent() {
+  const queryClient = useQueryClient()
+  const { showErrorToast, showSuccessToast } = useCustomToast()
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [showModal, setShowModal] = useState(false)
+  const [togglingId, setTogglingId] = useState<string | null>(null)
+  const [formData, setFormData] = useState({
+    name: "",
+    weekdays: [1] as number[],
+    is_active: true,
+    action_sms: true,
+    sms_to: "",
+    sms_message: "",
+    action_task: false,
+    task_title: "",
+    task_description: "",
+  })
+
+  const { data: remindsData, isLoading } = useQuery<
+    ApiListResponse<ReminderItem>
+  >({
+    queryKey: ["reminds"],
+    queryFn: () => apiCall("/api/v1/reminds/"),
+  })
+
+  const resetForm = () => {
+    setFormData({
+      name: "",
+      weekdays: [1],
+      is_active: true,
+      action_sms: true,
+      sms_to: "",
+      sms_message: "",
+      action_task: false,
+      task_title: "",
+      task_description: "",
+    })
+  }
+
+  const handleCancelModal = () => {
+    setEditingId(null)
+    setShowModal(false)
+    resetForm()
+  }
+
+  const executeDueMutation = useMutation({
+    mutationFn: () =>
+      apiCall("/api/v1/reminds/execute-due", {
+        method: "POST",
+      }) as Promise<ReminderExecutionInfo>,
+    onSuccess: (result) => {
+      if (result.triggered > 0) {
+        showSuccessToast(
+          `${result.triggered} reminder(s) triggered today (${result.sms_sent} SMS, ${result.tasks_created} task(s)).`,
+        )
+      }
+      queryClient.invalidateQueries({ queryKey: ["tasks"] })
+      queryClient.invalidateQueries({ queryKey: ["reminds"] })
+    },
+  })
+
+  useEffect(() => {
+    if (executeDueMutation.isPending) return
+    executeDueMutation.mutate()
+  }, [executeDueMutation.isPending, executeDueMutation.mutate])
+
+  const createMutation = useMutation({
+    mutationFn: (payload: Record<string, unknown>) =>
+      apiCall("/api/v1/reminds/", { method: "POST", body: payload }),
+    onSuccess: () => {
+      showSuccessToast("Reminder created")
+      handleCancelModal()
+      queryClient.invalidateQueries({ queryKey: ["reminds"] })
+    },
+    onError: (error: unknown) => {
+      showErrorToast(
+        error instanceof Error ? error.message : "Error creating reminder",
+      )
+    },
+  })
+
+  const updateMutation = useMutation({
+    mutationFn: ({
+      id,
+      payload,
+    }: {
+      id: string
+      payload: Record<string, unknown>
+    }) =>
+      apiCall(`/api/v1/reminds/${id}`, {
+        method: "PATCH",
+        body: payload,
+      }),
+    onSuccess: () => {
+      showSuccessToast("Reminder updated")
+      handleCancelModal()
+      queryClient.invalidateQueries({ queryKey: ["reminds"] })
+    },
+    onError: (error: unknown) => {
+      showErrorToast(
+        error instanceof Error ? error.message : "Error updating reminder",
+      )
+    },
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) =>
+      apiCall(`/api/v1/reminds/${id}`, {
+        method: "DELETE",
+      }),
+    onSuccess: () => {
+      showSuccessToast("Reminder deleted")
+      queryClient.invalidateQueries({ queryKey: ["reminds"] })
+    },
+    onError: (error: unknown) => {
+      showErrorToast(
+        error instanceof Error ? error.message : "Error deleting reminder",
+      )
+    },
+  })
+
+  const toggleActiveMutation = useMutation({
+    mutationFn: ({ id, nextActive }: { id: string; nextActive: boolean }) =>
+      apiCall(`/api/v1/reminds/${id}`, {
+        method: "PATCH",
+        body: { is_active: nextActive },
+      }),
+    onSuccess: (_data, variables) => {
+      showSuccessToast(
+        variables.nextActive ? "Reminder enabled" : "Reminder disabled",
+      )
+      queryClient.invalidateQueries({ queryKey: ["reminds"] })
+    },
+    onError: (error: unknown) => {
+      showErrorToast(
+        error instanceof Error ? error.message : "Error toggling reminder",
+      )
+    },
+    onSettled: () => {
+      setTogglingId(null)
+    },
+  })
+
+  const reminders = remindsData?.data || []
+
+  const handleOpenCreateModal = () => {
+    setEditingId(null)
+    resetForm()
+    setShowModal(true)
+  }
+
+  const toggleWeekday = (day: number) => {
+    setFormData((prev) => {
+      const exists = prev.weekdays.includes(day)
+      const next = exists
+        ? prev.weekdays.filter((item) => item !== day)
+        : [...prev.weekdays, day].sort((a, b) => a - b)
+      return { ...prev, weekdays: next }
+    })
+  }
+
+  const handleSubmit = (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!formData.name.trim()) {
+      showErrorToast("Reminder name is required")
+      return
+    }
+    if (!formData.action_sms && !formData.action_task) {
+      showErrorToast("Select at least one action")
+      return
+    }
+    if (formData.weekdays.length === 0) {
+      showErrorToast("Select at least one day")
+      return
+    }
+
+    const payload: Record<string, unknown> = {
+      name: formData.name.trim(),
+      weekday_mask: weekdayMaskFromList(formData.weekdays),
+      is_active: formData.is_active,
+      action_sms: formData.action_sms,
+      sms_to: formData.sms_to.trim() || null,
+      sms_message: formData.sms_message.trim() || null,
+      action_task: formData.action_task,
+      task_title: formData.task_title.trim() || null,
+      task_description: formData.task_description.trim() || null,
+    }
+
+    if (editingId) {
+      updateMutation.mutate({ id: editingId, payload })
+      return
+    }
+    createMutation.mutate(payload)
+  }
+
+  const handleEdit = (reminder: ReminderItem) => {
+    setEditingId(String(reminder.id))
+    setFormData({
+      name: reminder.name || "",
+      weekdays: weekdayListFromMask(reminder.weekday_mask),
+      is_active: reminder.is_active,
+      action_sms: reminder.action_sms,
+      sms_to: reminder.sms_to || "",
+      sms_message: reminder.sms_message || "",
+      action_task: reminder.action_task,
+      task_title: reminder.task_title || "",
+      task_description: reminder.task_description || "",
+    })
+    setShowModal(true)
+  }
+
+  return (
+    <div className="mx-auto max-w-7xl space-y-6">
+      <div className="rounded-lg bg-white p-6 shadow-md">
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
+              Reminders
+            </h2>
+            <p className="mt-1 text-sm text-[rgba(0,0,0,0.7)]">
+              Create weekly reminders to send SMS via Twilio and/or create tasks
+              automatically.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleOpenCreateModal}
+            className="rounded bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white hover:bg-[#55311c]"
+          >
+            New reminder
+          </button>
+        </div>
+      </div>
+
+      <div className="rounded-lg bg-white p-6 shadow-md">
+        <h3 className="mb-4 text-xl font-bold text-[#55311c]">Reminder list</h3>
+        {isLoading ? (
+          <p className="text-sm text-[rgba(0,0,0,0.65)]">
+            Loading reminders...
+          </p>
+        ) : reminders.length === 0 ? (
+          <p className="text-sm text-[rgba(0,0,0,0.65)]">No reminders yet.</p>
+        ) : (
+          <div className="space-y-3">
+            {reminders.map((reminder) => (
+              <div
+                key={String(reminder.id)}
+                className="rounded-lg border border-[#e8dfd8] p-4"
+              >
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <h4 className="text-lg font-bold text-[#55311c]">
+                      {reminder.name}
+                    </h4>
+                    <p className="text-sm text-[rgba(0,0,0,0.7)]">
+                      {weekdayLabelsFromMask(reminder.weekday_mask).join(
+                        ", ",
+                      ) || "No day"}{" "}
+                      - {reminder.is_active ? "Active" : "Inactive"}
+                    </p>
+                    <p className="mt-1 text-xs text-[rgba(0,0,0,0.6)]">
+                      Actions: {reminder.action_sms ? "SMS" : ""}{" "}
+                      {reminder.action_sms && reminder.action_task ? "+" : ""}{" "}
+                      {reminder.action_task ? "Task" : ""}
+                    </p>
+                    {reminder.last_triggered_on && (
+                      <p className="text-xs text-[rgba(0,0,0,0.55)]">
+                        Last triggered:{" "}
+                        {formatDateToBr(reminder.last_triggered_on)}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const id = String(reminder.id)
+                        setTogglingId(id)
+                        toggleActiveMutation.mutate({
+                          id,
+                          nextActive: !reminder.is_active,
+                        })
+                      }}
+                      disabled={
+                        toggleActiveMutation.isPending &&
+                        togglingId === String(reminder.id)
+                      }
+                      className={`rounded px-3 py-1 text-xs font-semibold text-white disabled:opacity-60 ${
+                        reminder.is_active
+                          ? "bg-amber-600 hover:bg-amber-700"
+                          : "bg-emerald-600 hover:bg-emerald-700"
+                      }`}
+                    >
+                      {reminder.is_active ? "Disable" : "Enable"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleEdit(reminder)}
+                      className="rounded bg-[#8c7569] px-3 py-1 text-xs font-semibold text-white hover:bg-[#55311c]"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => deleteMutation.mutate(String(reminder.id))}
+                      disabled={deleteMutation.isPending}
+                      className="rounded bg-red-600 px-3 py-1 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-60"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {showModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3">
+          <div className="w-full max-w-3xl rounded-lg bg-white p-5 shadow-xl sm:p-6">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-xl font-bold text-[#55311c]">
+                {editingId ? "Edit reminder" : "Create reminder"}
+              </h3>
+              <button
+                type="button"
+                onClick={handleCancelModal}
+                className="rounded border border-[#d9d0ca] px-3 py-1 text-sm text-[#55311c] hover:bg-[#f5f1ee]"
+              >
+                Close
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label
+                  htmlFor="remind-name"
+                  className="mb-1 block text-sm font-semibold text-[#55311c]"
+                >
+                  Reminder name
+                </label>
+                <input
+                  id="remind-name"
+                  type="text"
+                  value={formData.name}
+                  onChange={(e) =>
+                    setFormData((prev) => ({ ...prev, name: e.target.value }))
+                  }
+                  className="w-full rounded border border-[#d9d0ca] px-3 py-2 text-[#55311c] focus:border-[#8c7569] focus:outline-none"
+                  placeholder="Example: Tuesday caretaker check"
+                />
+              </div>
+
+              <div>
+                <p className="mb-2 text-sm font-semibold text-[#55311c]">
+                  Days of week
+                </p>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  {weekdayOptions.map((weekday) => {
+                    const selected = formData.weekdays.includes(weekday.value)
+                    return (
+                      <button
+                        key={weekday.value}
+                        type="button"
+                        onClick={() => toggleWeekday(weekday.value)}
+                        className={`rounded border px-3 py-2 text-sm font-semibold transition-all ${
+                          selected
+                            ? "border-[#8c7569] bg-[#8c7569] text-white"
+                            : "border-[#d9d0ca] text-[#55311c] hover:bg-[#f5f1ee]"
+                        }`}
+                      >
+                        {weekday.label}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-4">
+                <label className="flex items-center gap-2 text-sm text-[#55311c]">
+                  <input
+                    type="checkbox"
+                    checked={formData.is_active}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        is_active: e.target.checked,
+                      }))
+                    }
+                  />
+                  Active
+                </label>
+                <label className="flex items-center gap-2 text-sm text-[#55311c]">
+                  <input
+                    type="checkbox"
+                    checked={formData.action_sms}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        action_sms: e.target.checked,
+                      }))
+                    }
+                  />
+                  Send SMS
+                </label>
+                <label className="flex items-center gap-2 text-sm text-[#55311c]">
+                  <input
+                    type="checkbox"
+                    checked={formData.action_task}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        action_task: e.target.checked,
+                      }))
+                    }
+                  />
+                  Create task
+                </label>
+              </div>
+
+              {formData.action_sms && (
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div>
+                    <label
+                      htmlFor="remind-sms-to"
+                      className="mb-1 block text-sm font-semibold text-[#55311c]"
+                    >
+                      SMS destination (E.164)
+                    </label>
+                    <input
+                      id="remind-sms-to"
+                      type="text"
+                      value={formData.sms_to}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          sms_to: e.target.value,
+                        }))
+                      }
+                      className="w-full rounded border border-[#d9d0ca] px-3 py-2 text-[#55311c] focus:border-[#8c7569] focus:outline-none"
+                      placeholder="+447700900123"
+                    />
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="remind-sms-message"
+                      className="mb-1 block text-sm font-semibold text-[#55311c]"
+                    >
+                      SMS message
+                    </label>
+                    <textarea
+                      id="remind-sms-message"
+                      value={formData.sms_message}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          sms_message: e.target.value,
+                        }))
+                      }
+                      rows={3}
+                      className="w-full rounded border border-[#d9d0ca] px-3 py-2 text-[#55311c] focus:border-[#8c7569] focus:outline-none"
+                      placeholder="Reminder message text"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {formData.action_task && (
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div>
+                    <label
+                      htmlFor="remind-task-title"
+                      className="mb-1 block text-sm font-semibold text-[#55311c]"
+                    >
+                      Task title
+                    </label>
+                    <input
+                      id="remind-task-title"
+                      type="text"
+                      value={formData.task_title}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          task_title: e.target.value,
+                        }))
+                      }
+                      className="w-full rounded border border-[#d9d0ca] px-3 py-2 text-[#55311c] focus:border-[#8c7569] focus:outline-none"
+                      placeholder="Task created by reminder"
+                    />
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="remind-task-description"
+                      className="mb-1 block text-sm font-semibold text-[#55311c]"
+                    >
+                      Task description
+                    </label>
+                    <textarea
+                      id="remind-task-description"
+                      value={formData.task_description}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          task_description: e.target.value,
+                        }))
+                      }
+                      rows={3}
+                      className="w-full rounded border border-[#d9d0ca] px-3 py-2 text-[#55311c] focus:border-[#8c7569] focus:outline-none"
+                      placeholder="Additional information for task"
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="submit"
+                  disabled={
+                    createMutation.isPending || updateMutation.isPending
+                  }
+                  className="rounded bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white hover:bg-[#55311c] disabled:opacity-60"
+                >
+                  {editingId ? "Save changes" : "Create reminder"}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCancelModal}
+                  className="rounded border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] hover:bg-[#f5f1ee]"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function TwilioContent() {
   const { showErrorToast, showSuccessToast } = useCustomToast()
   const [selectedBuildingIds, setSelectedBuildingIds] = useState<string[]>([])
@@ -2901,10 +4663,13 @@ function TwilioContent() {
     ApiListResponse<Building>
   >({
     queryKey: ["buildings", "twilio-sms"],
-    queryFn: () => apiCall("/api/v1/buildings/condominio", { skip: 0, limit: 100 }),
+    queryFn: () =>
+      apiCall("/api/v1/buildings/condominio", { skip: 0, limit: 100 }),
   })
 
-  const { data: ResidentsData, isLoading: ResidentsLoading } = useQuery<Morador[]>({
+  const { data: ResidentsData, isLoading: ResidentsLoading } = useQuery<
+    Morador[]
+  >({
     queryKey: ["Residents", "twilio-sms"],
     queryFn: async () => {
       const allResidents: Morador[] = []
@@ -2979,7 +4744,9 @@ function TwilioContent() {
     Residents.forEach((morador) => {
       const id = String(morador.id)
       const includedByResident = residentIdSet.has(id)
-      const includedByBuilding = selectedBuildingNames.has(morador.building_nome)
+      const includedByBuilding = selectedBuildingNames.has(
+        morador.building_nome,
+      )
 
       if (includedByResident || includedByBuilding) {
         selectedMap.set(id, morador)
@@ -3070,7 +4837,7 @@ function TwilioContent() {
         })
 
         if (!response.ok) {
-          let detail = `Erro HTTP ${response.status}`
+          let detail = `HTTP error ${response.status}`
           try {
             const errorPayload = (await response.json()) as {
               detail?: string
@@ -3192,7 +4959,7 @@ function TwilioContent() {
           <input
             value={residentSearch}
             onChange={(e) => setResidentSearch(e.target.value)}
-            placeholder="Buscar por nome, building, flat ou Phone"
+            placeholder="Search by name, building, flat or phone"
             className="mb-3 w-full rounded border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
           />
 
@@ -3280,7 +5047,9 @@ function TwilioContent() {
             <p className="text-xs uppercase tracking-wide text-[#8c7569]">
               Final recipients
             </p>
-            <p className="text-2xl font-bold text-[#55311c]">{recipients.length}</p>
+            <p className="text-2xl font-bold text-[#55311c]">
+              {recipients.length}
+            </p>
           </div>
         </div>
 
@@ -3354,12 +5123,13 @@ function BinsQrCodesContent() {
     queryFn: () => apiCall("/api/v1/buildings/condominio"),
   })
 
-  const buildings = useMemo(
+  const buildings = (buildingsData?.data || []) as Building[]
+  const defaultBuilding = useMemo(
     () =>
-      ((buildingsData?.data || []) as Building[]).filter(
-        (building) => building.nome.trim().toLowerCase() !== "office",
-      ),
-    [buildingsData?.data],
+      [...buildings].find(
+        (building) => !building.nome.toLowerCase().includes("office"),
+      ) || null,
+    [buildings],
   )
 
   const baseUrl = useMemo(() => {
@@ -3367,137 +5137,111 @@ function BinsQrCodesContent() {
     return window.location.origin
   }, [])
 
-  const [qrMap, setQrMap] = useState<
-    Record<string, { dataUrl: string; link: string }>
-  >({})
+  const [qrData, setQrData] = useState<{
+    dataUrl: string
+    link: string
+  } | null>(null)
   const [isGenerating, setIsGenerating] = useState(false)
 
   useEffect(() => {
     let isActive = true
 
-    const generateQRCodes = async () => {
-      if (!baseUrl || buildings.length === 0) {
-        setQrMap({})
-        setIsGenerating(false)
+    const generateQRCode = async () => {
+      if (!baseUrl || !defaultBuilding) {
+        setQrData(null)
         return
       }
-
       setIsGenerating(true)
-      const nextMap: Record<string, { dataUrl: string; link: string }> = {}
 
-      for (let index = 0; index < buildings.length; index += 1) {
-        const building = buildings[index]
-        const params = new URLSearchParams()
-        params.set("buildingId", String(building.id))
-        if (building.nome) {
-          params.set("buildingName", String(building.nome))
-        }
-        const link = `${baseUrl}/bins-access?${params.toString()}`
-        const dataUrl = await QRCode.toDataURL(link, {
-          width: 240,
-          margin: 1,
-        })
-
-        if (!isActive) return
-        nextMap[String(building.id)] = { dataUrl, link }
-
-        // Prevent long main-thread blocking when many buildings exist.
-        if (index % 4 === 3) {
-          setQrMap({ ...nextMap })
-          await new Promise((resolve) => setTimeout(resolve, 0))
-        }
-      }
+      const params = new URLSearchParams()
+      params.set("buildingId", String(defaultBuilding.id))
+      params.set("buildingName", String(defaultBuilding.nome))
+      const link = `${baseUrl}/bins-access?${params.toString()}`
+      const dataUrl = await QRCode.toDataURL(link, { width: 280, margin: 1 })
 
       if (!isActive) return
-      setQrMap(nextMap)
+      setQrData({ dataUrl, link })
       setIsGenerating(false)
     }
 
-    generateQRCodes().catch(() => {
+    generateQRCode().catch(() => {
       if (!isActive) return
-      setQrMap({})
+      setQrData(null)
       setIsGenerating(false)
     })
 
     return () => {
       isActive = false
     }
-  }, [baseUrl, buildings])
+  }, [baseUrl, defaultBuilding])
 
   return (
     <div className="mx-auto max-w-7xl">
       <div className="mb-6 rounded-lg bg-white p-6 shadow-md">
         <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
-          QR Code - Bins
+          Bin Report
         </h2>
         <p className="mt-2 text-[rgba(0,0,0,0.7)]">
-          Use this QR only when the waste was not collected.
+          Single QR Code for miss collection reporting.
         </p>
       </div>
 
       {(isLoading || isGenerating) && (
         <div className="rounded-lg bg-white p-6 text-center text-sm text-[#55311c] shadow-md">
-          Generating QR codes...
+          Generating QR Codes...
         </div>
       )}
 
-      {!isLoading && buildings.length === 0 && (
-        <div className="rounded-lg bg-white p-6 text-center text-sm text-[rgba(0,0,0,0.7)] shadow-md">
-          No buildings found.
+      {!isLoading && !defaultBuilding && (
+        <div className="rounded-lg bg-white p-6 text-center text-sm text-[#55311c] shadow-md">
+          No building found.
         </div>
       )}
 
-      <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-        {buildings.map((building) => {
-          const qr = qrMap[String(building.id)]
-          return (
-            <div
-              key={String(building.id)}
-              className="rounded-lg bg-white p-5 shadow-md transition-all duration-200 hover:shadow-lg"
-            >
-              <div className="mb-4">
-                <h3 className="font-['Nunito',sans-serif] text-xl font-bold text-[#55311c]">
-                  {building.nome}
-                </h3>
-              </div>
+      {defaultBuilding && (
+        <div className="rounded-lg bg-white p-6 shadow-md">
+          <div className="mb-4">
+            <h3 className="font-['Nunito',sans-serif] text-xl font-bold text-[#55311c]">
+              MISS COLLECTION
+            </h3>
+            <p className="text-sm text-[rgba(0,0,0,0.65)]">
+              Use this QR code to report missed bin collections.
+            </p>
+          </div>
 
-              <div className="flex min-h-[260px] items-center justify-center rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-3">
-                {qr ? (
-                  <img
-                    src={qr.dataUrl}
-                    alt={`QR Code - Bins - ${building.nome}`}
-                    className="h-56 w-56"
-                  />
-                ) : (
-                  <p className="text-sm text-[rgba(0,0,0,0.6)]">Generating...</p>
-                )}
-              </div>
+          <div className="flex min-h-[300px] items-center justify-center rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
+            {qrData ? (
+              <img
+                src={qrData.dataUrl}
+                alt="QR Code - Miss Collection"
+                className="h-64 w-64"
+              />
+            ) : (
+              <p className="text-sm text-[rgba(0,0,0,0.6)]">Generating...</p>
+            )}
+          </div>
 
-              <div className="mt-4 space-y-2">
-                {qr && (
-                  <>
-                    <a
-                      href={qr.dataUrl}
-                      download={`bins-${building.nome.toLowerCase().replace(/\s+/g, "-")}.png`}
-                      className="block rounded-lg bg-[#8c7569] px-4 py-2 text-center text-sm font-semibold text-white transition-all duration-300 hover:bg-[#55311c]"
-                    >
-                      Download PNG
-                    </a>
-                    <a
-                      href={qr.link}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="block rounded-lg border border-[#8c7569] px-4 py-2 text-center text-sm font-semibold text-[#55311c] transition-all duration-300 hover:bg-[#f3eeea]"
-                    >
-                      Open link
-                    </a>
-                  </>
-                )}
-              </div>
+          {qrData && (
+            <div className="mt-4 grid gap-2 md:grid-cols-2">
+              <a
+                href={qrData.dataUrl}
+                download="qr-miss-collection.png"
+                className="block rounded-lg bg-[#8c7569] px-4 py-2 text-center text-sm font-semibold text-white transition-all duration-300 hover:bg-[#55311c]"
+              >
+                Download PNG
+              </a>
+              <a
+                href={qrData.link}
+                target="_blank"
+                rel="noreferrer"
+                className="block rounded-lg border border-[#8c7569] px-4 py-2 text-center text-sm font-semibold text-[#55311c] transition-all duration-300 hover:bg-[#f3eeea]"
+              >
+                Open link
+              </a>
             </div>
-          )
-        })}
-      </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -3505,24 +5249,21 @@ function BinsQrCodesContent() {
 function BinsContent() {
   const { showErrorToast, showSuccessToast } = useCustomToast()
   const [page, setPage] = useState(0)
-  const [buildingFilter, setBuildingFilter] = useState("")
+  const [typeFilter, setTypeFilter] = useState<"" | "general" | "recycle">("")
+  const [statusFilter, setStatusFilter] = useState<"" | "miss" | "late">("")
   const [dateFrom, setDateFrom] = useState("")
   const [dateTo, setDateTo] = useState("")
   const [isDownloadingReport, setIsDownloadingReport] = useState(false)
   const pageSize = 20
 
-  const { data: buildingsData } = useQuery<ApiListResponse<Building>>({
-    queryKey: ["buildings", "bins-filter"],
-    queryFn: () => apiCall("/api/v1/buildings/condominio", { skip: 0, limit: 500 }),
-  })
-
   const filterParams = useMemo(
     () => ({
-      building_id: buildingFilter || undefined,
       date_from: dateFrom || undefined,
       date_to: dateTo || undefined,
+      collection_type: typeFilter || undefined,
+      collection_status: statusFilter || undefined,
     }),
-    [buildingFilter, dateFrom, dateTo],
+    [dateFrom, dateTo, typeFilter, statusFilter],
   )
 
   const { data, isLoading, error } = useQuery<
@@ -3538,27 +5279,74 @@ function BinsContent() {
     placeholderData: keepPreviousData,
   })
 
-  const buildings = (buildingsData?.data || []) as Building[]
+  const { data: allData } = useQuery<ApiListResponse<BinMissCollectionRecord>>({
+    queryKey: ["bins", "all-for-alert", typeFilter],
+    queryFn: () =>
+      apiCall("/api/v1/bins/", {
+        skip: 0,
+        limit: 1000,
+        collection_type: typeFilter || undefined,
+      }),
+  })
+
   const items = data?.data || []
   const count = data?.count || 0
   const totalPages = Math.max(1, Math.ceil(count / pageSize))
+  const allItems = allData?.data || []
 
   const formatDate = (value: string) => {
     const dt = new Date(value)
     if (Number.isNaN(dt.getTime())) return "-"
-    return dt.toLocaleDateString()
+    return dt.toLocaleDateString("en-GB")
   }
 
   const formatTime = (value: string) => {
     const dt = new Date(value)
     if (Number.isNaN(dt.getTime())) return "-"
-    return dt.toLocaleTimeString()
+    return dt.toLocaleTimeString("en-GB")
   }
 
   const formatCsvValue = (value: string | number | boolean) => {
     const text = String(value).replace(/"/g, '""')
     return `"${text}"`
   }
+
+  const oldMissAlerts = useMemo(() => {
+    const sorted = [...allItems].sort(
+      (a, b) => new Date(a.data).getTime() - new Date(b.data).getTime(),
+    )
+    const openByType: Record<"general" | "recycle", string[]> = {
+      general: [],
+      recycle: [],
+    }
+
+    sorted.forEach((item) => {
+      const key = item.collection_type === "recycle" ? "recycle" : "general"
+      if (item.collection_status === "miss") openByType[key].push(item.data)
+      if (item.collection_status === "late" && openByType[key].length > 0) {
+        openByType[key].shift()
+      }
+    })
+
+    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
+    return (["general", "recycle"] as const)
+      .map((type) => {
+        const olderDates = openByType[type].filter(
+          (date) => new Date(date).getTime() < sevenDaysAgo,
+        )
+        if (olderDates.length === 0) return null
+        return {
+          type,
+          count: olderDates.length,
+          oldest: olderDates[0],
+        }
+      })
+      .filter(Boolean) as Array<{
+      type: "general" | "recycle"
+      count: number
+      oldest: string
+    }>
+  }, [allItems])
 
   const handleDownloadReport = async () => {
     setIsDownloadingReport(true)
@@ -3571,7 +5359,7 @@ function BinsContent() {
 
       const total = firstPage.count || 0
       if (!total) {
-        showErrorToast("Nenhum resultado para gerar relatório.")
+        showErrorToast("No results to generate the report.")
         return
       }
 
@@ -3582,13 +5370,14 @@ function BinsContent() {
       })) as ApiListResponse<BinMissCollectionRecord>
 
       const lines = [
-        ["Date", "Time", "Building", "Miss Collection"].join(","),
+        ["Date", "Time", "Type", "Status", "Building"].join(","),
         ...fullResult.data.map((item) =>
           [
             formatCsvValue(formatDate(item.data)),
             formatCsvValue(formatTime(item.data)),
+            formatCsvValue(item.collection_type),
+            formatCsvValue(item.collection_status),
             formatCsvValue(item.building_nome),
-            formatCsvValue(item.miss_collection ? "Yes" : "No"),
           ].join(","),
         ),
       ]
@@ -3603,9 +5392,9 @@ function BinsContent() {
       link.click()
       document.body.removeChild(link)
       URL.revokeObjectURL(href)
-      showSuccessToast("Relatório gerado com sucesso.")
+      showSuccessToast("Relat�rio gerado com sucesso.")
     } catch {
-      showErrorToast("Erro ao gerar relatório.")
+      showErrorToast("Failed to generate report.")
     } finally {
       setIsDownloadingReport(false)
     }
@@ -3634,38 +5423,86 @@ function BinsContent() {
   return (
     <div className="mx-auto max-w-7xl">
       <div className="mb-6 rounded-lg bg-white p-6 shadow-md">
-        <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
-          Bins
-        </h2>
-        <p className="mt-2 text-[rgba(0,0,0,0.7)]">
-          Log de eventos de miss collection por building.
-        </p>
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
+              Bins
+            </h2>
+            <p className="mt-2 text-[rgba(0,0,0,0.7)]">
+              Weekly schedule: General on Tuesdays and Thursdays. Recycle on
+              Thursday.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleDownloadReport}
+            disabled={isDownloadingReport}
+            className="rounded bg-[#8c7569] px-6 py-2 text-sm font-semibold text-white disabled:opacity-50 hover:bg-[#55311c]"
+          >
+            {isDownloadingReport ? "Generating..." : "Download report"}
+          </button>
+        </div>
       </div>
+
+      {oldMissAlerts.length > 0 && (
+        <div className="mb-6 rounded-lg border border-yellow-300 bg-yellow-50 p-4 shadow-md">
+          <p className="font-semibold text-yellow-800">
+            Old miss collections pending late collection:
+          </p>
+          <div className="mt-2 space-y-1 text-sm text-yellow-700">
+            {oldMissAlerts.map((alert) => (
+              <p key={`${alert.type}-${alert.oldest}`}>
+                {alert.type === "general" ? "General" : "Recycle"}:{" "}
+                {alert.count} pending (oldest: {formatDate(alert.oldest)})
+              </p>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="rounded-lg bg-white p-6 shadow-md">
         <div className="mb-4 grid gap-4 md:grid-cols-4">
           <div>
             <label
-              htmlFor="bins-building-filter"
+              htmlFor="bins-type-filter"
               className="mb-1 block text-sm font-semibold text-[#55311c]"
             >
-              Build
+              Type
             </label>
             <select
-              id="bins-building-filter"
-              value={buildingFilter}
+              id="bins-type-filter"
+              value={typeFilter}
               onChange={(e) => {
-                setBuildingFilter(e.target.value)
+                setTypeFilter(e.target.value as "" | "general" | "recycle")
                 setPage(0)
               }}
               className="w-full rounded border border-[#d9d0ca] px-3 py-2 text-[#55311c] focus:border-[#8c7569] focus:outline-none"
             >
-              <option value="">Todos</option>
-              {buildings.map((building) => (
-                <option key={String(building.id)} value={String(building.id)}>
-                  {building.nome}
-                </option>
-              ))}
+              <option value="">All</option>
+              <option value="general">General</option>
+              <option value="recycle">Recycle</option>
+            </select>
+          </div>
+
+          <div>
+            <label
+              htmlFor="bins-status-filter"
+              className="mb-1 block text-sm font-semibold text-[#55311c]"
+            >
+              Status
+            </label>
+            <select
+              id="bins-status-filter"
+              value={statusFilter}
+              onChange={(e) => {
+                setStatusFilter(e.target.value as "" | "miss" | "late")
+                setPage(0)
+              }}
+              className="w-full rounded border border-[#d9d0ca] px-3 py-2 text-[#55311c] focus:border-[#8c7569] focus:outline-none"
+            >
+              <option value="">All</option>
+              <option value="miss">Miss Collection</option>
+              <option value="late">Late Collection</option>
             </select>
           </div>
 
@@ -3674,7 +5511,7 @@ function BinsContent() {
               htmlFor="bins-date-from"
               className="mb-1 block text-sm font-semibold text-[#55311c]"
             >
-              Data inicial
+              Start date
             </label>
             <input
               id="bins-date-from"
@@ -3693,7 +5530,7 @@ function BinsContent() {
               htmlFor="bins-date-to"
               className="mb-1 block text-sm font-semibold text-[#55311c]"
             >
-              Data final
+              End date
             </label>
             <input
               id="bins-date-to"
@@ -3706,17 +5543,6 @@ function BinsContent() {
               }}
               className="w-full rounded border border-[#d9d0ca] px-3 py-2 text-[#55311c] focus:border-[#8c7569] focus:outline-none"
             />
-          </div>
-
-          <div className="flex items-end">
-            <button
-              type="button"
-              onClick={handleDownloadReport}
-              disabled={isDownloadingReport}
-              className="w-full rounded bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 hover:bg-[#55311c]"
-            >
-              {isDownloadingReport ? "Gerando..." : "Baixar relatório"}
-            </button>
           </div>
         </div>
 
@@ -3731,10 +5557,13 @@ function BinsContent() {
                   Time
                 </th>
                 <th className="border border-gray-300 px-4 py-3 text-left text-sm font-semibold text-white">
-                  Building
+                  Type
                 </th>
                 <th className="border border-gray-300 px-4 py-3 text-left text-sm font-semibold text-white">
-                  Miss Collection
+                  Status
+                </th>
+                <th className="border border-gray-300 px-4 py-3 text-left text-sm font-semibold text-white">
+                  Building
                 </th>
               </tr>
             </thead>
@@ -3748,17 +5577,22 @@ function BinsContent() {
                     {formatTime(item.data)}
                   </td>
                   <td className="border border-gray-300 px-4 py-3 text-[#55311c]">
-                    {item.building_nome}
+                    {item.collection_type === "recycle" ? "Recycle" : "General"}
                   </td>
                   <td className="border border-gray-300 px-4 py-3 text-[#55311c]">
-                    {item.miss_collection ? "Yes" : "No"}
+                    {item.collection_status === "late"
+                      ? "Late Collection"
+                      : "Miss Collection"}
+                  </td>
+                  <td className="border border-gray-300 px-4 py-3 text-[#55311c]">
+                    {item.building_nome}
                   </td>
                 </tr>
               ))}
               {items.length === 0 && (
                 <tr>
                   <td
-                    colSpan={4}
+                    colSpan={5}
                     className="border border-gray-300 px-4 py-8 text-center text-[rgba(0,0,0,0.65)]"
                   >
                     No miss collection records found.
@@ -3875,7 +5709,7 @@ function CleanerQrCodesContent() {
 
       {(isLoading || isGenerating) && (
         <div className="rounded-lg bg-white p-6 text-center text-sm text-[#55311c] shadow-md">
-          Gerando QR Codes...
+          Generating QR Codes...
         </div>
       )}
 
@@ -3892,55 +5726,55 @@ function CleanerQrCodesContent() {
             const qrItem = qrMap[String(building.id)]
             return (
               <div
-          key={building.id}
-          className="flex h-full flex-col justify-between rounded-lg bg-white p-6 shadow-md"
+                key={building.id}
+                className="flex h-full flex-col justify-between rounded-lg bg-white p-6 shadow-md"
               >
-          <div>
-            <h3 className="text-lg font-semibold text-[#55311c]">
-              {building.nome || "Building"}
-            </h3>
-          </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-[#55311c]">
+                    {building.nome || "Building"}
+                  </h3>
+                </div>
 
-          <div className="mt-4 flex flex-col items-center justify-center gap-4">
-            {qrItem?.dataUrl ? (
-              <img
-                src={qrItem.dataUrl}
-                alt={`QR Code ${building.nome || building.id}`}
-                className="h-48 w-48 rounded-lg border border-[#e5e0dc] bg-white p-2"
-              />
-            ) : (
-              <div className="flex h-48 w-48 items-center justify-center rounded-lg border border-dashed border-[#e5e0dc] text-xs text-[rgba(0,0,0,0.6)]">
-                QR Code unavailable
-              </div>
-            )}
+                <div className="mt-4 flex flex-col items-center justify-center gap-4">
+                  {qrItem?.dataUrl ? (
+                    <img
+                      src={qrItem.dataUrl}
+                      alt={`QR Code ${building.nome || building.id}`}
+                      className="h-48 w-48 rounded-lg border border-[#e5e0dc] bg-white p-2"
+                    />
+                  ) : (
+                    <div className="flex h-48 w-48 items-center justify-center rounded-lg border border-dashed border-[#e5e0dc] text-xs text-[rgba(0,0,0,0.6)]">
+                      QR Code unavailable
+                    </div>
+                  )}
 
-            <div className="flex w-full flex-col gap-2">
-              <a
-                href={qrItem?.dataUrl || "#"}
-                download={`qr-cleaner-${building.nome || building.id}.png`}
-                className={`w-full rounded-lg px-4 py-2 text-center text-sm font-semibold transition-all duration-200 ${
-            qrItem?.dataUrl
-              ? "bg-[#8c7569] text-white hover:bg-[#55311c]"
-              : "cursor-not-allowed bg-[#e5e0dc] text-[#8c7569]"
-                }`}
-                onClick={(event) => {
-            if (!qrItem?.dataUrl) event.preventDefault()
-                }}
-              >
-                Baixar QR Code
-              </a>
-              {qrItem?.link && (
-                <a
-                  href={qrItem.link}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="block rounded-lg border border-[#8c7569] px-4 py-2 text-center text-sm font-semibold text-[#55311c] transition-all duration-300 hover:bg-[#f3eeea]"
-                >
-                  Open link
-                </a>
-              )}
-            </div>
-          </div>
+                  <div className="flex w-full flex-col gap-2">
+                    <a
+                      href={qrItem?.dataUrl || "#"}
+                      download={`qr-cleaner-${building.nome || building.id}.png`}
+                      className={`w-full rounded-lg px-4 py-2 text-center text-sm font-semibold transition-all duration-200 ${
+                        qrItem?.dataUrl
+                          ? "bg-[#8c7569] text-white hover:bg-[#55311c]"
+                          : "cursor-not-allowed bg-[#e5e0dc] text-[#8c7569]"
+                      }`}
+                      onClick={(event) => {
+                        if (!qrItem?.dataUrl) event.preventDefault()
+                      }}
+                    >
+                      Download QR Code
+                    </a>
+                    {qrItem?.link && (
+                      <a
+                        href={qrItem.link}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="block rounded-lg border border-[#8c7569] px-4 py-2 text-center text-sm font-semibold text-[#55311c] transition-all duration-300 hover:bg-[#f3eeea]"
+                      >
+                        Open link
+                      </a>
+                    )}
+                  </div>
+                </div>
               </div>
             )
           })}
@@ -3966,6 +5800,13 @@ function CaretakerQrCodesContent() {
     Record<string, { dataUrl: string; link: string }>
   >({})
   const [isGenerating, setIsGenerating] = useState(false)
+  const binsBuildings = useMemo(
+    () =>
+      [...buildings].filter(
+        (building) => !building.nome.toLowerCase().includes("office"),
+      ),
+    [buildings],
+  )
 
   useEffect(() => {
     let isActive = true
@@ -3979,18 +5820,26 @@ function CaretakerQrCodesContent() {
       setIsGenerating(true)
 
       const entries = await Promise.all(
-        buildings.map(async (building) => {
-          const params = new URLSearchParams()
-          params.set("buildingId", String(building.id))
-          if (building.nome) {
-            params.set("buildingName", String(building.nome))
-          }
-          const link = `${baseUrl}/caretaker-access?${params.toString()}`
-          const dataUrl = await QRCode.toDataURL(link, {
+        [
+          {
+            key: "work-time",
+            link: `${baseUrl}/caretaker-access?mode=work-time`,
+          },
+          ...binsBuildings.map((building) => {
+            const params = new URLSearchParams()
+            params.set("buildingId", String(building.id))
+            if (building.nome) params.set("buildingName", String(building.nome))
+            return {
+              key: String(building.id),
+              link: `${baseUrl}/caretaker-access?${params.toString()}`,
+            }
+          }),
+        ].map(async (entry) => {
+          const dataUrl = await QRCode.toDataURL(entry.link, {
             width: 240,
             margin: 1,
           })
-          return [String(building.id), { dataUrl, link }] as const
+          return [entry.key, { dataUrl, link: entry.link }] as const
         }),
       )
 
@@ -4009,7 +5858,7 @@ function CaretakerQrCodesContent() {
     return () => {
       isActive = false
     }
-  }, [baseUrl, buildings])
+  }, [baseUrl, buildings, binsBuildings])
 
   return (
     <div className="mx-auto max-w-7xl">
@@ -4018,24 +5867,75 @@ function CaretakerQrCodesContent() {
           QR Code - Caretaker
         </h2>
         <p className="mt-2 text-[rgba(0,0,0,0.7)]">
-          Baixe um QR Code por building para registrar acesso no painel Caretaker.
+          QR codes for WORK TIME and building sessions.
         </p>
       </div>
 
       {(isLoading || isGenerating) && (
         <div className="rounded-lg bg-white p-6 text-center text-sm text-[#55311c] shadow-md">
-          Gerando QR Codes...
+          Generating QR Codes...
         </div>
       )}
 
-      {!isLoading && buildings.length === 0 && (
+      {!isLoading && binsBuildings.length === 0 && (
         <div className="rounded-lg bg-white p-6 text-center text-sm text-[#55311c] shadow-md">
           No building found.
         </div>
       )}
 
       <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-        {[...buildings].filter((building) => building.nome.toLowerCase().includes("office")).map((building) => {
+        <div
+          key="work-time-card"
+          className="flex h-full flex-col justify-between rounded-lg bg-white p-6 shadow-md"
+        >
+          <div>
+            <h3 className="text-lg font-semibold text-[#55311c]">WORK TIME</h3>
+            <p className="text-sm text-[rgba(0,0,0,0.6)]">Caretaker IN/OUT</p>
+          </div>
+
+          <div className="mt-4 flex flex-col items-center justify-center gap-4">
+            {qrMap["work-time"]?.dataUrl ? (
+              <img
+                src={qrMap["work-time"].dataUrl}
+                alt="QR Code WORK TIME"
+                className="h-48 w-48 rounded-lg border border-[#e5e0dc] bg-white p-2"
+              />
+            ) : (
+              <div className="flex h-48 w-48 items-center justify-center rounded-lg border border-dashed border-[#e5e0dc] text-xs text-[rgba(0,0,0,0.6)]">
+                QR Code unavailable
+              </div>
+            )}
+
+            <div className="flex w-full flex-col gap-2">
+              <a
+                href={qrMap["work-time"]?.dataUrl || "#"}
+                download="qr-work-time.png"
+                className={`w-full rounded-lg px-4 py-2 text-center text-sm font-semibold transition-all duration-200 ${
+                  qrMap["work-time"]?.dataUrl
+                    ? "bg-[#8c7569] text-white hover:bg-[#55311c]"
+                    : "cursor-not-allowed bg-[#e5e0dc] text-[#8c7569]"
+                }`}
+                onClick={(event) => {
+                  if (!qrMap["work-time"]?.dataUrl) event.preventDefault()
+                }}
+              >
+                Download QR Code
+              </a>
+              {qrMap["work-time"]?.link && (
+                <a
+                  href={qrMap["work-time"].link}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block rounded-lg border border-[#8c7569] px-4 py-2 text-center text-sm font-semibold text-[#55311c] transition-all duration-300 hover:bg-[#f3eeea]"
+                >
+                  Open link
+                </a>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {binsBuildings.map((building) => {
           const qrItem = qrMap[String(building.id)]
           return (
             <div
@@ -4047,7 +5947,7 @@ function CaretakerQrCodesContent() {
                   {building.nome || "Building"}
                 </h3>
                 <p className="text-sm text-[rgba(0,0,0,0.6)]">
-                  Code: {building.id}
+                  Caretaker building session
                 </p>
               </div>
 
@@ -4077,7 +5977,7 @@ function CaretakerQrCodesContent() {
                       if (!qrItem?.dataUrl) event.preventDefault()
                     }}
                   >
-                    Baixar QR Code
+                    Download QR Code
                   </a>
                   {qrItem?.link && (
                     <a
@@ -4126,7 +6026,7 @@ function CleanerContent() {
                   : "bg-[#f5f1ee] text-[#55311c] hover:bg-[#e8e1dc]"
               }`}
             >
-              Resumo
+              Summary
             </button>
             <button
               type="button"
@@ -4137,7 +6037,7 @@ function CleanerContent() {
                   : "bg-[#f5f1ee] text-[#55311c] hover:bg-[#e8e1dc]"
               }`}
             >
-              Cadastro
+              Registration
             </button>
           </div>
         </div>
@@ -4148,11 +6048,10 @@ function CleanerContent() {
   )
 }
 
-
 function CaretakerContent() {
-  const [activeSubTab, setActiveSubTab] = useState<"summary" | "register">(
-    "summary",
-  )
+  const [activeSubTab, setActiveSubTab] = useState<
+    "summary" | "register" | "schedules"
+  >("summary")
 
   return (
     <div className="mx-auto max-w-7xl">
@@ -4163,10 +6062,10 @@ function CaretakerContent() {
               Caretaker
             </h2>
             <p className="mt-1 text-[rgba(0,0,0,0.7)]">
-              Work summary and caretaker registration.
+              Work summary, caretaker registration and maintenance schedules.
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={() => setActiveSubTab("summary")}
@@ -4176,7 +6075,7 @@ function CaretakerContent() {
                   : "bg-[#f5f1ee] text-[#55311c] hover:bg-[#e8e1dc]"
               }`}
             >
-              Resumo
+              Summary
             </button>
             <button
               type="button"
@@ -4187,17 +6086,1108 @@ function CaretakerContent() {
                   : "bg-[#f5f1ee] text-[#55311c] hover:bg-[#e8e1dc]"
               }`}
             >
-              Cadastro
+              Registration
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveSubTab("schedules")}
+              className={`rounded-lg px-4 py-2 text-sm font-semibold transition-all duration-200 ${
+                activeSubTab === "schedules"
+                  ? "bg-[#8c7569] text-white"
+                  : "bg-[#f5f1ee] text-[#55311c] hover:bg-[#e8e1dc]"
+              }`}
+            >
+              Schedules
             </button>
           </div>
         </div>
       </div>
 
-      {activeSubTab === "summary" ? (
-        <CaretakerSummary />
-      ) : (
-        <CaretakerRegister />
+      {activeSubTab === "summary" && <CaretakerSummary />}
+      {activeSubTab === "register" && <CaretakerRegister />}
+      {activeSubTab === "schedules" && <CaretakerSchedules />}
+    </div>
+  )
+}
+
+function CaretakerSchedules({
+  initialTab = "alarm",
+}: {
+  initialTab?: "alarm" | "lift" | "light"
+}) {
+  const [activeTab, setActiveTab] = useState<"alarm" | "lift" | "light">(
+    initialTab,
+  )
+
+  useEffect(() => {
+    setActiveTab(initialTab)
+  }, [initialTab])
+
+  return (
+    <div className="rounded-lg bg-white p-6 shadow-md">
+      {activeTab === "alarm" && <FireAlarmSchedulePage />}
+      {activeTab === "lift" && (
+        <BuildingSchedulePage
+          scheduleId="lift"
+          title="Lift schedule"
+          storageKey={LIFT_SCHEDULE_STORAGE_KEY}
+        />
       )}
+      {activeTab === "light" && (
+        <BuildingSchedulePage
+          scheduleId="light"
+          title="Emergency light"
+          storageKey={LIGHT_SCHEDULE_STORAGE_KEY}
+        />
+      )}
+    </div>
+  )
+}
+
+function FireAlarmSchedulePage() {
+  const { showSuccessToast, showErrorToast } = useCustomToast()
+  const [selectedDate, setSelectedDate] = useState(() =>
+    snapToFireAlarmCycleDate(toDateInputValue()),
+  )
+  const [allLogs, setAllLogs] = useState<FireAlarmLogByDate>({})
+  const [rows, setRows] = useState<
+    Record<FireAlarmBuildingId, FireAlarmLogRow>
+  >(() => getDefaultFireAlarmRows())
+  const [activeView, setActiveView] = useState<"schedule" | "history">(
+    "schedule",
+  )
+  const [reportDateFrom, setReportDateFrom] = useState("")
+  const [reportDateTo, setReportDateTo] = useState("")
+  const [reportEmail, setReportEmail] = useState("")
+  const [isSendingReport, setIsSendingReport] = useState(false)
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(FIRE_ALARM_STORAGE_KEY)
+      if (!raw) {
+        localStorage.setItem(
+          FIRE_ALARM_STORAGE_KEY,
+          JSON.stringify(FIRE_ALARM_INITIAL_LOGS),
+        )
+        setAllLogs(FIRE_ALARM_INITIAL_LOGS)
+        setRows(FIRE_ALARM_INITIAL_LOGS[selectedDate] || getDefaultFireAlarmRows())
+        return
+      }
+      const parsed = JSON.parse(raw) as FireAlarmLogByDate
+      setAllLogs(parsed)
+      setRows(parsed[selectedDate] || getDefaultFireAlarmRows())
+    } catch {
+      setAllLogs({})
+      setRows(getDefaultFireAlarmRows())
+    }
+  }, [selectedDate])
+
+  const repetition = useMemo(
+    () => getFireAlarmRepetition(selectedDate),
+    [selectedDate],
+  )
+
+  const scheduleRows = useMemo(
+    () => getFireAlarmScheduleRowsForDate(selectedDate),
+    [selectedDate],
+  )
+  const historyDates = useMemo(
+    () => Object.keys(allLogs).sort((a, b) => b.localeCompare(a)),
+    [allLogs],
+  )
+
+  async function handleSendReport() {
+    if (reportDateFrom && reportDateTo && reportDateFrom > reportDateTo) {
+      showErrorToast("Invalid date range")
+      return
+    }
+    if (!reportEmail.trim()) {
+      showErrorToast("Email is required")
+      return
+    }
+
+    const sourceLogs: FireAlarmLogByDate = {
+      ...allLogs,
+      [selectedDate]: rows,
+    }
+
+    const selectedDates = Object.keys(sourceLogs)
+      .filter((date) => isDateWithinRange(date, reportDateFrom, reportDateTo))
+      .sort((a, b) => b.localeCompare(a))
+
+    if (selectedDates.length === 0) {
+      showErrorToast("No alarm records found in the selected range")
+      return
+    }
+
+    const headers = [
+      "Date",
+      "Building",
+      "Call Point",
+      "Location",
+      "Time",
+      "Action Required",
+      "Comments",
+    ]
+    const reportRows: (string | number)[][] = []
+
+    selectedDates.forEach((date) => {
+      const logRows = sourceLogs[date] || getDefaultFireAlarmRows()
+      const rowsForDate = getFireAlarmScheduleRowsForDate(date)
+      rowsForDate.forEach((entry) => {
+        const log = logRows[entry.buildingId] || {
+          time: "",
+          actionRequired: false,
+          comment: "",
+        }
+        reportRows.push([
+          formatDateToGb(date),
+          entry.buildingLabel,
+          entry.callPoint,
+          entry.location,
+          log.time || "-",
+          log.actionRequired ? "Yes" : "No",
+          log.comment || "-",
+        ])
+      })
+    })
+
+    const reportTitle = "Fire Alarm Schedule Report"
+    const fileName = `fire-alarm-schedule-${new Date().toISOString().slice(0, 10)}.pdf`
+    const fileDataBase64 = generatePdfTableReportBase64({
+      title: reportTitle,
+      dateRange: buildDateRangeLabel(reportDateFrom, reportDateTo),
+      headers,
+      rows: reportRows,
+    })
+
+    if (!fileDataBase64) {
+      showErrorToast("Failed to prepare report file")
+      return
+    }
+
+    try {
+      setIsSendingReport(true)
+      await apiCall("/api/v1/utils/send-report-email/", {
+        method: "POST",
+        body: {
+          email_to: reportEmail.trim(),
+          subject: reportTitle,
+          html_content: buildScheduleReportEmailHtml({
+            scheduleName: "Fire Alarm",
+            periodLabel: buildDateRangeLabel(reportDateFrom, reportDateTo),
+          }),
+          file_name: fileName,
+          file_data_base64: fileDataBase64,
+        },
+      })
+      showSuccessToast("Report sent by email")
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to send report by email"
+      showErrorToast(message)
+    } finally {
+      setIsSendingReport(false)
+    }
+  }
+
+  if (activeView === "history") {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
+          <div>
+            <h3 className="text-lg font-bold text-[#55311c]">
+              Historico do alarm schedule
+            </h3>
+            <p className="text-sm text-[rgba(0,0,0,0.65)]">
+              Escolha uma data salva para abrir o registro.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setActiveView("schedule")}
+            className="rounded-lg border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+          >
+            Voltar
+          </button>
+        </div>
+
+        <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
+          <h4 className="mb-3 text-sm font-semibold text-[#55311c]">
+            Generate report
+          </h4>
+          <p className="mb-3 text-xs text-[rgba(0,0,0,0.65)]">
+            Enter email and optional date range to send the PDF report.
+          </p>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+            <div>
+              <label
+                htmlFor="alarm-report-email"
+                className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+              >
+                Email
+              </label>
+              <input
+                id="alarm-report-email"
+                type="email"
+                value={reportEmail}
+                onChange={(event) => setReportEmail(event.target.value)}
+                placeholder="report@email.com"
+                className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="alarm-report-date-from"
+                className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+              >
+                Date from
+              </label>
+              <input
+                id="alarm-report-date-from"
+                type="date"
+                value={reportDateFrom}
+                onChange={(event) => setReportDateFrom(event.target.value)}
+                className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="alarm-report-date-to"
+                className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+              >
+                Date to
+              </label>
+              <input
+                id="alarm-report-date-to"
+                type="date"
+                min={reportDateFrom || undefined}
+                value={reportDateTo}
+                onChange={(event) => setReportDateTo(event.target.value)}
+                className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+              />
+            </div>
+            <div className="flex items-end">
+              <button
+                type="button"
+                onClick={handleSendReport}
+                disabled={isSendingReport}
+                className="w-full rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isSendingReport ? "Sending..." : "Send by email"}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[620px] border-collapse">
+            <thead>
+              <tr className="bg-[#8c7569]">
+                <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
+                  Date
+                </th>
+                <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
+                  Building / Call Point / Location
+                </th>
+                <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
+                  Saved rows
+                </th>
+                <th className="border border-[#736055] px-3 py-2 text-center text-sm font-semibold text-white">
+                  Action
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {historyDates.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={4}
+                    className="border border-[#e5e0dc] bg-white px-3 py-4 text-center text-sm text-[rgba(0,0,0,0.7)]"
+                  >
+                    Nenhum registro salvo ainda.
+                  </td>
+                </tr>
+              )}
+              {historyDates.map((date) => {
+                const savedRows = allLogs[date] || getDefaultFireAlarmRows()
+                const rowsForDate = getFireAlarmScheduleRowsForDate(date)
+                const totalSaved = Object.values(savedRows).filter(
+                  (row) =>
+                    row.time.trim() || row.actionRequired || row.comment.trim(),
+                ).length
+                return (
+                  <tr key={date} className="bg-white hover:bg-[#f8f5f3]">
+                    <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                      {formatDateToGb(date)}
+                    </td>
+                    <td className="border border-[#e5e0dc] px-3 py-2 text-xs text-[#55311c]">
+                      <div className="space-y-1">
+                        {rowsForDate.map((entry) => {
+                          const rowData = savedRows[entry.buildingId] || {
+                            time: "",
+                            actionRequired: false,
+                            comment: "",
+                          }
+                          return (
+                            <div key={`${date}-${entry.buildingId}`}>
+                              <span className="font-semibold">
+                                {entry.buildingLabel}
+                              </span>{" "}
+                              | {entry.callPoint} | {entry.location} |{" "}
+                              {rowData.time || "-"}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </td>
+                    <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                      {totalSaved} / 6
+                    </td>
+                    <td className="border border-[#e5e0dc] px-3 py-2 text-center text-sm">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedDate(snapToFireAlarmCycleDate(date))
+                          setActiveView("schedule")
+                        }}
+                        className="rounded border border-[#8c7569] px-3 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+                      >
+                        Abrir
+                      </button>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    )
+  }
+
+  const handleRowChange = (
+    buildingId: FireAlarmBuildingId,
+    key: keyof FireAlarmLogRow,
+    value: string | boolean,
+  ) => {
+    setRows((previous) => {
+      const nextRow = {
+        ...previous[buildingId],
+        [key]: value,
+      }
+      if (key === "actionRequired" && value === false) {
+        nextRow.comment = ""
+      }
+      return {
+        ...previous,
+        [buildingId]: nextRow,
+      }
+    })
+  }
+
+  const handleSave = () => {
+    const hasTime = scheduleRows.some((row) => rows[row.buildingId]?.time)
+    if (!hasTime) {
+      showErrorToast("Fill at least one time before saving")
+      return
+    }
+
+    const nextLogs = {
+      ...allLogs,
+      [selectedDate]: rows,
+    }
+
+    setAllLogs(nextLogs)
+    localStorage.setItem(FIRE_ALARM_STORAGE_KEY, JSON.stringify(nextLogs))
+    showSuccessToast("Alarm schedule saved")
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col gap-3 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h3 className="text-lg font-bold text-[#55311c]">Alarm schedule</h3>
+          <p className="text-sm text-[rgba(0,0,0,0.65)]">
+            Synced with 26/02/2026 (repetition 14): 014, 014, 055, 020, 063,
+            021.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setActiveView("history")}
+          className="self-start rounded-lg border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] sm:self-auto"
+        >
+          Consultar historico
+        </button>
+      </div>
+
+      <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] px-4 py-3 text-sm text-[#55311c]">
+        Date: <strong>{formatDateToGb(selectedDate)}</strong> | Repetition:{" "}
+        <strong>{repetition}</strong>
+      </div>
+
+      <div className="flex flex-wrap items-end justify-center gap-2 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-3">
+        <button
+          type="button"
+          onClick={() =>
+            setSelectedDate((previous) => shiftFireAlarmCycleDate(previous, -1))
+          }
+          className="rounded-lg border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+        >
+          Back
+        </button>
+        <div>
+          <label
+            htmlFor="fire-alarm-date"
+            className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+          >
+            Date
+          </label>
+          <input
+            id="fire-alarm-date"
+            type="date"
+            value={selectedDate}
+            onChange={(event) =>
+              setSelectedDate(snapToFireAlarmCycleDate(event.target.value))
+            }
+            className="rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() =>
+            setSelectedDate((previous) => shiftFireAlarmCycleDate(previous, 1))
+          }
+          className="rounded-lg border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+        >
+          Next
+        </button>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[900px] border-collapse">
+          <thead>
+            <tr className="bg-[#8c7569]">
+              <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
+                Date
+              </th>
+              <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
+                Building
+              </th>
+              <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
+                Call Point
+              </th>
+              <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
+                Location
+              </th>
+              <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
+                Time
+              </th>
+              <th className="border border-[#736055] px-3 py-2 text-center text-sm font-semibold text-white">
+                Action required
+              </th>
+              <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
+                Comments
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {scheduleRows.map((row) => {
+              const rowData = rows[row.buildingId] || {
+                time: "",
+                actionRequired: false,
+                comment: "",
+              }
+              return (
+                <tr
+                  key={row.buildingId}
+                  className="bg-white hover:bg-[#f8f5f3]"
+                >
+                  <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                    {formatDateToGb(selectedDate)}
+                  </td>
+                  <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                    {row.buildingLabel}
+                  </td>
+                  <td className="border border-[#e5e0dc] px-3 py-2 text-sm font-semibold text-[#55311c]">
+                    {row.callPoint}
+                  </td>
+                  <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                    {row.location}
+                  </td>
+                  <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                    <input
+                      type="time"
+                      value={rowData.time}
+                      onChange={(event) =>
+                        handleRowChange(
+                          row.buildingId,
+                          "time",
+                          event.target.value,
+                        )
+                      }
+                      className="w-full rounded border border-[#d9d0ca] px-2 py-1 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                    />
+                  </td>
+                  <td className="border border-[#e5e0dc] px-3 py-2 text-center text-sm">
+                    <input
+                      type="checkbox"
+                      checked={rowData.actionRequired}
+                      onChange={(event) =>
+                        handleRowChange(
+                          row.buildingId,
+                          "actionRequired",
+                          event.target.checked,
+                        )
+                      }
+                      className="h-4 w-4 cursor-pointer accent-[#8c7569]"
+                    />
+                  </td>
+                  <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                    <input
+                      type="text"
+                      value={rowData.comment}
+                      disabled={!rowData.actionRequired}
+                      onChange={(event) =>
+                        handleRowChange(
+                          row.buildingId,
+                          "comment",
+                          event.target.value,
+                        )
+                      }
+                      placeholder={
+                        rowData.actionRequired
+                          ? "Write action details"
+                          : "Enable Action required to add comment"
+                      }
+                      className="w-full rounded border border-[#d9d0ca] px-2 py-1 text-sm text-[#55311c] disabled:cursor-not-allowed disabled:bg-[#f0ece9] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                    />
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={handleSave}
+          className="rounded-lg bg-[#8c7569] px-6 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c]"
+        >
+          Save
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function BuildingSchedulePage({
+  scheduleId,
+  title,
+  storageKey,
+}: {
+  scheduleId: "lift" | "light"
+  title: string
+  storageKey: string
+}) {
+  const { showSuccessToast, showErrorToast } = useCustomToast()
+  const [selectedDate, setSelectedDate] = useState(() =>
+    snapToFireAlarmCycleDate(toDateInputValue()),
+  )
+  const [allLogs, setAllLogs] = useState<FireAlarmLogByDate>({})
+  const [rows, setRows] = useState<
+    Record<FireAlarmBuildingId, FireAlarmLogRow>
+  >(() => getDefaultFireAlarmRows())
+  const [activeView, setActiveView] = useState<"schedule" | "history">(
+    "schedule",
+  )
+  const [reportDateFrom, setReportDateFrom] = useState("")
+  const [reportDateTo, setReportDateTo] = useState("")
+  const [reportEmail, setReportEmail] = useState("")
+  const [isSendingReport, setIsSendingReport] = useState(false)
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(storageKey)
+      if (!raw) {
+        setAllLogs({})
+        setRows(getDefaultFireAlarmRows())
+        return
+      }
+      const parsed = JSON.parse(raw) as FireAlarmLogByDate
+      setAllLogs(parsed)
+      setRows(parsed[selectedDate] || getDefaultFireAlarmRows())
+    } catch {
+      setAllLogs({})
+      setRows(getDefaultFireAlarmRows())
+    }
+  }, [selectedDate, storageKey])
+
+  const repetition = useMemo(
+    () => getFireAlarmRepetition(selectedDate),
+    [selectedDate],
+  )
+  const buildingRows = useMemo(
+    () =>
+      FIRE_ALARM_BUILDINGS.map((building) => ({
+        buildingId: building.id,
+        buildingLabel: building.label,
+      })),
+    [],
+  )
+  const historyDates = useMemo(
+    () => Object.keys(allLogs).sort((a, b) => b.localeCompare(a)),
+    [allLogs],
+  )
+
+  const idPrefix = `${scheduleId}-schedule`
+
+  const handleRowChange = (
+    buildingId: FireAlarmBuildingId,
+    key: keyof FireAlarmLogRow,
+    value: string | boolean,
+  ) => {
+    setRows((previous) => {
+      const nextRow = {
+        ...previous[buildingId],
+        [key]: value,
+      }
+      if (key === "actionRequired" && value === false) {
+        nextRow.comment = ""
+      }
+      return {
+        ...previous,
+        [buildingId]: nextRow,
+      }
+    })
+  }
+
+  const handleSave = () => {
+    const hasTime = buildingRows.some((row) => rows[row.buildingId]?.time)
+    if (!hasTime) {
+      showErrorToast("Fill at least one time before saving")
+      return
+    }
+    const nextLogs = {
+      ...allLogs,
+      [selectedDate]: rows,
+    }
+    setAllLogs(nextLogs)
+    localStorage.setItem(storageKey, JSON.stringify(nextLogs))
+    showSuccessToast(`${title} saved`)
+  }
+
+  async function handleSendReport() {
+    if (reportDateFrom && reportDateTo && reportDateFrom > reportDateTo) {
+      showErrorToast("Invalid date range")
+      return
+    }
+    if (!reportEmail.trim()) {
+      showErrorToast("Email is required")
+      return
+    }
+
+    const sourceLogs: FireAlarmLogByDate = {
+      ...allLogs,
+      [selectedDate]: rows,
+    }
+
+    const selectedDates = Object.keys(sourceLogs)
+      .filter((date) => isDateWithinRange(date, reportDateFrom, reportDateTo))
+      .sort((a, b) => b.localeCompare(a))
+
+    if (selectedDates.length === 0) {
+      showErrorToast("No records found in the selected range")
+      return
+    }
+
+    const headers = ["Date", "Building", "Time", "Action Required", "Comments"]
+    const reportRows: (string | number)[][] = []
+
+    selectedDates.forEach((date) => {
+      const logRows = sourceLogs[date] || getDefaultFireAlarmRows()
+      buildingRows.forEach((entry) => {
+        const log = logRows[entry.buildingId] || {
+          time: "",
+          actionRequired: false,
+          comment: "",
+        }
+        reportRows.push([
+          formatDateToGb(date),
+          entry.buildingLabel,
+          log.time || "-",
+          log.actionRequired ? "Yes" : "No",
+          log.comment || "-",
+        ])
+      })
+    })
+
+    const reportTitle = `${title} Report`
+    const fileName = `${scheduleId}-schedule-${new Date().toISOString().slice(0, 10)}.pdf`
+    const fileDataBase64 = generatePdfTableReportBase64({
+      title: reportTitle,
+      dateRange: buildDateRangeLabel(reportDateFrom, reportDateTo),
+      headers,
+      rows: reportRows,
+    })
+
+    if (!fileDataBase64) {
+      showErrorToast("Failed to prepare report file")
+      return
+    }
+
+    try {
+      setIsSendingReport(true)
+      await apiCall("/api/v1/utils/send-report-email/", {
+        method: "POST",
+        body: {
+          email_to: reportEmail.trim(),
+          subject: reportTitle,
+          html_content: buildScheduleReportEmailHtml({
+            scheduleName: title,
+            periodLabel: buildDateRangeLabel(reportDateFrom, reportDateTo),
+          }),
+          file_name: fileName,
+          file_data_base64: fileDataBase64,
+        },
+      })
+      showSuccessToast("Report sent by email")
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to send report by email"
+      showErrorToast(message)
+    } finally {
+      setIsSendingReport(false)
+    }
+  }
+
+  if (activeView === "history") {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
+          <div>
+            <h3 className="text-lg font-bold text-[#55311c]">{title} history</h3>
+            <p className="text-sm text-[rgba(0,0,0,0.65)]">
+              Escolha uma data salva para abrir o registro.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setActiveView("schedule")}
+            className="rounded-lg border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+          >
+            Voltar
+          </button>
+        </div>
+
+        <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
+          <h4 className="mb-3 text-sm font-semibold text-[#55311c]">
+            Generate report
+          </h4>
+          <p className="mb-3 text-xs text-[rgba(0,0,0,0.65)]">
+            Enter email and optional date range to send the PDF report.
+          </p>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+            <div>
+              <label
+                htmlFor={`${idPrefix}-report-email`}
+                className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+              >
+                Email
+              </label>
+              <input
+                id={`${idPrefix}-report-email`}
+                type="email"
+                value={reportEmail}
+                onChange={(event) => setReportEmail(event.target.value)}
+                placeholder="report@email.com"
+                className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+              />
+            </div>
+            <div>
+              <label
+                htmlFor={`${idPrefix}-report-date-from`}
+                className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+              >
+                Date from
+              </label>
+              <input
+                id={`${idPrefix}-report-date-from`}
+                type="date"
+                value={reportDateFrom}
+                onChange={(event) => setReportDateFrom(event.target.value)}
+                className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+              />
+            </div>
+            <div>
+              <label
+                htmlFor={`${idPrefix}-report-date-to`}
+                className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+              >
+                Date to
+              </label>
+              <input
+                id={`${idPrefix}-report-date-to`}
+                type="date"
+                min={reportDateFrom || undefined}
+                value={reportDateTo}
+                onChange={(event) => setReportDateTo(event.target.value)}
+                className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+              />
+            </div>
+            <div className="flex items-end">
+              <button
+                type="button"
+                onClick={handleSendReport}
+                disabled={isSendingReport}
+                className="w-full rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isSendingReport ? "Sending..." : "Send by email"}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[620px] border-collapse">
+            <thead>
+              <tr className="bg-[#8c7569]">
+                <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
+                  Date
+                </th>
+                <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
+                  Building | Time
+                </th>
+                <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
+                  Saved rows
+                </th>
+                <th className="border border-[#736055] px-3 py-2 text-center text-sm font-semibold text-white">
+                  Action
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {historyDates.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={4}
+                    className="border border-[#e5e0dc] bg-white px-3 py-4 text-center text-sm text-[rgba(0,0,0,0.7)]"
+                  >
+                    Nenhum registro salvo ainda.
+                  </td>
+                </tr>
+              )}
+              {historyDates.map((date) => {
+                const savedRows = allLogs[date] || getDefaultFireAlarmRows()
+                const totalSaved = Object.values(savedRows).filter(
+                  (row) =>
+                    row.time.trim() || row.actionRequired || row.comment.trim(),
+                ).length
+                return (
+                  <tr key={date} className="bg-white hover:bg-[#f8f5f3]">
+                    <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                      {formatDateToGb(date)}
+                    </td>
+                    <td className="border border-[#e5e0dc] px-3 py-2 text-xs text-[#55311c]">
+                      <div className="space-y-1">
+                        {buildingRows.map((entry) => {
+                          const rowData = savedRows[entry.buildingId] || {
+                            time: "",
+                            actionRequired: false,
+                            comment: "",
+                          }
+                          return (
+                            <div key={`${date}-${entry.buildingId}`}>
+                              <span className="font-semibold">
+                                {entry.buildingLabel}
+                              </span>{" "}
+                              | {rowData.time || "-"}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </td>
+                    <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                      {totalSaved} / 6
+                    </td>
+                    <td className="border border-[#e5e0dc] px-3 py-2 text-center text-sm">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedDate(snapToFireAlarmCycleDate(date))
+                          setActiveView("schedule")
+                        }}
+                        className="rounded border border-[#8c7569] px-3 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+                      >
+                        Abrir
+                      </button>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col gap-3 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h3 className="text-lg font-bold text-[#55311c]">{title}</h3>
+          <p className="text-sm text-[rgba(0,0,0,0.65)]">
+            Synced weekly with 26/02/2026 (repetition 14).
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setActiveView("history")}
+          className="self-start rounded-lg border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] sm:self-auto"
+        >
+          Consultar historico
+        </button>
+      </div>
+
+      <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] px-4 py-3 text-sm text-[#55311c]">
+        Date: <strong>{formatDateToGb(selectedDate)}</strong> | Repetition:{" "}
+        <strong>{repetition}</strong>
+      </div>
+
+      <div className="flex flex-wrap items-end justify-center gap-2 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-3">
+        <button
+          type="button"
+          onClick={() =>
+            setSelectedDate((previous) => shiftFireAlarmCycleDate(previous, -1))
+          }
+          className="rounded-lg border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+        >
+          Back
+        </button>
+        <div>
+          <label
+            htmlFor={`${idPrefix}-date`}
+            className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+          >
+            Date
+          </label>
+          <input
+            id={`${idPrefix}-date`}
+            type="date"
+            value={selectedDate}
+            onChange={(event) =>
+              setSelectedDate(snapToFireAlarmCycleDate(event.target.value))
+            }
+            className="rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() =>
+            setSelectedDate((previous) => shiftFireAlarmCycleDate(previous, 1))
+          }
+          className="rounded-lg border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+        >
+          Next
+        </button>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[900px] border-collapse">
+          <thead>
+            <tr className="bg-[#8c7569]">
+              <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
+                Date
+              </th>
+              <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
+                Building
+              </th>
+              <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
+                Time
+              </th>
+              <th className="border border-[#736055] px-3 py-2 text-center text-sm font-semibold text-white">
+                Action required
+              </th>
+              <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
+                Comments
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {buildingRows.map((row) => {
+              const rowData = rows[row.buildingId] || {
+                time: "",
+                actionRequired: false,
+                comment: "",
+              }
+              return (
+                <tr key={row.buildingId} className="bg-white hover:bg-[#f8f5f3]">
+                  <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                    {formatDateToGb(selectedDate)}
+                  </td>
+                  <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                    {row.buildingLabel}
+                  </td>
+                  <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                    <input
+                      type="time"
+                      value={rowData.time}
+                      onChange={(event) =>
+                        handleRowChange(row.buildingId, "time", event.target.value)
+                      }
+                      className="w-full rounded border border-[#d9d0ca] px-2 py-1 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                    />
+                  </td>
+                  <td className="border border-[#e5e0dc] px-3 py-2 text-center text-sm">
+                    <input
+                      type="checkbox"
+                      checked={rowData.actionRequired}
+                      onChange={(event) =>
+                        handleRowChange(
+                          row.buildingId,
+                          "actionRequired",
+                          event.target.checked,
+                        )
+                      }
+                      className="h-4 w-4 cursor-pointer accent-[#8c7569]"
+                    />
+                  </td>
+                  <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                    <input
+                      type="text"
+                      value={rowData.comment}
+                      disabled={!rowData.actionRequired}
+                      onChange={(event) =>
+                        handleRowChange(row.buildingId, "comment", event.target.value)
+                      }
+                      placeholder={
+                        rowData.actionRequired
+                          ? "Write action details"
+                          : "Enable Action required to add comment"
+                      }
+                      className="w-full rounded border border-[#d9d0ca] px-2 py-1 text-sm text-[#55311c] disabled:cursor-not-allowed disabled:bg-[#f0ece9] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                    />
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={handleSave}
+          className="rounded-lg bg-[#8c7569] px-6 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c]"
+        >
+          Save
+        </button>
+      </div>
     </div>
   )
 }
@@ -4282,14 +7272,14 @@ function CleanerSummary() {
     if (!dateValue) return "-"
     const date = new Date(dateValue)
     if (Number.isNaN(date.getTime())) return "-"
-    return date.toLocaleDateString("pt-BR")
+    return date.toLocaleDateString("en-GB")
   }
 
   const formatTime = (dateValue?: string | null) => {
     if (!dateValue) return "-"
     const date = new Date(dateValue)
     if (Number.isNaN(date.getTime())) return "-"
-    return date.toLocaleTimeString("pt-BR", {
+    return date.toLocaleTimeString("en-GB", {
       hour: "2-digit",
       minute: "2-digit",
     })
@@ -4351,7 +7341,7 @@ function CleanerSummary() {
         startDate,
       }
     })
-  }, [sessions, buildingMap])
+  }, [sessions, buildingMap, getDurationMinutes])
 
   const tableSessions = useMemo(
     () => enrichedSessions.slice(0, 20),
@@ -4380,7 +7370,11 @@ function CleanerSummary() {
 
   const workloadCards = useMemo(() => {
     const now = new Date()
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    const todayStart = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+    )
     const weekStart = new Date(todayStart)
     const dayOfWeek = weekStart.getDay()
     const diffToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1
@@ -4396,7 +7390,8 @@ function CleanerSummary() {
       const startTime = session.startDate.getTime()
       if (startTime >= todayStart.getTime())
         todayMinutes += session.durationMinutes
-      if (startTime >= weekStart.getTime()) weekMinutes += session.durationMinutes
+      if (startTime >= weekStart.getTime())
+        weekMinutes += session.durationMinutes
       if (startTime >= monthStart.getTime())
         monthMinutes += session.durationMinutes
     })
@@ -4404,9 +7399,9 @@ function CleanerSummary() {
     return [
       { label: "Hoje", value: formatTotalMinutes(todayMinutes) },
       { label: "Semana", value: formatTotalMinutes(weekMinutes) },
-      { label: "Mês", value: formatTotalMinutes(monthMinutes) },
+      { label: "M�s", value: formatTotalMinutes(monthMinutes) },
     ]
-  }, [enrichedSessions])
+  }, [enrichedSessions, formatTotalMinutes])
 
   return (
     <div className="rounded-lg bg-white p-6 shadow-md">
@@ -4450,7 +7445,10 @@ function CleanerSummary() {
                 stroke="#55311c"
                 tick={{ fill: "#55311c", fontSize: 12 }}
               />
-              <YAxis stroke="#55311c" tick={{ fill: "#55311c", fontSize: 12 }} />
+              <YAxis
+                stroke="#55311c"
+                tick={{ fill: "#55311c", fontSize: 12 }}
+              />
               <Tooltip
                 formatter={(value: number) => [`${value}h`, "Horas"]}
                 contentStyle={{
@@ -4470,7 +7468,7 @@ function CleanerSummary() {
         </div>
         {!isLoadingAcess && buildingHoursData.length === 0 && (
           <p className="mt-3 text-sm text-[rgba(0,0,0,0.6)]">
-            Sem sessoes fechadas para gerar grafico.
+            No closed sessions to generate chart.
           </p>
         )}
       </div>
@@ -4595,7 +7593,7 @@ function CleanerRegister() {
         body: payload,
       }),
     onSuccess: () => {
-      showSuccessToast("Cleaner cadastrado com sucesso")
+      showSuccessToast("Cleaner created successfully")
       queryClient.invalidateQueries({ queryKey: ["funcionarios", "cleaners"] })
       setShowForm(false)
       setNome("")
@@ -4631,7 +7629,7 @@ function CleanerRegister() {
 
   const handleCreateCleaner = () => {
     if (!nome.trim()) {
-      showErrorToast("Informe o nome")
+      showErrorToast("Enter a name")
       return
     }
 
@@ -4654,7 +7652,7 @@ function CleanerRegister() {
     <div className="rounded-lg bg-white p-6 shadow-md">
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h3 className="font-['Nunito',sans-serif] text-xl font-bold text-[#55311c]">
-          Cadastro de cleaners
+          Cleaner registration
         </h3>
         <button
           type="button"
@@ -4667,7 +7665,7 @@ function CleanerRegister() {
             stroke="currentColor"
             viewBox="0 0 24 24"
           >
-            <title>Adicionar cleaner</title>
+            <title>Add cleaner</title>
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -4695,7 +7693,7 @@ function CleanerRegister() {
                 value={nome}
                 onChange={(e) => setNome(e.target.value)}
                 className="w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
-                placeholder="Nome do cleaner"
+                placeholder="Cleaner name"
               />
             </div>
             <div>
@@ -4703,7 +7701,7 @@ function CleanerRegister() {
                 className="block text-sm font-semibold text-[#55311c] mb-1"
                 htmlFor="cleaner-email"
               >
-                Email (opcional)
+                Email (optional)
               </label>
               <input
                 type="email"
@@ -4828,11 +7826,21 @@ function CaretakerSummary() {
     queryFn: () => apiCall("/api/v1/funcionarios/", { skip: 0, limit: 500 }),
   })
 
-  const { data: acessData, isLoading: isLoadingAcess } = useQuery<
-    ApiListResponse<AcessRecord>
+  const { data: workTimeData, isLoading: isLoadingWorkTime } = useQuery<
+    ApiListResponse<WorkTimeSessionRecord>
   >({
-    queryKey: ["acess", "caretaker"],
-    queryFn: () => apiCall("/api/v1/acess/", { skip: 0, limit: 200 }),
+    queryKey: ["acess", "caretaker", "work-time"],
+    queryFn: () =>
+      apiCall("/api/v1/acess/caretaker/work-time", { skip: 0, limit: 1000 }),
+    refetchInterval: 30000,
+  })
+
+  const { data: binSessionsData, isLoading: isLoadingBinSessions } = useQuery<
+    ApiListResponse<BinSessionRecord>
+  >({
+    queryKey: ["bins", "sessions", "caretaker-summary"],
+    queryFn: () => apiCall("/api/v1/bins/sessions", { skip: 0, limit: 1000 }),
+    refetchInterval: 30000,
   })
 
   const { data: buildingsData } = useQuery<ApiListResponse<Building>>({
@@ -4840,7 +7848,9 @@ function CaretakerSummary() {
     queryFn: () => apiCall("/api/v1/buildings/condominio"),
   })
 
-  const acesses = (acessData?.data || []) as AcessRecord[]
+  const workTimeRecordsRaw = (workTimeData?.data ||
+    []) as WorkTimeSessionRecord[]
+  const binSessionsRaw = (binSessionsData?.data || []) as BinSessionRecord[]
   const buildings = (buildingsData?.data || []) as Building[]
 
   const buildingMap = useMemo(() => {
@@ -4861,27 +7871,42 @@ function CaretakerSummary() {
     )
   }, [caretakersData])
 
-  const sessions = useMemo(() => {
-    const sorted = [...acesses]
+  const workTimeRecords = useMemo(() => {
+    if (!activeCaretakerId) return workTimeRecordsRaw
+    return workTimeRecordsRaw.filter(
+      (record) => record.funcionario_id === activeCaretakerId,
+    )
+  }, [workTimeRecordsRaw, activeCaretakerId])
+  const binSessions = useMemo(() => {
+    if (!activeCaretakerId) return binSessionsRaw
+    return binSessionsRaw.filter(
+      (record) => record.funcionario_id === activeCaretakerId,
+    )
+  }, [binSessionsRaw, activeCaretakerId])
+
+  const [selectedWorkDate, setSelectedWorkDate] = useState(() => {
+    const now = new Date()
+    const year = now.getFullYear()
+    const month = String(now.getMonth() + 1).padStart(2, "0")
+    const day = String(now.getDate()).padStart(2, "0")
+    return `${year}-${month}-${day}`
+  })
+
+  const workTimeSessionsGrouped = useMemo(() => {
+    const sorted = [...workTimeRecords]
       .filter((record) => record?.data)
       .sort(
         (a, b) =>
           new Date(a.data ?? 0).getTime() - new Date(b.data ?? 0).getTime(),
       )
 
-    const filtered = activeCaretakerId
-      ? sorted.filter(
-          (record) =>
-            record.funcionario_id === activeCaretakerId ||
-            record.funcionario_id === undefined,
-        )
-      : sorted
+    const result: Array<{
+      inRecord?: WorkTimeSessionRecord
+      outRecord?: WorkTimeSessionRecord
+    }> = []
+    let openRecord: WorkTimeSessionRecord | null = null
 
-    const result: Array<{ inRecord?: AcessRecord; outRecord?: AcessRecord }> =
-      []
-    let openRecord: AcessRecord | null = null
-
-    filtered.forEach((record) => {
+    sorted.forEach((record) => {
       if (record.operacao === 0) {
         if (!openRecord) openRecord = record
       } else if (record.operacao === 1) {
@@ -4895,22 +7920,21 @@ function CaretakerSummary() {
     })
 
     if (openRecord) result.push({ inRecord: openRecord })
-
-    return result.reverse().slice(0, 20)
-  }, [acesses, activeCaretakerId])
+    return result.reverse()
+  }, [workTimeRecords])
 
   const formatDate = (dateValue?: string | null) => {
     if (!dateValue) return "-"
     const date = new Date(dateValue)
     if (Number.isNaN(date.getTime())) return "-"
-    return date.toLocaleDateString("pt-BR")
+    return date.toLocaleDateString("en-GB")
   }
 
   const formatTime = (dateValue?: string | null) => {
     if (!dateValue) return "-"
     const date = new Date(dateValue)
     if (Number.isNaN(date.getTime())) return "-"
-    return date.toLocaleTimeString("pt-BR", {
+    return date.toLocaleTimeString("en-GB", {
       hour: "2-digit",
       minute: "2-digit",
     })
@@ -4929,12 +7953,267 @@ function CaretakerSummary() {
     return `${hours}h ${minutes}m`
   }
 
+  const getDurationMinutes = (
+    inValue?: string | null,
+    outValue?: string | null,
+    allowOpenSession = false,
+  ) => {
+    if (!inValue) return 0
+    const start = new Date(inValue).getTime()
+    const end = outValue
+      ? new Date(outValue).getTime()
+      : allowOpenSession
+        ? Date.now()
+        : NaN
+    if (Number.isNaN(start) || Number.isNaN(end) || end < start) return 0
+    const diffMinutes = Math.floor((end - start) / 60000)
+    if (diffMinutes >= 1440) return 0
+    return diffMinutes
+  }
+
+  const toDateKey = (dateValue?: string | null) => {
+    if (!dateValue) return ""
+    const date = new Date(dateValue)
+    if (Number.isNaN(date.getTime())) return ""
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, "0")
+    const day = String(date.getDate()).padStart(2, "0")
+    return `${year}-${month}-${day}`
+  }
+
+  const workTimeDayHours = useMemo(() => {
+    let totalMinutes = 0
+    workTimeSessionsGrouped.forEach((session) => {
+      const duration = getDurationMinutes(
+        session.inRecord?.data,
+        session.outRecord?.data,
+        false,
+      )
+      if (!duration) return
+      const sessionDate = toDateKey(
+        session.inRecord?.data || session.outRecord?.data,
+      )
+      if (sessionDate !== selectedWorkDate) return
+      totalMinutes += duration
+    })
+    return Number((totalMinutes / 60).toFixed(2))
+  }, [workTimeSessionsGrouped, selectedWorkDate, getDurationMinutes, toDateKey])
+
+  const workTimeChartData = useMemo(
+    () => [{ label: "WORK TIME", hours: workTimeDayHours }],
+    [workTimeDayHours],
+  )
+
+  const binSessionsGrouped = useMemo(() => {
+    const sorted = [...binSessions]
+      .filter((record) => record?.data)
+      .sort(
+        (a, b) =>
+          new Date(a.data ?? 0).getTime() - new Date(b.data ?? 0).getTime(),
+      )
+
+    const result: Array<{
+      inRecord?: BinSessionRecord
+      outRecord?: BinSessionRecord
+    }> = []
+    let openRecord: BinSessionRecord | null = null
+    sorted.forEach((record) => {
+      if (record.operacao === 0) {
+        if (!openRecord) openRecord = record
+      } else if (record.operacao === 1) {
+        if (openRecord) {
+          result.push({ inRecord: openRecord, outRecord: record })
+          openRecord = null
+        }
+      }
+    })
+    if (openRecord) result.push({ inRecord: openRecord })
+    return result
+  }, [binSessions])
+
+  const binsTimeByBuilding = useMemo(() => {
+    const totals = new Map<string, number>()
+    binSessionsGrouped.forEach((session) => {
+      const duration = getDurationMinutes(
+        session.inRecord?.data,
+        session.outRecord?.data,
+        true,
+      )
+      if (!duration) return
+      const buildingId =
+        session.inRecord?.building_id || session.outRecord?.building_id
+      const buildingLabel =
+        (buildingId && buildingMap.get(buildingId)) ||
+        session.inRecord?.building_nome ||
+        session.outRecord?.building_nome ||
+        "-"
+      const current = totals.get(buildingLabel) || 0
+      totals.set(buildingLabel, current + duration)
+    })
+    return [...totals.entries()]
+      .map(([building, minutes]) => ({
+        building,
+        hours: Number((minutes / 60).toFixed(2)),
+      }))
+      .sort((a, b) => b.hours - a.hours)
+  }, [binSessionsGrouped, buildingMap, getDurationMinutes])
+
+  const historyRows = useMemo(() => {
+    const binRows = binSessionsGrouped.map((session, index) => {
+      const buildingId =
+        session.inRecord?.building_id || session.outRecord?.building_id
+      const buildingLabel =
+        (buildingId && buildingMap.get(buildingId)) ||
+        session.inRecord?.building_nome ||
+        session.outRecord?.building_nome ||
+        "-"
+      const dateValue =
+        session.inRecord?.data || session.outRecord?.data || null
+      const sortTime = dateValue ? new Date(dateValue).getTime() : 0
+      return {
+        key: `bins-${index}-${session.inRecord?.id || "in"}-${session.outRecord?.id || "out"}`,
+        buildingLabel,
+        inValue: session.inRecord?.data || null,
+        outValue: session.outRecord?.data || null,
+        sortTime,
+      }
+    })
+
+    const workTimeRows = workTimeSessionsGrouped.map((session, index) => {
+      const dateValue =
+        session.inRecord?.data || session.outRecord?.data || null
+      const sortTime = dateValue ? new Date(dateValue).getTime() : 0
+      return {
+        key: `work-time-${index}-${session.inRecord?.id || "in"}-${session.outRecord?.id || "out"}`,
+        buildingLabel: "WORK TIME",
+        inValue: session.inRecord?.data || null,
+        outValue: session.outRecord?.data || null,
+        sortTime,
+      }
+    })
+
+    return [...binRows, ...workTimeRows]
+      .sort((a, b) => b.sortTime - a.sortTime)
+      .slice(0, 20)
+  }, [binSessionsGrouped, workTimeSessionsGrouped, buildingMap])
+
   return (
     <div className="rounded-lg bg-white p-6 shadow-md">
       <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <h3 className="font-['Nunito',sans-serif] text-xl font-bold text-[#55311c]">
           Work summary
         </h3>
+      </div>
+
+      <div className="mb-6 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
+        <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <h4 className="text-sm font-semibold text-[#55311c]">WORK TIME</h4>
+          <div className="flex items-center gap-2">
+            <label
+              htmlFor="caretaker-worktime-day"
+              className="text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+            >
+              Day
+            </label>
+            <input
+              id="caretaker-worktime-day"
+              type="date"
+              value={selectedWorkDate}
+              onChange={(event) => setSelectedWorkDate(event.target.value)}
+              className="rounded-lg border border-[#d9d0ca] bg-white px-3 py-1 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+            />
+          </div>
+        </div>
+        <div className="h-48 w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart
+              data={workTimeChartData}
+              layout="vertical"
+              margin={{ left: 10, right: 20 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" stroke="#d9d0ca" />
+              <XAxis
+                type="number"
+                stroke="#55311c"
+                tick={{ fill: "#55311c", fontSize: 12 }}
+              />
+              <YAxis
+                type="category"
+                dataKey="label"
+                width={90}
+                stroke="#55311c"
+                tick={{ fill: "#55311c", fontSize: 12 }}
+              />
+              <Tooltip
+                formatter={(value: number) => [`${value}h`, "Hours"]}
+                contentStyle={{
+                  borderRadius: "10px",
+                  border: "1px solid #e5e0dc",
+                  backgroundColor: "#fff",
+                }}
+              />
+              <Bar
+                dataKey="hours"
+                fill="#8c7569"
+                radius={[0, 8, 8, 0]}
+                maxBarSize={36}
+              />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+        {!isLoadingWorkTime && workTimeDayHours === 0 && (
+          <p className="mt-3 text-sm text-[rgba(0,0,0,0.6)]">
+            No WORK TIME sessions on the selected day.
+          </p>
+        )}
+      </div>
+
+      <div className="mb-6 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
+        <h4 className="mb-3 text-sm font-semibold text-[#55311c]">
+          Hour per Building (Bins)
+        </h4>
+        <div className="h-72 w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart
+              data={binsTimeByBuilding}
+              margin={{ left: 10, right: 20 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" stroke="#d9d0ca" />
+              <XAxis
+                type="category"
+                dataKey="building"
+                stroke="#55311c"
+                tick={{ fill: "#55311c", fontSize: 12 }}
+              />
+              <YAxis
+                type="number"
+                width={90}
+                stroke="#55311c"
+                tick={{ fill: "#55311c", fontSize: 12 }}
+              />
+              <Tooltip
+                formatter={(value: number) => [`${value}h`, "Horas"]}
+                contentStyle={{
+                  borderRadius: "10px",
+                  border: "1px solid #e5e0dc",
+                  backgroundColor: "#fff",
+                }}
+              />
+              <Bar
+                dataKey="hours"
+                name="Bins"
+                fill="#2d8659"
+                radius={[8, 8, 0, 0]}
+                maxBarSize={36}
+              />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+        {!isLoadingBinSessions && binsTimeByBuilding.length === 0 && (
+          <p className="mt-3 text-sm text-[rgba(0,0,0,0.6)]">
+            No sessions to generate chart.
+          </p>
+        )}
       </div>
 
       <div className="overflow-x-auto">
@@ -4959,7 +8238,7 @@ function CaretakerSummary() {
             </tr>
           </thead>
           <tbody>
-            {isLoadingAcess && (
+            {(isLoadingBinSessions || isLoadingWorkTime) && (
               <tr>
                 <td
                   className="border border-gray-400 px-3 py-3 text-center text-sm text-gray-600"
@@ -4969,50 +8248,37 @@ function CaretakerSummary() {
                 </td>
               </tr>
             )}
-            {!isLoadingAcess && sessions.length === 0 && (
-              <tr>
-                <td
-                  className="border border-gray-400 px-3 py-3 text-center text-sm text-gray-600"
-                  colSpan={5}
-                >
-                  No records found.
-                </td>
-              </tr>
-            )}
-            {sessions.map((session, index) => {
-              const buildingId =
-                session.inRecord?.building_id || session.outRecord?.building_id
-              const buildingLabel =
-                (buildingId && buildingMap.get(buildingId)) ||
-                session.inRecord?.building_nome ||
-                session.outRecord?.building_nome ||
-                "-"
-              const dateLabel = formatDate(
-                session.inRecord?.data || session.outRecord?.data,
-              )
+            {!isLoadingBinSessions &&
+              !isLoadingWorkTime &&
+              historyRows.length === 0 && (
+                <tr>
+                  <td
+                    className="border border-gray-400 px-3 py-3 text-center text-sm text-gray-600"
+                    colSpan={5}
+                  >
+                    No records found.
+                  </td>
+                </tr>
+              )}
+            {historyRows.map((row) => {
+              const dateLabel = formatDate(row.inValue || row.outValue)
 
               return (
-                <tr
-                  key={`${session.inRecord?.id || "in"}-${session.outRecord?.id || "out"}-${index}`}
-                  className="bg-white hover:bg-gray-50"
-                >
+                <tr key={row.key} className="bg-white hover:bg-gray-50">
                   <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
                     {dateLabel}
                   </td>
                   <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
-                    {buildingLabel}
+                    {row.buildingLabel}
                   </td>
                   <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
-                    {formatTime(session.inRecord?.data)}
+                    {formatTime(row.inValue)}
                   </td>
                   <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
-                    {formatTime(session.outRecord?.data)}
+                    {formatTime(row.outValue)}
                   </td>
                   <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
-                    {formatUsed(
-                      session.inRecord?.data,
-                      session.outRecord?.data,
-                    )}
+                    {formatUsed(row.inValue, row.outValue)}
                   </td>
                 </tr>
               )
@@ -5064,8 +8330,10 @@ function CaretakerRegister() {
         body: payload,
       }),
     onSuccess: () => {
-      showSuccessToast("Caretaker cadastrado com sucesso")
-      queryClient.invalidateQueries({ queryKey: ["funcionarios", "caretakers"] })
+      showSuccessToast("Caretaker created successfully")
+      queryClient.invalidateQueries({
+        queryKey: ["funcionarios", "caretakers"],
+      })
       setShowForm(false)
       setNome("")
       setEmail("")
@@ -5084,7 +8352,9 @@ function CaretakerRegister() {
       }),
     onSuccess: () => {
       showSuccessToast("Default caretaker updated")
-      queryClient.invalidateQueries({ queryKey: ["funcionarios", "caretakers"] })
+      queryClient.invalidateQueries({
+        queryKey: ["funcionarios", "caretakers"],
+      })
       queryClient.invalidateQueries({
         queryKey: ["funcionarios", "caretakers-summary"],
       })
@@ -5100,7 +8370,7 @@ function CaretakerRegister() {
 
   const handleCreateCaretaker = () => {
     if (!nome.trim()) {
-      showErrorToast("Informe o nome")
+      showErrorToast("Enter a name")
       return
     }
 
@@ -5123,7 +8393,7 @@ function CaretakerRegister() {
     <div className="rounded-lg bg-white p-6 shadow-md">
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h3 className="font-['Nunito',sans-serif] text-xl font-bold text-[#55311c]">
-          Cadastro de caretakers
+          Caretaker registration
         </h3>
         <button
           type="button"
@@ -5136,7 +8406,7 @@ function CaretakerRegister() {
             stroke="currentColor"
             viewBox="0 0 24 24"
           >
-            <title>Adicionar caretaker</title>
+            <title>Add caretaker</title>
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -5164,7 +8434,7 @@ function CaretakerRegister() {
                 value={nome}
                 onChange={(e) => setNome(e.target.value)}
                 className="w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
-                placeholder="Nome do caretaker"
+                placeholder="Caretaker name"
               />
             </div>
             <div>
@@ -5172,7 +8442,7 @@ function CaretakerRegister() {
                 className="block text-sm font-semibold text-[#55311c] mb-1"
                 htmlFor="caretaker-email"
               >
-                Email (opcional)
+                Email (optional)
               </label>
               <input
                 type="email"
@@ -5360,7 +8630,8 @@ function ResidentsContent() {
       [...Residents].sort((a, b) => {
         const buildingCompare = a.building_nome.localeCompare(b.building_nome)
         if (buildingCompare !== 0) return buildingCompare
-        if (a.flat_numero !== b.flat_numero) return a.flat_numero - b.flat_numero
+        if (a.flat_numero !== b.flat_numero)
+          return a.flat_numero - b.flat_numero
         return a.nome.localeCompare(b.nome)
       }),
     [Residents],
@@ -5378,7 +8649,7 @@ function ResidentsContent() {
     return sortedResidents.filter(
       (morador) => morador.cargo === RoleFilterMap[residentTypeFilter],
     )
-  }, [sortedResidents, residentTypeFilter])
+  }, [sortedResidents, residentTypeFilter, RoleFilterMap])
 
   const groupedFlatRows = useMemo<FlatResidentRow[]>(() => {
     if (residentTypeFilter !== "all") return []
@@ -5425,7 +8696,7 @@ function ResidentsContent() {
 
   useEffect(() => {
     setCurrentPage(0)
-  }, [selectedBuilding, searchTerm, residentTypeFilter])
+  }, [])
 
   useEffect(() => {
     if (currentPage > totalPages - 1) {
@@ -5437,13 +8708,13 @@ function ResidentsContent() {
     if (isAllTypeView) return []
     const start = currentPage * pageSize
     return filteredResidents.slice(start, start + pageSize)
-  }, [filteredResidents, currentPage, pageSize, isAllTypeView])
+  }, [filteredResidents, currentPage, isAllTypeView])
 
   const paginatedFlatRows = useMemo(() => {
     if (!isAllTypeView) return []
     const start = currentPage * pageSize
     return groupedFlatRows.slice(start, start + pageSize)
-  }, [groupedFlatRows, currentPage, pageSize, isAllTypeView])
+  }, [groupedFlatRows, currentPage, isAllTypeView])
 
   const updateReadingTypesMutation = useMutation({
     mutationFn: async ({
@@ -5465,9 +8736,7 @@ function ResidentsContent() {
     },
     onError: (error) => {
       const message =
-        error instanceof Error
-          ? error.message
-          : "Error updating reading types"
+        error instanceof Error ? error.message : "Error updating reading types"
       showErrorToast(message)
     },
   })
@@ -5477,13 +8746,15 @@ function ResidentsContent() {
     currentTypes: number,
     typeValue: number,
   ) => {
-    let newTypes = currentTypes
-    if (currentTypes & typeValue) {
+    // Flats do not support Low (bit 1), always keep it disabled.
+    const baseTypes = currentTypes & ~1
+    let newTypes = baseTypes
+    if (baseTypes & typeValue) {
       // Remove this type
-      newTypes = currentTypes & ~typeValue
+      newTypes = baseTypes & ~typeValue
     } else {
       // Add this type
-      newTypes = currentTypes | typeValue
+      newTypes = baseTypes | typeValue
     }
     updateReadingTypesMutation.mutate({ id, readingTypes: newTypes })
   }
@@ -5505,7 +8776,7 @@ function ResidentsContent() {
 
   if (isLoading && Residents.length === 0) {
     return (
-      <div className="mx-auto max-w-7xl">
+      <div className="mx-auto max-w-[110rem]">
         <div className="rounded-lg bg-white p-8 shadow-md text-center">
           <p className="text-[#55311c]">Loading residents...</p>
         </div>
@@ -5526,7 +8797,7 @@ function ResidentsContent() {
   }
 
   return (
-    <div className="mx-auto max-w-7xl">
+    <div className="mx-auto max-w-[110rem]">
       <div className="rounded-lg bg-white p-8 shadow-md">
         <div className="mb-6 flex items-center justify-between">
           <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
@@ -5565,7 +8836,7 @@ function ResidentsContent() {
               className="block text-sm font-semibold text-[#55311c] mb-2"
               htmlFor="residents-search"
             >
-              Buscar por Nome, Phone, Email ou Flat
+              Search by Name, Phone, Email or Flat
             </label>
             <input
               type="text"
@@ -5634,7 +8905,7 @@ function ResidentsContent() {
         ) : (
           <>
             <div className="overflow-x-auto">
-              <table className="w-full border-collapse rounded-lg bg-white">
+              <table className="w-full min-w-full border-collapse rounded-lg bg-white text-[13px] whitespace-nowrap [&_th]:px-3 [&_th]:py-2 [&_td]:px-3 [&_td]:py-2">
                 {isAllTypeView ? (
                   <>
                     <thead>
@@ -5668,15 +8939,6 @@ function ResidentsContent() {
                         </th>
                         <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
                           Phone
-                        </th>
-                        <th className="border border-gray-400 px-4 py-3 text-center font-['Nunito',sans-serif] font-semibold text-white">
-                          Normal
-                        </th>
-                        <th className="border border-gray-400 px-4 py-3 text-center font-['Nunito',sans-serif] font-semibold text-white">
-                          Low
-                        </th>
-                        <th className="border border-gray-400 px-4 py-3 text-center font-['Nunito',sans-serif] font-semibold text-white">
-                          Gas
                         </th>
                         <th className="border border-gray-400 px-4 py-3 text-center font-['Nunito',sans-serif] font-semibold text-white">
                           Actions
@@ -5717,63 +8979,6 @@ function ResidentsContent() {
                             {row.agent?.mobile || "-"}
                           </td>
                           <td className="border border-gray-400 px-4 py-3 text-center">
-                            <input
-                              type="checkbox"
-                              checked={(row.reading_types & 2) !== 0}
-                              onChange={() =>
-                                row.edit_target_id !== null &&
-                                handleCheckboxChange(
-                                  row.edit_target_id,
-                                  row.reading_types,
-                                  2,
-                                )
-                              }
-                              disabled={
-                                updateReadingTypesMutation.isPending ||
-                                row.edit_target_id === null
-                              }
-                              className="h-4 w-4 cursor-pointer"
-                            />
-                          </td>
-                          <td className="border border-gray-400 px-4 py-3 text-center">
-                            <input
-                              type="checkbox"
-                              checked={(row.reading_types & 1) !== 0}
-                              onChange={() =>
-                                row.edit_target_id !== null &&
-                                handleCheckboxChange(
-                                  row.edit_target_id,
-                                  row.reading_types,
-                                  1,
-                                )
-                              }
-                              disabled={
-                                updateReadingTypesMutation.isPending ||
-                                row.edit_target_id === null
-                              }
-                              className="h-4 w-4 cursor-pointer"
-                            />
-                          </td>
-                          <td className="border border-gray-400 px-4 py-3 text-center">
-                            <input
-                              type="checkbox"
-                              checked={(row.reading_types & 4) !== 0}
-                              onChange={() =>
-                                row.edit_target_id !== null &&
-                                handleCheckboxChange(
-                                  row.edit_target_id,
-                                  row.reading_types,
-                                  4,
-                                )
-                              }
-                              disabled={
-                                updateReadingTypesMutation.isPending ||
-                                row.edit_target_id === null
-                              }
-                              className="h-4 w-4 cursor-pointer"
-                            />
-                          </td>
-                          <td className="border border-gray-400 px-4 py-3 text-center">
                             <button
                               onClick={() => {
                                 if (row.edit_target_id === null) return
@@ -5811,9 +9016,6 @@ function ResidentsContent() {
                           Normal
                         </th>
                         <th className="border border-gray-400 px-4 py-3 text-center font-['Nunito',sans-serif] font-semibold text-white">
-                          Low
-                        </th>
-                        <th className="border border-gray-400 px-4 py-3 text-center font-['Nunito',sans-serif] font-semibold text-white">
                           Gas
                         </th>
                         <th className="border border-gray-400 px-4 py-3 text-center font-['Nunito',sans-serif] font-semibold text-white">
@@ -5845,21 +9047,6 @@ function ResidentsContent() {
                                   morador.id,
                                   morador.reading_types,
                                   2,
-                                )
-                              }
-                              disabled={updateReadingTypesMutation.isPending}
-                              className="h-4 w-4 cursor-pointer"
-                            />
-                          </td>
-                          <td className="border border-gray-400 px-4 py-3 text-center">
-                            <input
-                              type="checkbox"
-                              checked={(morador.reading_types & 1) !== 0}
-                              onChange={() =>
-                                handleCheckboxChange(
-                                  morador.id,
-                                  morador.reading_types,
-                                  1,
                                 )
                               }
                               disabled={updateReadingTypesMutation.isPending}
@@ -6294,5 +9481,3 @@ function AddResidentForm({
     </div>
   )
 }
-
-

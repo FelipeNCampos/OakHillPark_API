@@ -86,7 +86,7 @@ const CrudSection = <T extends { id: string }>({
   const createMutation = useMutation({
     mutationFn: (payload: Record<string, unknown>) => createFn(payload),
     onSuccess: () => {
-      showSuccessToast(`${title} criado com sucesso`)
+      showSuccessToast(`${title} created successfully`)
       setCreateOpen(false)
       queryClient.invalidateQueries({ queryKey })
     },
@@ -102,7 +102,7 @@ const CrudSection = <T extends { id: string }>({
       payload: Record<string, unknown>
     }) => updateFn(id, payload),
     onSuccess: () => {
-      showSuccessToast(`${title} atualizado com sucesso`)
+      showSuccessToast(`${title} updated successfully`)
       setEditOpen(false)
       queryClient.invalidateQueries({ queryKey })
     },
@@ -112,7 +112,7 @@ const CrudSection = <T extends { id: string }>({
   const deleteMutation = useMutation({
     mutationFn: (id: string) => deleteFn(id),
     onSuccess: () => {
-      showSuccessToast(`${title} removido com sucesso`)
+      showSuccessToast(`${title} removed successfully`)
       setDeleteOpen(false)
       queryClient.invalidateQueries({ queryKey })
     },
@@ -180,9 +180,9 @@ const CrudSection = <T extends { id: string }>({
           </DialogTrigger>
           <DialogContent className="sm:max-w-xl">
             <DialogHeader>
-              <DialogTitle>Novo {title}</DialogTitle>
+              <DialogTitle>New {title}</DialogTitle>
               <DialogDescription>
-                Informe o JSON do payload para criar.
+                Provide the JSON payload to create.
               </DialogDescription>
             </DialogHeader>
             <textarea

@@ -1,0 +1,429 @@
+from datetime import datetime, timezone
+from typing import Any
+import uuid
+
+from fastapi import APIRouter, HTTPException
+from sqlalchemy import or_
+from sqlalchemy.exc import IntegrityError
+from sqlmodel import func, select
+
+from app.api.deps import CurrentUser, SessionDep
+from app.models import (
+    Condominio,
+    Funcionario,
+    Reminder,
+    ReminderCreate,
+    ReminderExecutionSummary,
+    ReminderPublic,
+    RemindersPublic,
+    ReminderUpdate,
+    Task,
+    User,
+)
+from app.utils import send_sms_notification
+
+router = APIRouter(prefix="/reminds", tags=["reminds"])
+
+
+def _is_manager(user: User) -> bool:
+    return bool(user.is_superuser or user.cargo >= 2)
+
+
+def _resolve_user_condominio_id(session: SessionDep, user: User):
+    if user.condominio_id:
+        return user.condominio_id
+    condominio = session.exec(select(Condominio).limit(1)).first()
+    if condominio:
+        user.condominio_id = condominio.id
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+        return condominio.id
+    return None
+
+
+def _reminder_to_public(reminder: Reminder) -> ReminderPublic:
+    return ReminderPublic(
+        id=reminder.id,
+        name=reminder.name,
+        weekday_mask=reminder.weekday_mask,
+        is_active=reminder.is_active,
+        action_sms=reminder.action_sms,
+        sms_to=reminder.sms_to,
+        sms_message=reminder.sms_message,
+        action_task=reminder.action_task,
+        task_title=reminder.task_title,
+        task_description=reminder.task_description,
+        condominio_id=reminder.condominio_id,
+        created_by_user_id=reminder.created_by_user_id,
+        last_triggered_on=reminder.last_triggered_on,
+        last_triggered_at=reminder.last_triggered_at,
+        created_at=reminder.created_at,
+        updated_at=reminder.updated_at,
+    )
+
+
+def _validate_reminder_actions(
+    *,
+    action_sms: bool,
+    sms_to: str | None,
+    sms_message: str | None,
+    action_task: bool,
+    task_title: str | None,
+) -> None:
+    if not action_sms and not action_task:
+        raise HTTPException(
+            status_code=400, detail="Select at least one action (SMS or task)"
+        )
+
+    if action_sms:
+        if not (sms_to or "").strip():
+            raise HTTPException(
+                status_code=400, detail="SMS destination is required for SMS action"
+            )
+        if not (sms_message or "").strip():
+            raise HTTPException(
+                status_code=400, detail="SMS message is required for SMS action"
+            )
+
+    if action_task and not (task_title or "").strip():
+        raise HTTPException(
+            status_code=400, detail="Task title is required for task action"
+        )
+
+
+def _validate_weekday_mask(weekday_mask: int) -> None:
+    if weekday_mask < 1 or weekday_mask > 127:
+        raise HTTPException(status_code=400, detail="Invalid weekday mask")
+
+
+def _next_task_code(session: SessionDep, condominio_id) -> str:
+    import re
+
+    task_code_pattern = re.compile(r"^task-(\d+)$")
+    statement = select(Task.code).where(
+        Task.condominio_id == condominio_id,
+        Task.code.is_not(None),
+    )
+    codes = session.exec(statement).all()
+    max_seq = 0
+    for code in codes:
+        if not code:
+            continue
+        match = task_code_pattern.fullmatch(code.strip().lower())
+        if not match:
+            continue
+        max_seq = max(max_seq, int(match.group(1)))
+    return f"task-{max_seq + 1:03d}"
+
+
+def _resolve_active_caretaker_user(session: SessionDep, condominio_id) -> User | None:
+    default_caretaker = session.exec(
+        select(Funcionario)
+        .where(
+            Funcionario.cargo == 1,
+            Funcionario.status,
+            Funcionario.is_default,
+            Funcionario.condominio_id == condominio_id,
+        )
+        .limit(1)
+    ).first()
+
+    if default_caretaker and default_caretaker.email:
+        user = session.exec(
+            select(User).where(
+                User.email == default_caretaker.email,
+                User.cargo == 1,
+                User.is_active,
+                or_(
+                    User.condominio_id == condominio_id,
+                    User.condominio_id.is_(None),
+                ),
+            )
+        ).first()
+        if user:
+            if user.condominio_id is None:
+                user.condominio_id = condominio_id
+                session.add(user)
+                session.commit()
+                session.refresh(user)
+            return user
+
+    return session.exec(
+        select(User)
+        .where(
+            User.cargo == 1,
+            User.is_active,
+            or_(User.condominio_id == condominio_id, User.condominio_id.is_(None)),
+        )
+        .order_by(User.created_at.asc())
+        .limit(1)
+    ).first()
+
+
+@router.get("/", response_model=RemindersPublic)
+def read_reminders(
+    session: SessionDep,
+    current_user: CurrentUser,
+    skip: int = 0,
+    limit: int = 100,
+) -> Any:
+    if not _is_manager(current_user):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    condominio_id = _resolve_user_condominio_id(session, current_user)
+    if not condominio_id:
+        raise HTTPException(status_code=400, detail="No condominio configured")
+
+    count = session.exec(
+        select(func.count())
+        .select_from(Reminder)
+        .where(Reminder.condominio_id == condominio_id)
+    ).one()
+    reminders = session.exec(
+        select(Reminder)
+        .where(Reminder.condominio_id == condominio_id)
+        .order_by(Reminder.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+    ).all()
+
+    return RemindersPublic(
+        data=[_reminder_to_public(item) for item in reminders],
+        count=count,
+    )
+
+
+@router.post("/", response_model=ReminderPublic, status_code=201)
+def create_reminder(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    payload: ReminderCreate,
+) -> ReminderPublic:
+    if not _is_manager(current_user):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    condominio_id = _resolve_user_condominio_id(session, current_user)
+    if not condominio_id:
+        raise HTTPException(status_code=400, detail="No condominio configured")
+
+    _validate_reminder_actions(
+        action_sms=payload.action_sms,
+        sms_to=payload.sms_to,
+        sms_message=payload.sms_message,
+        action_task=payload.action_task,
+        task_title=payload.task_title,
+    )
+    _validate_weekday_mask(payload.weekday_mask)
+
+    now = datetime.now(timezone.utc)
+    reminder = Reminder(
+        name=payload.name.strip(),
+        weekday_mask=payload.weekday_mask,
+        is_active=payload.is_active,
+        action_sms=payload.action_sms,
+        sms_to=payload.sms_to.strip() if payload.sms_to else None,
+        sms_message=payload.sms_message.strip() if payload.sms_message else None,
+        action_task=payload.action_task,
+        task_title=payload.task_title.strip() if payload.task_title else None,
+        task_description=(
+            payload.task_description.strip() if payload.task_description else None
+        ),
+        condominio_id=condominio_id,
+        created_by_user_id=current_user.id,
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(reminder)
+    session.commit()
+    session.refresh(reminder)
+    return _reminder_to_public(reminder)
+
+
+@router.patch("/{reminder_id}", response_model=ReminderPublic)
+def update_reminder(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    reminder_id: str,
+    payload: ReminderUpdate,
+) -> ReminderPublic:
+    if not _is_manager(current_user):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    try:
+        reminder_uuid = uuid.UUID(reminder_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid reminder id") from exc
+
+    condominio_id = _resolve_user_condominio_id(session, current_user)
+    if not condominio_id:
+        raise HTTPException(status_code=400, detail="No condominio configured")
+
+    reminder = session.get(Reminder, reminder_uuid)
+    if not reminder:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    if reminder.condominio_id != condominio_id:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    if payload.name is not None:
+        reminder.name = payload.name.strip()
+    if payload.weekday_mask is not None:
+        _validate_weekday_mask(payload.weekday_mask)
+        reminder.weekday_mask = payload.weekday_mask
+    if payload.is_active is not None:
+        reminder.is_active = payload.is_active
+    if payload.action_sms is not None:
+        reminder.action_sms = payload.action_sms
+    if payload.action_task is not None:
+        reminder.action_task = payload.action_task
+
+    if payload.sms_to is not None:
+        reminder.sms_to = payload.sms_to.strip() or None
+    if payload.sms_message is not None:
+        reminder.sms_message = payload.sms_message.strip() or None
+    if payload.task_title is not None:
+        reminder.task_title = payload.task_title.strip() or None
+    if payload.task_description is not None:
+        reminder.task_description = payload.task_description.strip() or None
+
+    _validate_reminder_actions(
+        action_sms=reminder.action_sms,
+        sms_to=reminder.sms_to,
+        sms_message=reminder.sms_message,
+        action_task=reminder.action_task,
+        task_title=reminder.task_title,
+    )
+
+    reminder.updated_at = datetime.now(timezone.utc)
+    session.add(reminder)
+    session.commit()
+    session.refresh(reminder)
+    return _reminder_to_public(reminder)
+
+
+@router.delete("/{reminder_id}")
+def delete_reminder(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    reminder_id: str,
+) -> dict[str, str]:
+    if not _is_manager(current_user):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    try:
+        reminder_uuid = uuid.UUID(reminder_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid reminder id") from exc
+
+    condominio_id = _resolve_user_condominio_id(session, current_user)
+    if not condominio_id:
+        raise HTTPException(status_code=400, detail="No condominio configured")
+
+    reminder = session.get(Reminder, reminder_uuid)
+    if not reminder:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    if reminder.condominio_id != condominio_id:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    session.delete(reminder)
+    session.commit()
+    return {"message": "Reminder deleted successfully"}
+
+
+@router.post("/execute-due", response_model=ReminderExecutionSummary)
+def execute_due_reminders(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> ReminderExecutionSummary:
+    if not _is_manager(current_user):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    condominio_id = _resolve_user_condominio_id(session, current_user)
+    if not condominio_id:
+        raise HTTPException(status_code=400, detail="No condominio configured")
+
+    today_utc = datetime.now(timezone.utc)
+    today_date = today_utc.date()
+    weekday = today_date.weekday()
+
+    due_candidates = session.exec(
+        select(Reminder).where(
+            Reminder.condominio_id == condominio_id,
+            Reminder.is_active,
+            or_(
+                Reminder.last_triggered_on.is_(None),
+                Reminder.last_triggered_on < today_date,
+            ),
+        )
+    ).all()
+    weekday_bit = 1 << weekday
+    due_reminders = [
+        reminder
+        for reminder in due_candidates
+        if (reminder.weekday_mask & weekday_bit) != 0
+    ]
+
+    sms_sent = 0
+    tasks_created = 0
+    triggered = 0
+
+    for reminder in due_reminders:
+        reminder_triggered = False
+
+        if reminder.action_sms and reminder.sms_to and reminder.sms_message:
+            try:
+                send_sms_notification(
+                    phone_to=reminder.sms_to,
+                    body=reminder.sms_message,
+                )
+                sms_sent += 1
+                reminder_triggered = True
+            except Exception:
+                # Keep reminder pending for another attempt if SMS fails.
+                pass
+
+        if reminder.action_task and reminder.task_title:
+            assigned_user_id = None
+            caretaker = _resolve_active_caretaker_user(session, condominio_id)
+            if caretaker:
+                assigned_user_id = caretaker.id
+
+            if assigned_user_id:
+                for _attempt in range(3):
+                    try:
+                        now = datetime.now(timezone.utc)
+                        task = Task(
+                            code=_next_task_code(session, condominio_id),
+                            title=reminder.task_title,
+                            description=(reminder.task_description or "").strip(),
+                            status="todo",
+                            condominio_id=condominio_id,
+                            created_by_user_id=current_user.id,
+                            assigned_to_user_id=assigned_user_id,
+                            created_at=now,
+                            updated_at=now,
+                        )
+                        session.add(task)
+                        session.commit()
+                        tasks_created += 1
+                        reminder_triggered = True
+                        break
+                    except IntegrityError:
+                        session.rollback()
+
+        if reminder_triggered:
+            reminder.last_triggered_on = today_date
+            reminder.last_triggered_at = datetime.now(timezone.utc)
+            reminder.updated_at = datetime.now(timezone.utc)
+            session.add(reminder)
+            session.commit()
+            triggered += 1
+
+    return ReminderExecutionSummary(
+        checked=len(due_reminders),
+        triggered=triggered,
+        sms_sent=sms_sent,
+        tasks_created=tasks_created,
+    )

@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from pydantic import EmailStr
 from sqlalchemy import DateTime as SQLAlchemyDateTime
@@ -84,6 +84,9 @@ class Condominio(SQLModel, table=True):
         back_populates="condominio", cascade_delete=True
     )
     tasks: list["Task"] = Relationship(back_populates="condominio", cascade_delete=True)
+    reminders: list["Reminder"] = Relationship(
+        back_populates="condominio", cascade_delete=True
+    )
 
 
 class Building(SQLModel, table=True):
@@ -106,6 +109,9 @@ class Building(SQLModel, table=True):
         back_populates="building", cascade_delete=True
     )
     bins: list["BinMissCollection"] = Relationship(
+        back_populates="building", cascade_delete=True
+    )
+    bin_sessions: list["BinSession"] = Relationship(
         back_populates="building", cascade_delete=True
     )
 
@@ -166,6 +172,12 @@ class Funcionario(SQLModel, table=True):
     acessos: list["Acess"] = Relationship(
         back_populates="funcionario", cascade_delete=True
     )
+    bin_sessions: list["BinSession"] = Relationship(
+        back_populates="funcionario", cascade_delete=True
+    )
+    work_time_sessions: list["WorkTimeSession"] = Relationship(
+        back_populates="funcionario", cascade_delete=True
+    )
 
 
 class Acess(SQLModel, table=True):
@@ -193,14 +205,49 @@ class BinMissCollection(SQLModel, table=True):
         sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
     )
     miss_collection: bool = Field(default=True)
+    collection_type: str = Field(default="general", max_length=20)
+    collection_status: str = Field(default="miss", max_length=20)
     building_id: uuid.UUID = Field(
         foreign_key="building.id", nullable=False, ondelete="CASCADE"
     )
     building: Building | None = Relationship(back_populates="bins")
 
 
+class BinSession(SQLModel, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    status: bool = Field(default=True)
+    data: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    operacao: int = Field(default=0)
+    building_id: uuid.UUID = Field(
+        foreign_key="building.id", nullable=False, ondelete="CASCADE"
+    )
+    funcionario_id: uuid.UUID = Field(
+        foreign_key="funcionario.id", nullable=False, ondelete="CASCADE"
+    )
+    building: Building | None = Relationship(back_populates="bin_sessions")
+    funcionario: Funcionario | None = Relationship(back_populates="bin_sessions")
+
+
+class WorkTimeSession(SQLModel, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    status: bool = Field(default=True)
+    data: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    operacao: int = Field(default=0)
+    funcionario_id: uuid.UUID = Field(
+        foreign_key="funcionario.id", nullable=False, ondelete="CASCADE"
+    )
+    funcionario: Funcionario | None = Relationship(back_populates="work_time_sessions")
+
+
 class Task(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    code: str = Field(max_length=32, index=True)
     title: str = Field(max_length=255)
     description: str = Field(default="")
     status: str = Field(default="todo", max_length=20)  # todo | in_progress | paused | done
@@ -237,6 +284,55 @@ class TaskMessage(SQLModel, table=True):
         sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
     )
     task: Task | None = Relationship(back_populates="messages")
+
+
+class Reminder(SQLModel, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    name: str = Field(max_length=255)
+    weekday_mask: int = Field(default=2, ge=1, le=127)  # bitmask for weekdays
+    is_active: bool = Field(default=True)
+    action_sms: bool = Field(default=False)
+    sms_to: str | None = Field(default=None, max_length=20)
+    sms_message: str | None = Field(default=None, max_length=1600)
+    action_task: bool = Field(default=False)
+    task_title: str | None = Field(default=None, max_length=255)
+    task_description: str | None = Field(default=None)
+    condominio_id: uuid.UUID = Field(
+        foreign_key="condominio.id", nullable=False, ondelete="CASCADE"
+    )
+    created_by_user_id: uuid.UUID = Field(foreign_key="user.id", nullable=False)
+    last_triggered_on: date | None = Field(default=None)
+    last_triggered_at: datetime | None = Field(
+        default=None,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    created_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    updated_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    condominio: Condominio | None = Relationship(back_populates="reminders")
+
+
+class FireAlarmScheduleRecord(SQLModel, table=True):
+    __tablename__ = "fire_alarm_schedule_record"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    schedule_type: str = Field(default="fire_alarm", max_length=50, index=True)
+    test_date: date = Field(index=True)
+    time: str = Field(default="", max_length=5)
+    building_label: str = Field(default="", max_length=100)
+    call_point: str | None = Field(default=None, max_length=20)
+    location: str | None = Field(default=None, max_length=100)
+    action_required: bool = Field(default=False)
+    comments: str | None = Field(default=None, max_length=500)
+    created_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
 
 
 class Readings(SQLModel, table=True):
@@ -279,6 +375,14 @@ class SMSNotificationCreate(SQLModel):
         description="Phone number in E.164 format, e.g. +15551234567",
     )
     body: str = Field(min_length=1, max_length=1600)
+
+
+class ReportEmailCreate(SQLModel):
+    email_to: EmailStr
+    subject: str = Field(min_length=1, max_length=255)
+    html_content: str = Field(default="")
+    file_name: str = Field(min_length=1, max_length=255)
+    file_data_base64: str = Field(min_length=1)
 
 
 # JSON payload containing access token
@@ -530,18 +634,70 @@ class AcessActiveStatus(SQLModel):
 class BinMissCollectionCreate(SQLModel):
     building_id: uuid.UUID
     miss_collection: bool = True
+    collection_type: str = Field(default="general", max_length=20)
+    collection_status: str = Field(default="miss", max_length=20)
 
 
 class BinMissCollectionPublic(SQLModel):
     id: uuid.UUID
     data: datetime
     miss_collection: bool
+    collection_type: str
+    collection_status: str
     building_id: uuid.UUID
     building_nome: str
 
 
 class BinMissCollectionsPublic(SQLModel):
     data: list[BinMissCollectionPublic]
+    count: int
+
+
+class BinSessionBase(SQLModel):
+    status: bool = Field(default=True)
+    data: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    operacao: int = Field(default=0)
+    building_id: uuid.UUID
+
+
+class BinSessionCreate(BinSessionBase):
+    pass
+
+
+class BinSessionPublic(BinSessionBase):
+    id: uuid.UUID
+    funcionario_id: uuid.UUID
+    building_nome: str
+
+
+class BinSessionsPublic(SQLModel):
+    data: list[BinSessionPublic]
+    count: int
+
+
+class WorkTimeSessionBase(SQLModel):
+    status: bool = Field(default=True)
+    data: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    operacao: int = Field(default=0)
+
+
+class WorkTimeSessionCreate(WorkTimeSessionBase):
+    pass
+
+
+class WorkTimeSessionPublic(WorkTimeSessionBase):
+    id: uuid.UUID
+    funcionario_id: uuid.UUID
+
+
+class WorkTimeSessionsPublic(SQLModel):
+    data: list[WorkTimeSessionPublic]
     count: int
 
 
@@ -568,6 +724,7 @@ class TaskStatusUpdate(SQLModel):
 
 class TaskPublic(SQLModel):
     id: uuid.UUID
+    code: str
     title: str
     description: str
     status: str
@@ -604,6 +761,61 @@ class TaskMessagePublic(SQLModel):
 class TaskMessagesPublic(SQLModel):
     data: list[TaskMessagePublic]
     count: int
+
+
+class ReminderCreate(SQLModel):
+    name: str = Field(min_length=1, max_length=255)
+    weekday_mask: int = Field(ge=1, le=127)
+    is_active: bool = True
+    action_sms: bool = False
+    sms_to: str | None = Field(default=None, max_length=20)
+    sms_message: str | None = Field(default=None, max_length=1600)
+    action_task: bool = False
+    task_title: str | None = Field(default=None, max_length=255)
+    task_description: str | None = Field(default=None)
+
+
+class ReminderUpdate(SQLModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    weekday_mask: int | None = Field(default=None, ge=1, le=127)
+    is_active: bool | None = None
+    action_sms: bool | None = None
+    sms_to: str | None = Field(default=None, max_length=20)
+    sms_message: str | None = Field(default=None, max_length=1600)
+    action_task: bool | None = None
+    task_title: str | None = Field(default=None, max_length=255)
+    task_description: str | None = Field(default=None)
+
+
+class ReminderPublic(SQLModel):
+    id: uuid.UUID
+    name: str
+    weekday_mask: int
+    is_active: bool
+    action_sms: bool
+    sms_to: str | None
+    sms_message: str | None
+    action_task: bool
+    task_title: str | None
+    task_description: str | None
+    condominio_id: uuid.UUID
+    created_by_user_id: uuid.UUID
+    last_triggered_on: date | None
+    last_triggered_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class RemindersPublic(SQLModel):
+    data: list[ReminderPublic]
+    count: int
+
+
+class ReminderExecutionSummary(SQLModel):
+    checked: int
+    triggered: int
+    sms_sent: int
+    tasks_created: int
 
 
 class ReadingsBase(SQLModel):

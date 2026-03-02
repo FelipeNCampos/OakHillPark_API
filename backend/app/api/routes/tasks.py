@@ -1,8 +1,10 @@
 from datetime import datetime, timezone
+import re
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import or_
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import func, select
 
 from app.api.deps import CurrentUser, SessionDep, require_cargo
@@ -27,6 +29,7 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 TASK_ALLOWED_STATUSES = {"todo", "in_progress", "paused", "done"}
 STATUS_EVENT_PREFIX = "[STATUS]"
+TASK_CODE_PATTERN = re.compile(r"^task-(\d+)$")
 
 
 def _is_manager(user: User) -> bool:
@@ -121,6 +124,7 @@ def _task_to_public(session: SessionDep, task: Task) -> TaskPublic:
     )
     return TaskPublic(
         id=task.id,
+        code=task.code,
         title=task.title,
         description=task.description,
         status=task.status,
@@ -132,6 +136,23 @@ def _task_to_public(session: SessionDep, task: Task) -> TaskPublic:
         created_at=task.created_at,
         updated_at=task.updated_at,
     )
+
+
+def _next_task_code(session: SessionDep, condominio_id) -> str:
+    statement = select(Task.code).where(
+        Task.condominio_id == condominio_id,
+        Task.code.is_not(None),
+    )
+    codes = session.exec(statement).all()
+    max_seq = 0
+    for code in codes:
+        if not code:
+            continue
+        match = TASK_CODE_PATTERN.fullmatch(code.strip().lower())
+        if not match:
+            continue
+        max_seq = max(max_seq, int(match.group(1)))
+    return f"task-{max_seq + 1:03d}"
 
 
 def _check_task_access(task: Task, current_user: User) -> None:
@@ -343,21 +364,29 @@ def create_task(
     if caretaker.condominio_id != condominio_id:
         raise HTTPException(status_code=400, detail="Caretaker outside this condominio")
 
-    now = datetime.now(timezone.utc)
-    task = Task(
-        title=payload.title.strip(),
-        description=payload.description.strip(),
-        status="todo",
-        condominio_id=condominio_id,
-        created_by_user_id=current_user.id,
-        assigned_to_user_id=assigned_to_user_id,
-        created_at=now,
-        updated_at=now,
-    )
-    session.add(task)
-    session.commit()
-    session.refresh(task)
-    return _task_to_public(session, task)
+    for _attempt in range(3):
+        now = datetime.now(timezone.utc)
+        task = Task(
+            code=_next_task_code(session, condominio_id),
+            title=payload.title.strip(),
+            description=payload.description.strip(),
+            status="todo",
+            condominio_id=condominio_id,
+            created_by_user_id=current_user.id,
+            assigned_to_user_id=assigned_to_user_id,
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(task)
+        try:
+            session.commit()
+            session.refresh(task)
+            return _task_to_public(session, task)
+        except IntegrityError:
+            # Retry if another concurrent transaction consumed this code.
+            session.rollback()
+
+    raise HTTPException(status_code=500, detail="Could not generate a unique task code")
 
 
 @router.get("/", response_model=TasksPublic, dependencies=[Depends(require_cargo(1))])
@@ -424,6 +453,7 @@ def read_tasks(
         data.append(
             TaskPublic(
                 id=task.id,
+                code=task.code,
                 title=task.title,
                 description=task.description,
                 status=task.status,

@@ -1,17 +1,61 @@
 import logging
+import csv
+from datetime import date
+from pathlib import Path
 
 from sqlmodel import Session, select
 
+from app import crud
 from app.core.db import engine, init_db
-from app.models import Acess, Building, Condominio, Flat, Funcionario
+from app.models import (
+    Building,
+    Condominio,
+    FireAlarmScheduleRecord,
+    Flat,
+    Funcionario,
+    User,
+    UserCreate,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+DEFAULT_MANAGER_EMAIL = "oakhillporter@gmail.com"
+DEFAULT_MANAGER_PASSWORD = "Oakhill@8610"
+DEFAULT_MANAGER_NAME = "Luiz Fernandes"
+FIRE_ALARM_SEED_FILE = Path(__file__).resolve().parents[1] / "data" / "fire_alarm_schedule_seed.csv"
 
 
 def init() -> None:
     with Session(engine) as session:
         init_db(session)
+
+
+def ensure_default_manager_user(session: Session, condominio: Condominio) -> None:
+    manager_user = session.exec(
+        select(User).where(User.email == DEFAULT_MANAGER_EMAIL)
+    ).first()
+    if manager_user:
+        manager_user.full_name = DEFAULT_MANAGER_NAME
+        manager_user.cargo = 2
+        manager_user.condominio_id = condominio.id
+        manager_user.is_active = True
+        session.add(manager_user)
+        session.commit()
+        logger.info("Ensured default manager user exists and is linked to Oak Hill Park")
+        return
+
+    manager_in = UserCreate(
+        email=DEFAULT_MANAGER_EMAIL,
+        password=DEFAULT_MANAGER_PASSWORD,
+        full_name=DEFAULT_MANAGER_NAME,
+        is_superuser=False,
+        cargo=2,
+        condominio_id=condominio.id,
+    )
+    crud.create_user(session=session, user_create=manager_in)
+    session.commit()
+    logger.info("Created default manager user for Oak Hill Park")
 
 
 def create_initial_data() -> None:
@@ -47,6 +91,8 @@ def create_initial_data() -> None:
                 session.add(caretaker)
 
             session.commit()
+            ensure_fire_alarm_schedule_seed(session)
+            ensure_default_manager_user(session, condominio)
             logger.info("Initial data already exists, ensured default staff are active")
             return
         # Create condominio
@@ -119,34 +165,79 @@ def create_initial_data() -> None:
             },
         ]
 
-        funcionarios = {}
         for func_data in funcionarios_data:
             funcionario = Funcionario(
                 **func_data,
                 condominio_id=condominio.id
             )
             session.add(funcionario)
-            session.flush()
-            funcionarios[func_data["nome"]] = funcionario
             logger.info(f"Created funcionario: {func_data['nome']} (cargo={func_data['cargo']})")
 
         session.commit()
-
-        # Create Access records linking funcionarios to buildings
-        # Each funcionario has access to all buildings
-        for func_name, funcionario in funcionarios.items():
-            for _, building in buildings.items():
-                acess = Acess(
-                    status=True,
-                    operacao=0,
-                    building_id=building.id,
-                    funcionario_id=funcionario.id
-                )
-                session.add(acess)
-            logger.info(f"Created {len(buildings)} access records for {func_name}")
-
-        session.commit()
         logger.info("Initial data created successfully")
+        ensure_fire_alarm_schedule_seed(session)
+        ensure_default_manager_user(session, condominio)
+
+
+def ensure_fire_alarm_schedule_seed(session: Session) -> None:
+    existing = session.exec(select(FireAlarmScheduleRecord.id)).first()
+    if existing:
+        return
+    if not FIRE_ALARM_SEED_FILE.exists():
+        logger.warning("Fire alarm seed file not found: %s", FIRE_ALARM_SEED_FILE)
+        return
+
+    with FIRE_ALARM_SEED_FILE.open(encoding="utf-8-sig", newline="") as f:
+        reader = csv.DictReader(f)
+        payload = []
+        seen_keys: set[tuple[str, str]] = set()
+        for row in reader:
+            normalized = {str(k).strip(): (v or "").strip() for k, v in row.items()}
+
+            date_br = normalized.get("Date", "")
+            building_label = normalized.get("Building", "")
+            if not date_br or not building_label:
+                continue
+
+            key = (date_br, building_label)
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+
+            payload.append(normalized)
+
+    created = 0
+    for item in payload:
+        test_date_raw = item.get("Date", "")
+        if not test_date_raw:
+            continue
+        try:
+            day, month, year = str(test_date_raw).split("/")
+            parsed_date = date(int(year), int(month), int(day))
+        except ValueError:
+            continue
+
+        action_value = str(item.get("Further action required", "")).strip().lower()
+        action_required = action_value in {"yes", "y", "true", "1"}
+        raw_comment = str(item.get("Comments", "")).strip()
+        comments = None if not raw_comment or raw_comment.lower() == "none" else raw_comment
+
+        record = FireAlarmScheduleRecord(
+            schedule_type="fire_alarm",
+            test_date=parsed_date,
+            time=str(item.get("Time", "")).strip(),
+            building_label=str(item.get("Building", "")).strip(),
+            call_point=str(item.get("Call Point", "")).strip() or None,
+            location=str(item.get("Location", "")).strip() or None,
+            action_required=action_required,
+            comments=comments,
+        )
+        session.add(record)
+        created += 1
+
+    if created:
+        session.commit()
+        logger.info("Seeded %s fire alarm schedule records", created)
 
 
 def main() -> None:

@@ -9,6 +9,7 @@ import useCustomToast from "@/hooks/useCustomToast"
 const searchSchema = z.object({
   op: z.string().optional().catch(""),
   operation: z.string().optional().catch(""),
+  mode: z.string().optional().catch(""),
   buildingId: z.string().optional().catch(""),
   building: z.string().optional().catch(""),
   buildingName: z.string().optional().catch(""),
@@ -78,8 +79,9 @@ export const Route = createFileRoute("/caretaker-access")({
 function CaretakerAccess() {
   const { showSuccessToast, showErrorToast } = useCustomToast()
   const search = Route.useSearch() as z.infer<typeof searchSchema>
-  const { op, operation, buildingId, building, buildingName } = search
+  const { op, operation, mode, buildingId, building, buildingName } = search
   const [showConfirmation, setShowConfirmation] = useState(false)
+  const isWorkTimeMode = (mode || "").toLowerCase() === "work-time"
 
   const rawOperation = (op || operation || "").toLowerCase()
   const hasExplicitOperation = rawOperation === "in" || rawOperation === "out"
@@ -106,13 +108,22 @@ function CaretakerAccess() {
     activeBuildingId &&
     buildingId &&
     String(activeBuildingId) === String(buildingId)
+  const hasOpenSessionForCurrentContext = isWorkTimeMode
+    ? hasOpenSession
+    : Boolean(hasActiveSessionInBuilding)
+  const canOpenSession = !hasOpenSessionForCurrentContext
+  const canCloseSession = hasOpenSessionForCurrentContext
 
   useEffect(() => {
-    if (!buildingId) return
+    if (!isWorkTimeMode && !buildingId) return
     let isActive = true
 
     setIsCheckingSession(true)
-    publicApiCall("/api/v1/acess/caretaker/active")
+    publicApiCall(
+      isWorkTimeMode
+        ? "/api/v1/acess/caretaker/work-time/active"
+        : "/api/v1/bins/sessions/active",
+    )
       .then((data) => {
         if (!isActive) return
         const open = Boolean(data?.has_open_session)
@@ -121,7 +132,10 @@ function CaretakerAccess() {
         setActiveBuildingId(activeId)
 
         if (!hasExplicitOperation && !hasUserSelected) {
-          if (open && activeId && String(activeId) === String(buildingId)) {
+          const hasOpenForCurrentContext = isWorkTimeMode
+            ? open
+            : open && activeId && String(activeId) === String(buildingId)
+          if (hasOpenForCurrentContext) {
             setSelectedOperation("out")
           } else {
             setSelectedOperation("in")
@@ -144,26 +158,34 @@ function CaretakerAccess() {
     return () => {
       isActive = false
     }
-  }, [buildingId, hasExplicitOperation, hasUserSelected])
+  }, [buildingId, hasExplicitOperation, hasUserSelected, isWorkTimeMode])
 
   useEffect(() => {
-    if (hasActiveSessionInBuilding && selectedOperation === "in") {
+    if (canCloseSession && selectedOperation === "in") {
       setSelectedOperation("out")
     }
-  }, [hasActiveSessionInBuilding, selectedOperation])
+    if (canOpenSession && selectedOperation === "out") {
+      setSelectedOperation("in")
+    }
+  }, [canCloseSession, canOpenSession, selectedOperation])
 
   interface AcessPayload {
     status: boolean
     operacao: 0 | 1
-    building_id: string
+    building_id?: string
   }
 
   const mutation = useMutation({
     mutationFn: (payload: AcessPayload) =>
-      publicApiCall("/api/v1/acess/caretaker", {
-        method: "POST",
-        body: payload,
-      }),
+      publicApiCall(
+        isWorkTimeMode
+          ? "/api/v1/acess/caretaker/work-time"
+          : "/api/v1/bins/sessions",
+        {
+          method: "POST",
+          body: payload,
+        },
+      ),
     onSuccess: () => {
       showSuccessToast("Record confirmed")
       setShowConfirmation(true)
@@ -181,7 +203,17 @@ function CaretakerAccess() {
     },
   })
 
-  const canSubmit = Boolean(operationLabel) && Boolean(buildingId)
+  const isSelectedOperationAllowed =
+    selectedOperation === "in"
+      ? canOpenSession
+      : selectedOperation === "out"
+        ? canCloseSession
+        : false
+
+  const canSubmit =
+    Boolean(operationLabel) &&
+    (isWorkTimeMode || Boolean(buildingId)) &&
+    isSelectedOperationAllowed
 
   const handleConfirm = () => {
     if (!canSubmit) {
@@ -189,7 +221,7 @@ function CaretakerAccess() {
       return
     }
 
-    if (!buildingId) {
+    if (!isWorkTimeMode && !buildingId) {
       showErrorToast("Invalid QR code. Building not found.")
       return
     }
@@ -197,38 +229,42 @@ function CaretakerAccess() {
     const payload: AcessPayload = {
       status: true,
       operacao: selectedOperation === "in" ? 0 : 1,
-      building_id: buildingId,
+      ...(buildingId ? { building_id: buildingId } : {}),
     }
 
     mutation.mutate(payload)
   }
 
   return (
-    <div className="min-h-screen bg-[#f5f1ee] px-4 py-8">
+    <div className="min-h-screen bg-[#f5f1ee] px-3 py-6 sm:px-4 sm:py-8">
       <div className="mx-auto max-w-xl">
-        <div className="rounded-2xl bg-white p-8 shadow-lg">
+        <div className="rounded-2xl bg-white p-5 shadow-lg sm:p-8">
           <h1 className="mb-2 text-center text-2xl font-bold text-[#55311c]">
-            Caretaker Access
+            {isWorkTimeMode ? "WORK TIME" : "Caretaker Access"}
           </h1>
           <p className="mb-6 text-center text-[rgba(0,0,0,0.7)]">
-            Choose the operation and confirm the record.
+            {isWorkTimeMode
+              ? "Choose IN/OUT to register caretaker work time."
+              : "Choose the operation and confirm the record."}
           </p>
 
-          <div className="space-y-4">
-            <div className="rounded-lg border border-[#e5e0dc] bg-[#f9f7f5] p-4">
-              <p className="text-sm font-semibold text-[#55311c]">Building</p>
-              <p className="text-lg font-bold text-[#55311c]">
-                {buildingLabel || "Not provided"}
-              </p>
+          {!isWorkTimeMode && (
+            <div className="space-y-4">
+              <div className="rounded-lg border border-[#e5e0dc] bg-[#f9f7f5] p-4">
+                <p className="text-sm font-semibold text-[#55311c]">Building</p>
+                <p className="text-lg font-bold text-[#55311c]">
+                  {buildingLabel || "Not provided"}
+                </p>
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="mt-6">
             <p className="mb-2 text-sm font-semibold text-[#55311c]">
               Operation
             </p>
-            <div className="flex rounded-full bg-[#f5f1ee] p-1">
-              {!hasActiveSessionInBuilding && (
+            <div className="flex flex-col rounded-2xl bg-[#f5f1ee] p-1 sm:flex-row sm:rounded-full">
+              {canOpenSession && (
                 <button
                   type="button"
                   onClick={() => {
@@ -244,29 +280,31 @@ function CaretakerAccess() {
                   IN
                 </button>
               )}
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedOperation("out")
-                  setHasUserSelected(true)
-                }}
-                className={`flex-1 rounded-full px-4 py-2 text-sm font-semibold transition-all duration-200 ${
-                  selectedOperation === "out"
-                    ? "bg-[#8c7569] text-white shadow"
-                    : "text-[#55311c] hover:bg-[#e8e1dc]"
-                }`}
-              >
-                OUT
-              </button>
+              {canCloseSession && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedOperation("out")
+                    setHasUserSelected(true)
+                  }}
+                  className={`flex-1 rounded-full px-4 py-2 text-sm font-semibold transition-all duration-200 ${
+                    selectedOperation === "out"
+                      ? "bg-[#8c7569] text-white shadow"
+                      : "text-[#55311c] hover:bg-[#e8e1dc]"
+                  }`}
+                >
+                  OUT
+                </button>
+              )}
             </div>
             {isCheckingSession && (
               <p className="mt-2 text-xs text-[rgba(0,0,0,0.6)]">
                 Checking active session...
               </p>
             )}
-            {!isCheckingSession && hasActiveSessionInBuilding && (
+            {!isCheckingSession && canCloseSession && (
               <p className="mt-2 text-xs text-[rgba(0,0,0,0.6)]">
-                Active session in this building. Only OUT available.
+                Active session open. Only OUT available.
               </p>
             )}
           </div>

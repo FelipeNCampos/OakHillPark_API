@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import desc
 from sqlmodel import col, func, select
 
-from app.api.deps import SessionDep, require_cargo
+from app.api.deps import SessionDep, get_current_user, require_cargo
 from app.models import (
     Acess,
     AcessActiveStatus,
@@ -16,6 +16,11 @@ from app.models import (
     AcessUpdate,
     Funcionario,
     Message,
+    User,
+    WorkTimeSession,
+    WorkTimeSessionCreate,
+    WorkTimeSessionPublic,
+    WorkTimeSessionsPublic,
 )
 
 router = APIRouter(prefix="/acess", tags=["acess"])
@@ -47,6 +52,17 @@ def get_last_acess(session: SessionDep, funcionario_id: uuid.UUID) -> Acess | No
         select(Acess)
         .where(Acess.funcionario_id == funcionario_id)
         .order_by(desc(col(Acess.data)))
+        .limit(1)
+    ).first()
+
+
+def get_last_work_time_session(
+    session: SessionDep, funcionario_id: uuid.UUID
+) -> WorkTimeSession | None:
+    return session.exec(
+        select(WorkTimeSession)
+        .where(WorkTimeSession.funcionario_id == funcionario_id)
+        .order_by(desc(col(WorkTimeSession.data)))
         .limit(1)
     ).first()
 
@@ -91,7 +107,12 @@ def read_active_caretaker(session: SessionDep) -> Any:
 def read_acess(session: SessionDep, skip: int = 0, limit: int = 100) -> Any:
     count_statement = select(func.count()).select_from(Acess)
     count = session.exec(count_statement).one()
-    statement = select(Acess).offset(skip).limit(limit)
+    statement = (
+        select(Acess)
+        .order_by(desc(col(Acess.data)))
+        .offset(skip)
+        .limit(limit)
+    )
     acesses = session.exec(statement).all()
     return AcessesPublic(data=acesses, count=count)
 
@@ -213,6 +234,103 @@ def create_caretaker_acess(*, session: SessionDep, acess_in: AcessCreate) -> Any
     session.commit()
     session.refresh(acess)
     return acess
+
+
+@router.get("/caretaker/work-time/active", response_model=AcessActiveStatus)
+def read_active_caretaker_work_time(session: SessionDep) -> Any:
+    caretaker = get_default_funcionario(session, 1)
+    if not caretaker:
+        return AcessActiveStatus(has_open_session=False, building_id=None)
+
+    last_session = get_last_work_time_session(session, caretaker.id)
+    if last_session and last_session.operacao == 0:
+        return AcessActiveStatus(has_open_session=True, building_id=None)
+    return AcessActiveStatus(has_open_session=False, building_id=None)
+
+
+@router.post("/caretaker/work-time", response_model=WorkTimeSessionPublic, status_code=201)
+def create_caretaker_work_time(
+    *, session: SessionDep, payload: WorkTimeSessionCreate
+) -> Any:
+    caretaker = get_default_funcionario(session, 1)
+    if not caretaker:
+        raise HTTPException(status_code=404, detail="Default caretaker not found")
+
+    if payload.operacao not in {0, 1}:
+        raise HTTPException(status_code=422, detail="Invalid operacao")
+
+    last_session = get_last_work_time_session(session, caretaker.id)
+
+    if payload.operacao == 0 and last_session and last_session.operacao == 0:
+        raise HTTPException(status_code=400, detail="Caretaker already has an open work time session")
+
+    if payload.operacao == 1 and (last_session is None or last_session.operacao == 1):
+        raise HTTPException(
+            status_code=400,
+            detail="Caretaker does not have an open work time session to close",
+        )
+
+    item = WorkTimeSession.model_validate(
+        payload,
+        update={
+            "status": True,
+            "funcionario_id": caretaker.id,
+        },
+    )
+    session.add(item)
+    session.commit()
+    session.refresh(item)
+    return WorkTimeSessionPublic(
+        id=item.id,
+        status=item.status,
+        data=item.data,
+        operacao=item.operacao,
+        funcionario_id=item.funcionario_id,
+    )
+
+
+@router.get(
+    "/caretaker/work-time",
+    response_model=WorkTimeSessionsPublic,
+    dependencies=[Depends(require_cargo(1))],
+)
+def read_caretaker_work_time(
+    session: SessionDep,
+    current_user: User = Depends(get_current_user),
+    skip: int = 0,
+    limit: int = 100,
+) -> Any:
+    condominio_id = current_user.condominio_id
+    conditions = [Funcionario.condominio_id == condominio_id, Funcionario.cargo == 1]
+
+    count_statement = (
+        select(func.count())
+        .select_from(WorkTimeSession)
+        .join(Funcionario, WorkTimeSession.funcionario_id == Funcionario.id)
+        .where(*conditions)
+    )
+    count = session.exec(count_statement).one()
+
+    statement = (
+        select(WorkTimeSession)
+        .join(Funcionario, WorkTimeSession.funcionario_id == Funcionario.id)
+        .where(*conditions)
+        .order_by(WorkTimeSession.data.desc())
+        .offset(skip)
+        .limit(limit)
+    )
+    rows = session.exec(statement).all()
+    data = [
+        WorkTimeSessionPublic(
+            id=item.id,
+            status=item.status,
+            data=item.data,
+            operacao=item.operacao,
+            funcionario_id=item.funcionario_id,
+        )
+        for item in rows
+    ]
+    return WorkTimeSessionsPublic(data=data, count=count)
 
 
 @router.patch("/{id}", response_model=AcessPublic, dependencies=[Depends(require_cargo(1))])

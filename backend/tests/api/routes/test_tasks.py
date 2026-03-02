@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
+import re
 
 from app import crud
 from app.core.config import settings
@@ -15,11 +16,9 @@ from tests.utils.utils import random_email, random_lower_string
 
 
 def _ensure_condominio_and_users(db: Session) -> tuple[Condominio, User, User]:
-    condominio = db.exec(
-        select(Condominio).where(Condominio.nome == "Test Tasks Condominio")
-    ).first()
+    condominio = db.exec(select(Condominio).limit(1)).first()
     if not condominio:
-        condominio = Condominio.model_validate(CondominioCreate(nome="Test Tasks Condominio"))
+        condominio = Condominio.model_validate(CondominioCreate(nome="Oak Hill Park"))
         db.add(condominio)
         db.commit()
         db.refresh(condominio)
@@ -87,6 +86,7 @@ def test_tasks_lifecycle(client: TestClient, db: Session) -> None:
     assert create_task.status_code == 200
     task = create_task.json()
     task_id = task["id"]
+    assert re.fullmatch(r"task-\d{3,}", task["code"])
 
     caretaker_password = random_lower_string()
     caretaker = crud.update_user(
@@ -147,3 +147,43 @@ def test_manager_creates_task_without_assigned_user(
     assert create_task.status_code == 200
     payload = create_task.json()
     assert payload["assigned_to_user_id"] == str(caretaker.id)
+    assert re.fullmatch(r"task-\d{3,}", payload["code"])
+
+
+def test_task_code_auto_increment(client: TestClient, db: Session) -> None:
+    _, _, caretaker = _ensure_condominio_and_users(db)
+
+    manager_headers = user_authentication_headers(
+        client=client,
+        email=settings.FIRST_SUPERUSER,
+        password=settings.FIRST_SUPERUSER_PASSWORD,
+    )
+
+    first = client.post(
+        f"{settings.API_V1_STR}/tasks/",
+        headers=manager_headers,
+        json={
+            "title": "Task code first",
+            "description": "First code",
+            "assigned_to_user_id": str(caretaker.id),
+        },
+    )
+    assert first.status_code == 200
+    first_code = first.json()["code"]
+    first_match = re.fullmatch(r"task-(\d{3,})", first_code)
+    assert first_match
+
+    second = client.post(
+        f"{settings.API_V1_STR}/tasks/",
+        headers=manager_headers,
+        json={
+            "title": "Task code second",
+            "description": "Second code",
+            "assigned_to_user_id": str(caretaker.id),
+        },
+    )
+    assert second.status_code == 200
+    second_code = second.json()["code"]
+    second_match = re.fullmatch(r"task-(\d{3,})", second_code)
+    assert second_match
+    assert int(second_match.group(1)) == int(first_match.group(1)) + 1

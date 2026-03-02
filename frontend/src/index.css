@@ -123,3 +123,54 @@
     cursor: pointer;
   }
 }
+
+@media (max-width: 768px) {
+  body {
+    overflow-x: hidden;
+  }
+
+  button,
+  [role="button"],
+  input,
+  select,
+  textarea {
+    min-height: 42px;
+  }
+
+  .dashboard-mobile-root {
+    width: 100%;
+    overflow-x: hidden;
+  }
+
+  .dashboard-mobile-root .mx-auto.max-w-7xl,
+  .dashboard-mobile-root .mx-auto.max-w-5xl {
+    width: 100%;
+  }
+
+  .dashboard-mobile-root .overflow-x-auto {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .dashboard-mobile-root .overflow-x-auto table {
+    min-width: 680px;
+  }
+
+  .dashboard-mobile-root table th,
+  .dashboard-mobile-root table td {
+    white-space: nowrap;
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+
+  .dashboard-mobile-root .recharts-responsive-container {
+    min-height: 220px;
+  }
+
+  .dashboard-mobile-root .grid.md\:grid-cols-2,
+  .dashboard-mobile-root .grid.lg\:grid-cols-2,
+  .dashboard-mobile-root .grid.xl\:grid-cols-3 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

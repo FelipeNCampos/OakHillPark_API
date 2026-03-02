@@ -43,7 +43,7 @@ def test_create_bin_miss_collection(client: TestClient, db: Session) -> None:
     response = client.post(f"{settings.API_V1_STR}/bins/", json=payload)
 
     assert response.status_code == 201
-    assert response.json() == {"message": "Miss collection recorded"}
+    assert response.json() == {"message": "Bins collection record saved"}
 
 
 def test_read_bin_miss_collections(

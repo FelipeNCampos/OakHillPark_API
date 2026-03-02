@@ -46,7 +46,13 @@ def send_email(
         html=html_content,
         mail_from=(settings.EMAILS_FROM_NAME, settings.EMAILS_FROM_EMAIL),
     )
-    smtp_options = {"host": settings.SMTP_HOST, "port": settings.SMTP_PORT}
+    smtp_options = {
+        "host": settings.SMTP_HOST,
+        "port": settings.SMTP_PORT,
+        # The emails library defaults to fail_silently=True when omitted.
+        # Force explicit failure so callers don't treat silent SMTP errors as success.
+        "fail_silently": False,
+    }
     if settings.SMTP_TLS:
         smtp_options["tls"] = True
     elif settings.SMTP_SSL:
@@ -54,9 +60,81 @@ def send_email(
     if settings.SMTP_USER:
         smtp_options["user"] = settings.SMTP_USER
     if settings.SMTP_PASSWORD:
-        smtp_options["password"] = settings.SMTP_PASSWORD
-    response = message.send(to=email_to, smtp=smtp_options)
-    logger.info(f"send email result: {response}")
+        # Gmail app passwords are commonly copied with spaces.
+        # Normalize by removing whitespace to avoid SMTP auth failures.
+        smtp_password = settings.SMTP_PASSWORD
+        if settings.SMTP_HOST and "gmail.com" in settings.SMTP_HOST.lower():
+            smtp_password = "".join(smtp_password.split())
+        smtp_options["password"] = smtp_password
+    try:
+        response = message.send(to=email_to, smtp=smtp_options)
+        if not getattr(response, "success", False):
+            error = getattr(response, "error", None)
+            status_code = getattr(response, "status_code", None)
+            status_text = getattr(response, "status_text", None)
+            raise RuntimeError(
+                f"SMTP did not accept the message (status={status_code}, detail={status_text}, error={error})"
+            )
+        logger.info(f"send email result: {response}")
+    except Exception as exc:
+        logger.exception("send email failed")
+        raise RuntimeError("Failed to send email. Check SMTP credentials/settings.") from exc
+
+
+def send_email_with_attachment(
+    *,
+    email_to: str,
+    subject: str = "",
+    html_content: str = "",
+    file_name: str,
+    file_bytes: bytes,
+    mime_type: str = "application/pdf",
+) -> None:
+    assert settings.emails_enabled, "no provided configuration for email variables"
+    message = emails.Message(
+        subject=subject,
+        html=html_content,
+        mail_from=(settings.EMAILS_FROM_NAME, settings.EMAILS_FROM_EMAIL),
+    )
+    message.attach(
+        data=file_bytes,
+        filename=file_name,
+        content_type=mime_type,
+        content_disposition="attachment",
+    )
+    smtp_options = {
+        "host": settings.SMTP_HOST,
+        "port": settings.SMTP_PORT,
+        # The emails library defaults to fail_silently=True when omitted.
+        # Force explicit failure so callers don't treat silent SMTP errors as success.
+        "fail_silently": False,
+    }
+    if settings.SMTP_TLS:
+        smtp_options["tls"] = True
+    elif settings.SMTP_SSL:
+        smtp_options["ssl"] = True
+    if settings.SMTP_USER:
+        smtp_options["user"] = settings.SMTP_USER
+    if settings.SMTP_PASSWORD:
+        # Gmail app passwords are commonly copied with spaces.
+        # Normalize by removing whitespace to avoid SMTP auth failures.
+        smtp_password = settings.SMTP_PASSWORD
+        if settings.SMTP_HOST and "gmail.com" in settings.SMTP_HOST.lower():
+            smtp_password = "".join(smtp_password.split())
+        smtp_options["password"] = smtp_password
+    try:
+        response = message.send(to=email_to, smtp=smtp_options)
+        if not getattr(response, "success", False):
+            error = getattr(response, "error", None)
+            status_code = getattr(response, "status_code", None)
+            status_text = getattr(response, "status_text", None)
+            raise RuntimeError(
+                f"SMTP did not accept the attachment message (status={status_code}, detail={status_text}, error={error})"
+            )
+        logger.info(f"send email with attachment result: {response}")
+    except Exception as exc:
+        logger.exception("send email with attachment failed")
+        raise RuntimeError("Failed to send email. Check SMTP credentials/settings.") from exc
 
 
 def send_sms_notification(*, phone_to: str, body: str) -> str:

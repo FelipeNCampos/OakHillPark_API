@@ -185,9 +185,9 @@ function CleanerAccess() {
   }
 
   return (
-    <div className="min-h-screen bg-[#f5f1ee] px-4 py-8">
+    <div className="min-h-screen bg-[#f5f1ee] px-3 py-6 sm:px-4 sm:py-8">
       <div className="mx-auto max-w-xl">
-        <div className="rounded-2xl bg-white p-8 shadow-lg">
+        <div className="rounded-2xl bg-white p-5 shadow-lg sm:p-8">
           <h1 className="mb-2 text-center text-2xl font-bold text-[#55311c]">
             Cleaner Access
           </h1>
@@ -208,7 +208,7 @@ function CleanerAccess() {
             <p className="mb-2 text-sm font-semibold text-[#55311c]">
               Operation
             </p>
-            <div className="flex rounded-full bg-[#f5f1ee] p-1">
+            <div className="flex flex-col rounded-2xl bg-[#f5f1ee] p-1 sm:flex-row sm:rounded-full">
               {!hasActiveSessionInBuilding && (
                 <button
                   type="button"

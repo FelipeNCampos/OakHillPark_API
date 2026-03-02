@@ -74,10 +74,7 @@ function Login() {
   }
 
   return (
-    <AuthLayoutModal
-      title="Welcome!"
-      description="Access for Condo Managers"
-    >
+    <AuthLayoutModal title="Welcome!" description="Access for Condo Managers">
       <Form {...form}>
         <form
           onSubmit={form.handleSubmit(onSubmit)}
@@ -126,14 +123,14 @@ function Login() {
             )}
           />
 
-          <div className="mt-2 flex items-center justify-between">
+          <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <RouterLink
               to="/recover-password"
               className="text-sm text-[rgba(51,51,51,0.6)] hover:underline"
             >
               Forgot your password?
             </RouterLink>
-            <div className="flex items-center gap-2">
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
               <RouterLink
                 to={"/caretaker-login" as any}
                 className="text-sm text-[#8c7569] hover:underline"
@@ -143,7 +140,7 @@ function Login() {
               <LoadingButton
                 type="submit"
                 loading={loginMutation.isPending}
-                className="cursor-pointer rounded border-0 bg-[#8c7569] px-3 py-2 font-['Nunito',sans-serif] text-white outline-none transition-all duration-300 hover:bg-[#55311c]"
+                className="w-full cursor-pointer rounded border-0 bg-[#8c7569] px-3 py-2 font-['Nunito',sans-serif] text-white outline-none transition-all duration-300 hover:bg-[#55311c] sm:w-auto"
               >
                 Log in
               </LoadingButton>

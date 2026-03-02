@@ -15,8 +15,31 @@ export function AuthLayoutModal({
 }: AuthLayoutModalProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [showScrollDown, setShowScrollDown] = useState(true)
+  const [isMobileView, setIsMobileView] = useState(false)
 
   useEffect(() => {
+    if (typeof window === "undefined") return
+    const mediaQuery = window.matchMedia("(max-width: 768px)")
+    const updateView = () => {
+      const mobile = mediaQuery.matches
+      setIsMobileView(mobile)
+      if (mobile) {
+        setIsOpen(true)
+        setShowScrollDown(false)
+        document.body.style.overflow = "hidden"
+      }
+    }
+
+    updateView()
+    mediaQuery.addEventListener("change", updateView)
+    return () => {
+      mediaQuery.removeEventListener("change", updateView)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (isMobileView) return
+
     const handleScroll = () => {
       if (window.scrollY > window.innerHeight / 3 && !isOpen) {
         setIsOpen(true)
@@ -30,7 +53,7 @@ export function AuthLayoutModal({
       window.removeEventListener("scroll", handleScroll)
       document.body.style.overflow = "initial"
     }
-  }, [isOpen])
+  }, [isMobileView, isOpen])
 
   const handleClose = () => {
     setIsOpen(false)
@@ -47,7 +70,7 @@ export function AuthLayoutModal({
     <>
       {/* Background container with scroll */}
       <div
-        className="h-[200vh] bg-cover bg-center bg-no-repeat"
+        className="h-[160vh] bg-cover bg-center bg-no-repeat sm:h-[200vh]"
         style={{ backgroundImage: "url(/assets/images/background.jpg)" }}
       />
 
@@ -78,7 +101,7 @@ export function AuthLayoutModal({
       >
         {/* Modal container */}
         <div
-          className={`absolute flex w-full max-w-[720px] overflow-hidden rounded-[10px] bg-white transition-all ${
+          className={`absolute flex w-[95vw] max-w-[720px] flex-col overflow-hidden rounded-[10px] bg-white transition-all md:w-full md:flex-row ${
             isOpen
               ? "pointer-events-auto scale-100 translate-y-0 opacity-100 duration-[600ms]"
               : "pointer-events-none scale-[0.4] translate-y-[100px] opacity-0 duration-[300ms]"
@@ -86,7 +109,7 @@ export function AuthLayoutModal({
         >
           {/* Left side - Form */}
           <div
-            className={`flex-[1.5] bg-white px-[30px] pb-5 pt-[60px] transition-all duration-500 ${
+            className={`flex-[1.5] bg-white px-5 pb-5 pt-12 transition-all duration-500 sm:px-[30px] sm:pt-[60px] ${
               isOpen
                 ? "translate-y-0 opacity-100 delay-100"
                 : "translate-y-[80px] opacity-0"
@@ -102,7 +125,7 @@ export function AuthLayoutModal({
           </div>
 
           {/* Right side - Image */}
-          <div className="flex-[2] overflow-hidden transition-all duration-300">
+          <div className="hidden flex-[2] overflow-hidden transition-all duration-300 md:block">
             <img
               src={imageUrl}
               alt="Login background"
@@ -129,7 +152,7 @@ export function AuthLayoutModal({
         {!isOpen && (
           <button
             onClick={handleOpenClick}
-            className="cursor-pointer rounded-[30px] border-0 bg-white px-10 py-[10px] font-['Nunito',sans-serif] text-[18px] text-[#7d695e] shadow-[0_10px_40px_rgba(0,0,0,0.16)] outline-0 transition-all duration-300 hover:border-[rgba(255,255,255,0.2)] hover:bg-[rgba(255,255,255,0.8)]"
+            className="cursor-pointer rounded-[30px] border-0 bg-white px-8 py-[10px] text-base font-['Nunito',sans-serif] text-[#7d695e] shadow-[0_10px_40px_rgba(0,0,0,0.16)] outline-0 transition-all duration-300 hover:border-[rgba(255,255,255,0.2)] hover:bg-[rgba(255,255,255,0.8)] sm:px-10 sm:text-[18px]"
             type="button"
           >
             Click here to login

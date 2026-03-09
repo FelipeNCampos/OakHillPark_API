@@ -79,7 +79,7 @@ const CrudSection = <T extends { id: string }>({
 
   const rows = data?.data ?? []
   const countLabel = useMemo(
-    () => `${rows.length} de ${data?.count ?? 0}`,
+    () => `${rows.length} of ${data?.count ?? 0}`,
     [rows.length, data?.count],
   )
 
@@ -270,7 +270,7 @@ const CrudSection = <T extends { id: string }>({
           <DialogHeader>
             <DialogTitle>Edit {title}</DialogTitle>
             <DialogDescription>
-              Atualize o JSON do registro selecionado.
+              Update the JSON of the selected record.
             </DialogDescription>
           </DialogHeader>
           <textarea

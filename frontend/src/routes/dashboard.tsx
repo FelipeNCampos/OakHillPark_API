@@ -165,10 +165,14 @@ interface FireAlarmLogRow {
   comment: string
 }
 
-type FireAlarmLogByDate = Record<
-  string,
-  Record<FireAlarmBuildingId, FireAlarmLogRow>
->
+type FireAlarmLogByDate = Record<string, Record<string, FireAlarmLogRow>>
+
+type ScheduleBuildingId = string
+
+interface ScheduleBuildingEntry {
+  buildingId: ScheduleBuildingId
+  buildingLabel: string
+}
 
 type ResidentTypeFilter = "owner_1" | "owner_2" | "tenant" | "agent" | "all"
 
@@ -182,6 +186,18 @@ type FlatResidentRow = {
   tenant?: Morador
   agent?: Morador
   edit_target_id: EntityId | null
+}
+
+type FlatResidentsPreview = {
+  owner_1?: Morador
+  owner_2?: Morador
+  tenant?: Morador
+  agent?: Morador
+}
+
+type ResidentEditContext = {
+  editTitle: string
+  flatResidents?: FlatResidentsPreview
 }
 
 interface MoradorDetail {
@@ -901,12 +917,48 @@ const mergeLogsWithInitialSeed = (
 const mergeFireAlarmLogsWithInitialSeed = (logs: FireAlarmLogByDate) =>
   mergeLogsWithInitialSeed(logs, FIRE_ALARM_INITIAL_LOGS)
 
+const createEmptyLogRow = (): FireAlarmLogRow => ({
+  time: "",
+  actionRequired: false,
+  comment: "",
+})
+
+const LIGHT_MARTLETT_SPLIT_BUILDINGS: ScheduleBuildingEntry[] = [
+  { buildingId: "martlett_1_6", buildingLabel: "Martlett 1-6" },
+  { buildingId: "martlett_7_9", buildingLabel: "Martlett 7-9" },
+  { buildingId: "martlett_10_12", buildingLabel: "Martlett 10-12" },
+  { buildingId: "martlett_13_16", buildingLabel: "Martlett 13-16" },
+]
+
+const normalizeLightScheduleRows = (
+  rowMap: Record<string, FireAlarmLogRow> | undefined,
+) => {
+  const normalized = { ...(rowMap || {}) }
+  const legacyMartlett = normalized.martlett
+  LIGHT_MARTLETT_SPLIT_BUILDINGS.forEach((entry) => {
+    if (!normalized[entry.buildingId]) {
+      normalized[entry.buildingId] = legacyMartlett
+        ? { ...legacyMartlett }
+        : createEmptyLogRow()
+    }
+  })
+  return normalized
+}
+
+const normalizeLightScheduleLogs = (logs: FireAlarmLogByDate) => {
+  const normalized: FireAlarmLogByDate = {}
+  Object.entries(logs).forEach(([date, rowMap]) => {
+    normalized[date] = normalizeLightScheduleRows(rowMap)
+  })
+  return normalized
+}
+
 const getInitialLogsByScheduleId = (
   scheduleId: "lift" | "light",
 ): FireAlarmLogByDate =>
   scheduleId === "lift"
     ? LIFT_SCHEDULE_INITIAL_LOGS
-    : LIGHT_SCHEDULE_INITIAL_LOGS
+    : normalizeLightScheduleLogs(LIGHT_SCHEDULE_INITIAL_LOGS)
 
 const FIRE_ALARM_BUILDINGS: FireAlarmBuildingConfig[] = [
   {
@@ -940,7 +992,7 @@ const FIRE_ALARM_BUILDINGS: FireAlarmBuildingConfig[] = [
       "071",
       "076",
     ],
-    locations: ["GF", "1F", "2F", "GF", "1F", "2F"],
+    locations: ["GF | 1-6", "1F | 1-6", "2F | 1-6", "GF | 7-9", "1F | 7-9", "2F | 7-9","GF | 10-12","1F | 10-12","2F | 10-12","GF | 13-16","1F | 13-16","2F | 13-16"],
     anchorCallPoint: "055",
   },
   {
@@ -965,18 +1017,21 @@ const FIRE_ALARM_BUILDINGS: FireAlarmBuildingConfig[] = [
       "064",
     ],
     locations: [
-      "GF | 1-6",
-      "1F | 1-6",
-      "2F | 1-6",
-      "GF | 7-9",
-      "1F | 7-9",
-      "2F | 7-9",
-      "GF | 10-12",
-      "1F | 10-12",
-      "2F | 10-12",
-      "GF | 13-16",
-      "1F | 13-16",
-      "2F | 13-16",
+      "GF",
+      "1F",
+      "2F",
+      "4F",
+      "5F",
+      "6F",
+      "BOILER",
+      "LIFT ROOM",
+      "GF REAR",
+      "1F REAR",
+      "2F REAR",
+      "3F REAR",
+      "4F REAR",
+      "5F REAR",
+      "6F REAR",
     ],
     anchorCallPoint: "020",
   },
@@ -1013,6 +1068,7 @@ const FIRE_ALARM_BUILDINGS: FireAlarmBuildingConfig[] = [
       "BOILER",
       "LIFT ROOM",
       "GF REAR",
+      "Garage",
       "1F REAR",
       "2F REAR",
       "3F REAR",
@@ -1064,6 +1120,46 @@ const FIRE_ALARM_BUILDINGS: FireAlarmBuildingConfig[] = [
     anchorCallPoint: "021",
   },
 ]
+
+const LIFT_UNAVAILABLE_BUILDINGS = new Set<FireAlarmBuildingId>([
+  "falcon_1_6",
+  "falcon_7_12",
+  "martlett",
+])
+
+const LIGHT_SCHEDULE_BUILDINGS: ScheduleBuildingEntry[] = [
+  { buildingId: "falcon_1_6", buildingLabel: "Falcon 1-6" },
+  { buildingId: "falcon_7_12", buildingLabel: "Falcon 7-12" },
+  ...LIGHT_MARTLETT_SPLIT_BUILDINGS,
+  { buildingId: "merlin", buildingLabel: "Merlin" },
+  { buildingId: "oak_lodge", buildingLabel: "Oak Lodge" },
+  { buildingId: "northwood", buildingLabel: "NorthWood" },
+]
+
+const getBuildingsForSchedule = (
+  scheduleId: "lift" | "light",
+): ScheduleBuildingEntry[] => {
+  if (scheduleId === "light") {
+    return LIGHT_SCHEDULE_BUILDINGS
+  }
+  return FIRE_ALARM_BUILDINGS.filter(
+    (building) => !LIFT_UNAVAILABLE_BUILDINGS.has(building.id),
+  ).map((building) => ({
+    buildingId: building.id,
+    buildingLabel: building.label,
+  }))
+}
+
+const getDefaultRowsForSchedule = (scheduleId: "lift" | "light") => {
+  const rows: Record<string, FireAlarmLogRow> = {}
+  getBuildingsForSchedule(scheduleId).forEach((entry) => {
+    rows[entry.buildingId] = createEmptyLogRow()
+  })
+  return rows
+}
+
+const hasLogRowContent = (row?: FireAlarmLogRow) =>
+  Boolean(row && (row.time.trim() || row.actionRequired || row.comment.trim()))
 
 const toDateInputValue = (date = new Date()) => {
   const year = date.getFullYear()
@@ -1124,7 +1220,7 @@ const snapToFireAlarmCycleDate = (isoDate: string) => {
 }
 
 const shiftFireAlarmCycleDate = (isoDate: string, weeks: number) => {
-  const current = parseIsoDateToUtc(snapToFireAlarmCycleDate(isoDate))
+  const current = parseIsoDateToUtc(isoDate)
   if (Number.isNaN(current)) return FIRE_ALARM_ANCHOR_DATE
   return formatUtcMsToIsoDate(current + weeks * 7 * 24 * 60 * 60 * 1000)
 }
@@ -1283,7 +1379,7 @@ function ClientDashboard() {
             className="rounded bg-[#8c7569] px-6 py-2 text-white transition-all duration-300 hover:bg-[#55311c]"
             type="button"
           >
-            Voltar ao Login
+            Back to Login
           </button>
         </div>
       </div>
@@ -1624,7 +1720,7 @@ function OverviewContent({ user }: { user: UserProfile }) {
             </svg>
           </div>
           <p className="text-3xl font-bold text-[#55311c]">--</p>
-          <p className="mt-1 text-sm text-[rgba(0,0,0,0.6)]">Cadastrados</p>
+          <p className="mt-1 text-sm text-[rgba(0,0,0,0.6)]">Registered</p>
         </div>
 
         <div className="rounded-lg bg-white p-6 shadow-md transition-all duration-300 hover:shadow-lg">
@@ -2006,7 +2102,7 @@ function BuildingReadingsTable({
         result.low = current.low
         if (previous && previous.low !== undefined) {
           result.lowUsed = current.low - previous.low
-          // Calculate percentage: (used atual * 100) / used anterior
+          // Calculate percentage: (current used * 100) / previous used
           if (previousPrevious && previousPrevious.low !== undefined) {
             const previousUsed = previous.low - previousPrevious.low
             result.lowPercent =
@@ -2025,7 +2121,7 @@ function BuildingReadingsTable({
         result.normal = current.normal
         if (previous && previous.normal !== undefined) {
           result.normalUsed = current.normal - previous.normal
-          // Calculate percentage: (used atual * 100) / used anterior
+          // Calculate percentage: (current used * 100) / previous used
           if (previousPrevious && previousPrevious.normal !== undefined) {
             const previousUsed = previous.normal - previousPrevious.normal
             result.normalPercent =
@@ -2044,7 +2140,7 @@ function BuildingReadingsTable({
         result.gas = current.gas
         if (previous && previous.gas !== undefined) {
           result.gasUsed = current.gas - previous.gas
-          // Calculate percentage: (used atual * 100) / used anterior
+          // Calculate percentage: (current used * 100) / previous used
           if (previousPrevious && previousPrevious.gas !== undefined) {
             const previousUsed = previous.gas - previousPrevious.gas
             result.gasPercent =
@@ -2289,7 +2385,7 @@ function BuildingReadingsTable({
             stroke="currentColor"
             viewBox="0 0 24 24"
           >
-            <title>Building anterior</title>
+            <title>Previous building</title>
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -2644,7 +2740,7 @@ function BuildingReadingsTable({
           <div className="w-full max-w-md rounded-2xl bg-white p-4 shadow-xl sm:p-6">
             <h3 className="text-lg font-bold text-[#55311c]">Edit readings</h3>
             <p className="mt-1 text-sm text-[rgba(0,0,0,0.7)]">
-              Data: {editingRow.date.split("T")[0]}
+              Date: {editingRow.date.split("T")[0]}
             </p>
 
             <div className="mt-4 grid gap-4">
@@ -2653,7 +2749,7 @@ function BuildingReadingsTable({
                   className="block text-sm font-semibold text-[#55311c]"
                   htmlFor="edit-reading-date"
                 >
-                  Data
+                  Date
                 </label>
                 <input
                   type="date"
@@ -2926,7 +3022,7 @@ function AddReadingsForm({
         )
       }
 
-      alert("Readings cadastradas com sucesso!")
+      alert("Readings registered successfully!")
       onBack()
     } catch (error) {
       console.error("Error submitting readings:", error)
@@ -2948,7 +3044,7 @@ function AddReadingsForm({
             className="rounded-lg bg-gray-500 px-4 py-2 font-['Nunito',sans-serif] text-sm font-semibold text-white transition-all duration-300 hover:bg-gray-600"
             type="button"
           >
-            Voltar
+            Back
           </button>
         </div>
 
@@ -3164,7 +3260,7 @@ function AddFlatReadingsForm({
       // Invalidate cache so new readings show up
       queryClient.invalidateQueries({ queryKey: ["flat_readings"] })
 
-      showSuccessToast("Readings cadastradas com sucesso!")
+      showSuccessToast("Readings registered successfully!")
       onBack()
     } catch (error) {
       console.error("Error submitting readings:", error)
@@ -3195,7 +3291,7 @@ function AddFlatReadingsForm({
               className="rounded-lg bg-gray-500 px-4 py-2 font-['Nunito',sans-serif] text-sm font-semibold text-white transition-all duration-300 hover:bg-gray-600"
               type="button"
             >
-              Voltar
+              Back
             </button>
           </div>
           <p className="text-[#55311c] font-['Nunito',sans-serif]">
@@ -3218,7 +3314,7 @@ function AddFlatReadingsForm({
             className="rounded-lg bg-gray-500 px-4 py-2 font-['Nunito',sans-serif] text-sm font-semibold text-white transition-all duration-300 hover:bg-gray-600"
             type="button"
           >
-            Voltar
+            Back
           </button>
         </div>
 
@@ -3703,7 +3799,7 @@ function FlatReadingsTable({
         result.low = current.low
         if (previous && previous.low !== undefined) {
           result.lowUsed = current.low - previous.low
-          // Calculate percentage: (used atual * 100) / used anterior
+          // Calculate percentage: (current used * 100) / previous used
           if (previousPrevious && previousPrevious.low !== undefined) {
             const previousUsed = previous.low - previousPrevious.low
             result.lowPercent =
@@ -3722,7 +3818,7 @@ function FlatReadingsTable({
         result.normal = current.normal
         if (previous && previous.normal !== undefined) {
           result.normalUsed = current.normal - previous.normal
-          // Calculate percentage: (used atual * 100) / used anterior
+          // Calculate percentage: (current used * 100) / previous used
           if (previousPrevious && previousPrevious.normal !== undefined) {
             const previousUsed = previous.normal - previousPrevious.normal
             result.normalPercent =
@@ -3741,7 +3837,7 @@ function FlatReadingsTable({
         result.gas = current.gas
         if (previous && previous.gas !== undefined) {
           result.gasUsed = current.gas - previous.gas
-          // Calculate percentage: (used atual * 100) / used anterior
+          // Calculate percentage: (current used * 100) / previous used
           if (previousPrevious && previousPrevious.gas !== undefined) {
             const previousUsed = previous.gas - previousPrevious.gas
             result.gasPercent =
@@ -3989,7 +4085,7 @@ function FlatReadingsTable({
             stroke="currentColor"
             viewBox="0 0 24 24"
           >
-            <title>Flat anterior</title>
+            <title>Previous flat</title>
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -4239,7 +4335,7 @@ function FlatReadingsTable({
           <div className="w-full max-w-md rounded-2xl bg-white p-4 shadow-xl sm:p-6">
             <h3 className="text-lg font-bold text-[#55311c]">Edit readings</h3>
             <p className="mt-1 text-sm text-[rgba(0,0,0,0.7)]">
-              Data: {editingRow.date.split("T")[0]}
+              Date: {editingRow.date.split("T")[0]}
             </p>
 
             <div className="mt-4 grid gap-4">
@@ -4248,7 +4344,7 @@ function FlatReadingsTable({
                   className="block text-sm font-semibold text-[#55311c]"
                   htmlFor="edit-flat-reading-date"
                 >
-                  Data
+                  Date
                 </label>
                 <input
                   type="date"
@@ -4490,6 +4586,21 @@ function getResidentRoleLabel(cargo: number): string {
       return "Agent"
     default:
       return "Unknown"
+  }
+}
+
+function getResidentRoleEditToken(cargo: number): string {
+  switch (cargo) {
+    case 0:
+      return "owner1"
+    case 1:
+      return "owner2"
+    case 2:
+      return "tenant"
+    case 3:
+      return "agent"
+    default:
+      return "resident"
   }
 }
 
@@ -5195,7 +5306,7 @@ function TwilioContent() {
   const sendBulkSms = async () => {
     const body = messageBody.trim()
     if (!body) {
-      showErrorToast("Escreva a Message antes de enviar.")
+      showErrorToast("Write the message before sending.")
       return
     }
 
@@ -5256,7 +5367,7 @@ function TwilioContent() {
         failed += 1
         errors.push(
           `${recipient.nome} (${recipient.building_nome} ${recipient.flat_numero}): ${
-            error instanceof Error ? error.message : "erro ao enviar"
+            error instanceof Error ? error.message : "failed to send"
           }`,
         )
       }
@@ -5266,7 +5377,7 @@ function TwilioContent() {
     setSendReport({ success, failed, skipped, errors })
 
     if (success > 0) {
-      showSuccessToast(`${success} SMS enviado(s) com sucesso.`)
+      showSuccessToast(`${success} SMS sent successfully.`)
     }
     if (failed > 0 || skipped > 0) {
       showErrorToast(
@@ -5480,7 +5591,7 @@ function TwilioContent() {
             disabled={isSending}
             className="rounded bg-[#8c7569] px-5 py-2 font-semibold text-white transition-all duration-300 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {isSending ? "Enviando..." : "Enviar SMS em lote"}
+            {isSending ? "Sending..." : "Send bulk SMS"}
           </button>
           <button
             type="button"
@@ -5498,8 +5609,8 @@ function TwilioContent() {
               Resultado do envio
             </h4>
             <p className="mt-1 text-sm text-[rgba(0,0,0,0.7)]">
-              {sendReport.success} sucesso(s), {sendReport.failed} falha(s),{" "}
-              {sendReport.skipped} ignorado(s).
+              {sendReport.success} success(es), {sendReport.failed} failure(s),{" "}
+              {sendReport.skipped} skipped.
             </p>
 
             {sendReport.errors.length > 0 && (
@@ -5793,7 +5904,7 @@ function BinsContent() {
       link.click()
       document.body.removeChild(link)
       URL.revokeObjectURL(href)
-      showSuccessToast("Relat�rio gerado com sucesso.")
+      showSuccessToast("Report generated successfully.")
     } catch {
       showErrorToast("Failed to generate report.")
     } finally {
@@ -5952,7 +6063,7 @@ function BinsContent() {
             <thead>
               <tr className="bg-[#8c7569]">
                 <th className="border border-gray-300 px-4 py-3 text-left text-sm font-semibold text-white">
-                  Data
+                  Date
                 </th>
                 <th className="border border-gray-300 px-4 py-3 text-left text-sm font-semibold text-white">
                   Time
@@ -5962,9 +6073,6 @@ function BinsContent() {
                 </th>
                 <th className="border border-gray-300 px-4 py-3 text-left text-sm font-semibold text-white">
                   Status
-                </th>
-                <th className="border border-gray-300 px-4 py-3 text-left text-sm font-semibold text-white">
-                  Building
                 </th>
               </tr>
             </thead>
@@ -5985,15 +6093,12 @@ function BinsContent() {
                       ? "Late Collection"
                       : "Miss Collection"}
                   </td>
-                  <td className="border border-gray-300 px-4 py-3 text-[#55311c]">
-                    {item.building_nome}
-                  </td>
                 </tr>
               ))}
               {items.length === 0 && (
                 <tr>
                   <td
-                    colSpan={5}
+                    colSpan={4}
                     className="border border-gray-300 px-4 py-8 text-center text-[rgba(0,0,0,0.65)]"
                   >
                     No miss collection records found.
@@ -6006,7 +6111,7 @@ function BinsContent() {
 
         <div className="mt-6 flex items-center justify-between">
           <p className="text-sm text-[#55311c]">
-            Mostrando {items.length} de {count} registro(s)
+            Showing {items.length} of {count} record(s)
           </p>
           <div className="flex gap-2">
             <button
@@ -6015,7 +6120,7 @@ function BinsContent() {
               disabled={page === 0}
               className="rounded bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 hover:bg-[#55311c]"
             >
-              Anterior
+              Previous
             </button>
             <span className="flex items-center px-3 text-sm text-[#55311c]">
               {page + 1} / {totalPages}
@@ -6547,8 +6652,9 @@ function CaretakerSchedules({
 
 function FireAlarmSchedulePage() {
   const { showSuccessToast, showErrorToast } = useCustomToast()
-  const [selectedDate, setSelectedDate] = useState(() =>
-    snapToFireAlarmCycleDate(toDateInputValue()),
+  const [selectedDate, setSelectedDate] = useState(() => toDateInputValue())
+  const [calendarMonth, setCalendarMonth] = useState(() =>
+    toDateInputValue().slice(0, 7),
   )
   const [allLogs, setAllLogs] = useState<FireAlarmLogByDate>({})
   const [rows, setRows] = useState<
@@ -6598,6 +6704,71 @@ function FireAlarmSchedulePage() {
     () => Object.keys(allLogs).sort((a, b) => b.localeCompare(a)),
     [allLogs],
   )
+  const datesWithLogs = useMemo(() => {
+    const dates = new Set<string>()
+    Object.entries(allLogs).forEach(([date, savedRows]) => {
+      if (Object.values(savedRows || {}).some((row) => hasLogRowContent(row))) {
+        dates.add(date)
+      }
+    })
+    if (Object.values(rows).some((row) => hasLogRowContent(row))) {
+      dates.add(selectedDate)
+    }
+    return dates
+  }, [allLogs, rows, selectedDate])
+  const calendarMonthLabel = useMemo(() => {
+    const [yearRaw, monthRaw] = calendarMonth.split("-")
+    const year = Number(yearRaw)
+    const month = Number(monthRaw)
+    if (!year || !month) return calendarMonth
+    return new Date(Date.UTC(year, month - 1, 1)).toLocaleDateString("en-GB", {
+      month: "long",
+      year: "numeric",
+      timeZone: "UTC",
+    })
+  }, [calendarMonth])
+  const calendarDays = useMemo(() => {
+    const [yearRaw, monthRaw] = calendarMonth.split("-")
+    const year = Number(yearRaw)
+    const month = Number(monthRaw)
+    if (!year || !month) return [] as { isoDate: string | null; day: string }[]
+    const firstDay = new Date(Date.UTC(year, month - 1, 1))
+    const firstWeekday = (firstDay.getUTCDay() + 6) % 7
+    const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate()
+    const cells: { isoDate: string | null; day: string }[] = []
+
+    for (let i = 0; i < firstWeekday; i += 1) {
+      cells.push({ isoDate: null, day: "" })
+    }
+    for (let day = 1; day <= daysInMonth; day += 1) {
+      cells.push({
+        isoDate: `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
+        day: String(day),
+      })
+    }
+
+    return cells
+  }, [calendarMonth])
+
+  useEffect(() => {
+    const selectedMonth = selectedDate.slice(0, 7)
+    setCalendarMonth((previous) =>
+      previous === selectedMonth ? previous : selectedMonth,
+    )
+  }, [selectedDate])
+
+  const handleShiftCalendarMonth = (step: number) => {
+    setCalendarMonth((previous) => {
+      const [yearRaw, monthRaw] = previous.split("-")
+      const year = Number(yearRaw)
+      const month = Number(monthRaw)
+      if (!year || !month) return previous
+      const shifted = new Date(Date.UTC(year, month - 1 + step, 1))
+      const nextYear = shifted.getUTCFullYear()
+      const nextMonth = String(shifted.getUTCMonth() + 1).padStart(2, "0")
+      return `${nextYear}-${nextMonth}`
+    })
+  }
 
   async function handleSendReport() {
     if (reportDateFrom && reportDateTo && reportDateFrom > reportDateTo) {
@@ -6700,10 +6871,10 @@ function FireAlarmSchedulePage() {
         <div className="flex items-center justify-between rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
           <div>
             <h3 className="text-lg font-bold text-[#55311c]">
-              Historico do alarm schedule
+              Alarm schedule history
             </h3>
             <p className="text-sm text-[rgba(0,0,0,0.65)]">
-              Escolha uma data salva para abrir o registro.
+              Choose a saved date to open the record.
             </p>
           </div>
           <button
@@ -6711,7 +6882,7 @@ function FireAlarmSchedulePage() {
             onClick={() => setActiveView("schedule")}
             className="rounded-lg border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
           >
-            Voltar
+            Back
           </button>
         </div>
 
@@ -6808,16 +6979,15 @@ function FireAlarmSchedulePage() {
                     colSpan={4}
                     className="border border-[#e5e0dc] bg-white px-3 py-4 text-center text-sm text-[rgba(0,0,0,0.7)]"
                   >
-                    Nenhum registro salvo ainda.
+                    No saved records yet.
                   </td>
                 </tr>
               )}
               {historyDates.map((date) => {
                 const savedRows = allLogs[date] || getDefaultFireAlarmRows()
                 const rowsForDate = getFireAlarmScheduleRowsForDate(date)
-                const totalSaved = Object.values(savedRows).filter(
-                  (row) =>
-                    row.time.trim() || row.actionRequired || row.comment.trim(),
+                const totalSaved = rowsForDate.filter((entry) =>
+                  hasLogRowContent(savedRows[entry.buildingId]),
                 ).length
                 return (
                   <tr key={date} className="bg-white hover:bg-[#f8f5f3]">
@@ -6845,13 +7015,13 @@ function FireAlarmSchedulePage() {
                       </div>
                     </td>
                     <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
-                      {totalSaved} / 6
+                      {totalSaved} / {rowsForDate.length}
                     </td>
                     <td className="border border-[#e5e0dc] px-3 py-2 text-center text-sm">
                       <button
                         type="button"
                         onClick={() => {
-                          setSelectedDate(snapToFireAlarmCycleDate(date))
+                          setSelectedDate(date)
                           setActiveView("schedule")
                         }}
                         className="rounded border border-[#8c7569] px-3 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
@@ -6921,7 +7091,7 @@ function FireAlarmSchedulePage() {
           onClick={() => setActiveView("history")}
           className="self-start rounded-lg border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] sm:self-auto"
         >
-          Consultar historico
+          View history
         </button>
       </div>
 
@@ -6951,10 +7121,12 @@ function FireAlarmSchedulePage() {
             id="fire-alarm-date"
             type="date"
             value={selectedDate}
-            onChange={(event) =>
-              setSelectedDate(snapToFireAlarmCycleDate(event.target.value))
-            }
-            className="rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+            onChange={(event) => setSelectedDate(event.target.value)}
+            className={`rounded-lg border px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569] ${
+              datesWithLogs.has(selectedDate)
+                ? "border-[#5f9f7d] bg-[#eef7f1]"
+                : "border-[#d9d0ca] bg-white"
+            }`}
           />
         </div>
         <button
@@ -6966,6 +7138,69 @@ function FireAlarmSchedulePage() {
         >
           Next
         </button>
+      </div>
+
+      <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div>
+            <h4 className="text-sm font-semibold text-[#55311c]">
+              Alarm calendar navigation
+            </h4>
+            <p className="text-xs text-[rgba(0,0,0,0.65)]">
+              Green dates already have saved records.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => handleShiftCalendarMonth(-1)}
+              className="rounded border border-[#8c7569] px-2 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+            >
+              Prev month
+            </button>
+            <span className="text-xs font-semibold text-[#55311c]">
+              {calendarMonthLabel}
+            </span>
+            <button
+              type="button"
+              onClick={() => handleShiftCalendarMonth(1)}
+              className="rounded border border-[#8c7569] px-2 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+            >
+              Next month
+            </button>
+          </div>
+        </div>
+        <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.6)]">
+          {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((weekDay) => (
+            <div key={weekDay}>{weekDay}</div>
+          ))}
+        </div>
+        <div className="mt-1 grid grid-cols-7 gap-1">
+          {calendarDays.map((cell, index) => {
+            if (!cell.isoDate) {
+              return <div key={`empty-${index}`} className="h-8 rounded" />
+            }
+            const isoDate = cell.isoDate
+            const isSelected = isoDate === selectedDate
+            const hasRecord = datesWithLogs.has(isoDate)
+            return (
+              <button
+                key={isoDate}
+                type="button"
+                onClick={() => setSelectedDate(isoDate)}
+                className={`h-8 rounded border text-xs font-semibold transition-all duration-200 ${
+                  isSelected
+                    ? "border-[#55311c] bg-[#55311c] text-white"
+                    : hasRecord
+                      ? "border-[#5f9f7d] bg-[#eef7f1] text-[#2f6a4b] hover:bg-[#dff0e6]"
+                      : "border-[#d9d0ca] bg-white text-[#55311c] hover:bg-[#f0ebe7]"
+                }`}
+              >
+                {cell.day}
+              </button>
+            )
+          })}
+        </div>
       </div>
 
       <div className="overflow-x-auto">
@@ -7111,9 +7346,9 @@ function BuildingSchedulePage({
     snapScheduleDate(toDateInputValue()),
   )
   const [allLogs, setAllLogs] = useState<FireAlarmLogByDate>({})
-  const [rows, setRows] = useState<
-    Record<FireAlarmBuildingId, FireAlarmLogRow>
-  >(() => getDefaultFireAlarmRows())
+  const [rows, setRows] = useState<Record<string, FireAlarmLogRow>>(() =>
+    getDefaultRowsForSchedule(scheduleId),
+  )
   const [activeView, setActiveView] = useState<"schedule" | "history">(
     "schedule",
   )
@@ -7121,40 +7356,56 @@ function BuildingSchedulePage({
   const [reportDateTo, setReportDateTo] = useState("")
   const [reportEmail, setReportEmail] = useState("")
   const [isSendingReport, setIsSendingReport] = useState(false)
-  const initialLogs = getInitialLogsByScheduleId(scheduleId)
+  const initialLogs = useMemo(
+    () => getInitialLogsByScheduleId(scheduleId),
+    [scheduleId],
+  )
+  const emptyRows = useMemo(
+    () => getDefaultRowsForSchedule(scheduleId),
+    [scheduleId],
+  )
 
   useEffect(() => {
     try {
       const raw = localStorage.getItem(storageKey)
       if (!raw) {
-        localStorage.setItem(storageKey, JSON.stringify(initialLogs))
-        setAllLogs(initialLogs)
-        setRows(initialLogs[selectedDate] || getDefaultFireAlarmRows())
+        const normalizedInitialLogs =
+          scheduleId === "light"
+            ? normalizeLightScheduleLogs(initialLogs)
+            : initialLogs
+        localStorage.setItem(storageKey, JSON.stringify(normalizedInitialLogs))
+        setAllLogs(normalizedInitialLogs)
+        setRows(
+          normalizedInitialLogs[selectedDate] ||
+            (scheduleId === "light"
+              ? normalizeLightScheduleRows(emptyRows)
+              : emptyRows),
+        )
         return
       }
       const parsed = JSON.parse(raw) as FireAlarmLogByDate
-      const merged = mergeLogsWithInitialSeed(parsed, initialLogs)
+      const mergedSource =
+        scheduleId === "light" ? normalizeLightScheduleLogs(parsed) : parsed
+      const merged = mergeLogsWithInitialSeed(mergedSource, initialLogs)
       localStorage.setItem(storageKey, JSON.stringify(merged))
       setAllLogs(merged)
-      setRows(merged[selectedDate] || getDefaultFireAlarmRows())
+      setRows(
+        merged[selectedDate] ||
+          (scheduleId === "light"
+            ? normalizeLightScheduleRows(emptyRows)
+            : emptyRows),
+      )
     } catch {
       setAllLogs({})
-      setRows(getDefaultFireAlarmRows())
+      setRows(scheduleId === "light" ? normalizeLightScheduleRows(emptyRows) : emptyRows)
     }
-  }, [initialLogs, selectedDate, storageKey])
+  }, [emptyRows, initialLogs, scheduleId, selectedDate, storageKey])
 
   const repetition = useMemo(
     () => getFireAlarmRepetition(selectedDate),
     [selectedDate],
   )
-  const buildingRows = useMemo(
-    () =>
-      FIRE_ALARM_BUILDINGS.map((building) => ({
-        buildingId: building.id,
-        buildingLabel: building.label,
-      })),
-    [],
-  )
+  const buildingRows = useMemo(() => getBuildingsForSchedule(scheduleId), [scheduleId])
   const historyDates = useMemo(
     () => Object.keys(allLogs).sort((a, b) => b.localeCompare(a)),
     [allLogs],
@@ -7163,7 +7414,7 @@ function BuildingSchedulePage({
   const idPrefix = `${scheduleId}-schedule`
 
   const handleRowChange = (
-    buildingId: FireAlarmBuildingId,
+    buildingId: ScheduleBuildingId,
     key: keyof FireAlarmLogRow,
     value: string | boolean,
   ) => {
@@ -7225,7 +7476,11 @@ function BuildingSchedulePage({
     const reportRows: (string | number)[][] = []
 
     selectedDates.forEach((date) => {
-      const logRows = sourceLogs[date] || getDefaultFireAlarmRows()
+      const logRows =
+        sourceLogs[date] ||
+        (scheduleId === "light"
+          ? normalizeLightScheduleRows(emptyRows)
+          : emptyRows)
       buildingRows.forEach((entry) => {
         const log = logRows[entry.buildingId] || {
           time: "",
@@ -7288,7 +7543,7 @@ function BuildingSchedulePage({
           <div>
             <h3 className="text-lg font-bold text-[#55311c]">{title} history</h3>
             <p className="text-sm text-[rgba(0,0,0,0.65)]">
-              Escolha uma data salva para abrir o registro.
+              Choose a saved date to open the record.
             </p>
           </div>
           <button
@@ -7296,7 +7551,7 @@ function BuildingSchedulePage({
             onClick={() => setActiveView("schedule")}
             className="rounded-lg border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
           >
-            Voltar
+            Back
           </button>
         </div>
 
@@ -7393,15 +7648,18 @@ function BuildingSchedulePage({
                     colSpan={4}
                     className="border border-[#e5e0dc] bg-white px-3 py-4 text-center text-sm text-[rgba(0,0,0,0.7)]"
                   >
-                    Nenhum registro salvo ainda.
+                    No saved records yet.
                   </td>
                 </tr>
               )}
               {historyDates.map((date) => {
-                const savedRows = allLogs[date] || getDefaultFireAlarmRows()
-                const totalSaved = Object.values(savedRows).filter(
-                  (row) =>
-                    row.time.trim() || row.actionRequired || row.comment.trim(),
+                const savedRows =
+                  allLogs[date] ||
+                  (scheduleId === "light"
+                    ? normalizeLightScheduleRows(emptyRows)
+                    : emptyRows)
+                const totalSaved = buildingRows.filter((entry) =>
+                  hasLogRowContent(savedRows[entry.buildingId]),
                 ).length
                 return (
                   <tr key={date} className="bg-white hover:bg-[#f8f5f3]">
@@ -7428,7 +7686,7 @@ function BuildingSchedulePage({
                       </div>
                     </td>
                     <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
-                      {totalSaved} / 6
+                      {totalSaved} / {buildingRows.length}
                     </td>
                     <td className="border border-[#e5e0dc] px-3 py-2 text-center text-sm">
                       <button
@@ -7470,7 +7728,7 @@ function BuildingSchedulePage({
           onClick={() => setActiveView("history")}
           className="self-start rounded-lg border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] sm:self-auto"
         >
-          Consultar historico
+          View history
         </button>
       </div>
 
@@ -7898,7 +8156,7 @@ function CleanerSummary() {
           <thead>
             <tr className="bg-gray-200">
               <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700">
-                Data
+                Date
               </th>
               <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700">
                 Building
@@ -8105,7 +8363,7 @@ function CleanerRegister() {
                 className="block text-sm font-semibold text-[#55311c] mb-1"
                 htmlFor="cleaner-name"
               >
-                Nome
+                Name
               </label>
               <input
                 type="text"
@@ -8173,7 +8431,7 @@ function CleanerRegister() {
           <thead>
             <tr className="bg-gray-200">
               <th className="border border-gray-400 px-3 py-2 text-left text-sm font-bold text-gray-700">
-                Nome
+                Name
               </th>
               <th className="border border-gray-400 px-3 py-2 text-left text-sm font-bold text-gray-700">
                 Email
@@ -8641,7 +8899,7 @@ function CaretakerSummary() {
           <thead>
             <tr className="bg-gray-200">
               <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700">
-                Data
+                Date
               </th>
               <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700">
                 Building
@@ -8846,7 +9104,7 @@ function CaretakerRegister() {
                 className="block text-sm font-semibold text-[#55311c] mb-1"
                 htmlFor="caretaker-name"
               >
-                Nome
+                Name
               </label>
               <input
                 type="text"
@@ -8914,7 +9172,7 @@ function CaretakerRegister() {
           <thead>
             <tr className="bg-gray-200">
               <th className="border border-gray-400 px-3 py-2 text-left text-sm font-bold text-gray-700">
-                Nome
+                Name
               </th>
               <th className="border border-gray-400 px-3 py-2 text-left text-sm font-bold text-gray-700">
                 Email
@@ -8986,6 +9244,9 @@ function CaretakerRegister() {
 function ResidentsContent() {
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<EntityId | null>(null)
+  const [editContext, setEditContext] = useState<ResidentEditContext | null>(
+    null,
+  )
   const [currentPage, setCurrentPage] = useState(0)
   const [selectedBuilding, setSelectedBuilding] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState("")
@@ -9210,8 +9471,10 @@ function ResidentsContent() {
         onBack={() => {
           setShowForm(false)
           setEditingId(null)
+          setEditContext(null)
         }}
         editingId={editingId}
+        editContext={editContext}
       />
     )
   }
@@ -9226,6 +9489,7 @@ function ResidentsContent() {
           <button
             onClick={() => {
               setEditingId(null)
+              setEditContext(null)
               setShowForm(true)
             }}
             className="flex items-center gap-2 rounded-lg bg-[#8c7569] px-4 py-2 font-['Nunito',sans-serif] text-sm font-semibold text-white transition-all duration-300 hover:bg-[#55311c]"
@@ -9272,7 +9536,7 @@ function ResidentsContent() {
               className="block text-sm font-semibold text-[#55311c] mb-2"
               htmlFor="residents-building"
             >
-              Filtrar por Building
+              Filter by building
             </label>
             <select
               id="residents-building"
@@ -9293,7 +9557,7 @@ function ResidentsContent() {
               className="block text-sm font-semibold text-[#55311c] mb-2"
               htmlFor="residents-type"
             >
-              Filtrar por Tipo
+              Filter by type
             </label>
             <select
               id="residents-type"
@@ -9402,7 +9666,22 @@ function ResidentsContent() {
                             <button
                               onClick={() => {
                                 if (row.edit_target_id === null) return
+                                const targetResident =
+                                  row.owner_1 ??
+                                  row.owner_2 ??
+                                  row.tenant ??
+                                  row.agent ??
+                                  null
                                 setEditingId(row.edit_target_id)
+                                setEditContext({
+                                  editTitle: `Edit ${getResidentRoleEditToken(targetResident?.cargo ?? -1)}`,
+                                  flatResidents: {
+                                    owner_1: row.owner_1,
+                                    owner_2: row.owner_2,
+                                    tenant: row.tenant,
+                                    agent: row.agent,
+                                  },
+                                })
                                 setShowForm(true)
                               }}
                               className="mr-2 rounded-lg bg-[#8c7569] px-3 py-1 font-['Nunito',sans-serif] text-xs font-semibold text-white transition-all duration-300 hover:bg-[#55311c] disabled:opacity-50"
@@ -9427,7 +9706,7 @@ function ResidentsContent() {
                           Number
                         </th>
                         <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
-                          Nome
+                          Name
                         </th>
                         <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
                           Phone
@@ -9492,6 +9771,9 @@ function ResidentsContent() {
                             <button
                               onClick={() => {
                                 setEditingId(morador.id)
+                                setEditContext({
+                                  editTitle: `Edit ${getResidentRoleEditToken(morador.cargo)}`,
+                                })
                                 setShowForm(true)
                               }}
                               className="mr-2 rounded-lg bg-[#8c7569] px-3 py-1 font-['Nunito',sans-serif] text-xs font-semibold text-white transition-all duration-300 hover:bg-[#55311c]"
@@ -9511,8 +9793,8 @@ function ResidentsContent() {
             {/* Pagination */}
             <div className="mt-6 flex items-center justify-between">
               <div className="text-sm font-['Nunito',sans-serif] text-[#55311c]">
-                Mostrando {Math.min(currentPage * pageSize + 1, totalCount)} a{" "}
-                {Math.min((currentPage + 1) * pageSize, totalCount)} de{" "}
+                Showing {Math.min(currentPage * pageSize + 1, totalCount)} to {" "}
+                {Math.min((currentPage + 1) * pageSize, totalCount)} of{" "}
                 {totalCount} Residents
               </div>
               <div className="flex gap-2">
@@ -9522,7 +9804,7 @@ function ResidentsContent() {
                   type="button"
                   className="rounded-lg bg-[#8c7569] px-4 py-2 font-['Nunito',sans-serif] text-sm font-semibold text-white transition-all duration-200 disabled:opacity-50 hover:bg-[#55311c]"
                 >
-                  Anterior
+                  Previous
                 </button>
                 <div className="flex items-center gap-2">
                   {Array.from({ length: totalPages }, (_, i) => {
@@ -9565,9 +9847,11 @@ function ResidentsContent() {
 function AddResidentForm({
   onBack,
   editingId,
+  editContext,
 }: {
   onBack: () => void
   editingId: EntityId | null
+  editContext: ResidentEditContext | null
 }) {
   const [formData, setFormData] = useState({
     nome: "",
@@ -9576,11 +9860,17 @@ function AddResidentForm({
     cargo: 0,
     car1: "",
     car2: "",
-    car3: "",
     flat_id: "",
   })
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [flats, setFlats] = useState<Array<{ id: EntityId; label: string }>>([])
+  const flatResidentsPreview = editContext?.flatResidents
+  const hasFlatResidentsPreview = Boolean(
+    flatResidentsPreview?.owner_1 ||
+      flatResidentsPreview?.owner_2 ||
+      flatResidentsPreview?.tenant ||
+      flatResidentsPreview?.agent,
+  )
 
   const { data: buildingsData } = useQuery<ApiListResponse<Building>>({
     queryKey: ["buildings"],
@@ -9608,7 +9898,6 @@ function AddResidentForm({
             cargo: morador.cargo,
             car1: morador.car1 || "",
             car2: morador.car2 || "",
-            car3: morador.car3 || "",
             flat_id: String(morador.flat_id),
           })
         } catch (error) {
@@ -9668,10 +9957,9 @@ function AddResidentForm({
         nome: formData.nome,
         email: formData.email || null,
         mobile: formData.mobile || "",
-        cargo: formData.cargo,
+        ...(!editingId ? { cargo: formData.cargo } : {}),
         car1: formData.car1 || null,
         car2: formData.car2 || null,
-        car3: formData.car3 || null,
         flat_id: formData.flat_id,
       }
 
@@ -9709,16 +9997,62 @@ function AddResidentForm({
       <div className="rounded-lg bg-white p-8 shadow-md">
         <div className="mb-6 flex items-center justify-between">
           <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
-            {editingId ? "Edit Resident" : "New Resident"}
+            {editingId ? (editContext?.editTitle ?? "Edit resident") : "New Resident"}
           </h2>
           <button
             onClick={onBack}
             className="rounded-lg bg-gray-500 px-4 py-2 font-['Nunito',sans-serif] text-sm font-semibold text-white transition-all duration-300 hover:bg-gray-600"
             type="button"
           >
-            Voltar
+            Back
           </button>
         </div>
+
+        {editingId && hasFlatResidentsPreview && (
+          <div className="mb-6 rounded-lg border border-[#e5e0dc] bg-[#f9f7f5] p-4">
+            <h3 className="text-sm font-semibold text-[#55311c]">
+              Residents in this flat
+            </h3>
+            <div className="mt-2 grid gap-2 text-sm text-[#55311c] sm:grid-cols-2">
+              {flatResidentsPreview?.owner_1 && (
+                <p>
+                  <span className="font-semibold">Owner 1:</span>{" "}
+                  {flatResidentsPreview.owner_1.nome}
+                  {flatResidentsPreview.owner_1.mobile
+                    ? ` (${flatResidentsPreview.owner_1.mobile})`
+                    : ""}
+                </p>
+              )}
+              {flatResidentsPreview?.owner_2 && (
+                <p>
+                  <span className="font-semibold">Owner 2:</span>{" "}
+                  {flatResidentsPreview.owner_2.nome}
+                  {flatResidentsPreview.owner_2.mobile
+                    ? ` (${flatResidentsPreview.owner_2.mobile})`
+                    : ""}
+                </p>
+              )}
+              {flatResidentsPreview?.tenant && (
+                <p>
+                  <span className="font-semibold">Tenant:</span>{" "}
+                  {flatResidentsPreview.tenant.nome}
+                  {flatResidentsPreview.tenant.mobile
+                    ? ` (${flatResidentsPreview.tenant.mobile})`
+                    : ""}
+                </p>
+              )}
+              {flatResidentsPreview?.agent && (
+                <p>
+                  <span className="font-semibold">Agent:</span>{" "}
+                  {flatResidentsPreview.agent.nome}
+                  {flatResidentsPreview.agent.mobile
+                    ? ` (${flatResidentsPreview.agent.mobile})`
+                    : ""}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit}>
           <div className="grid gap-6 md:grid-cols-2">
@@ -9727,7 +10061,7 @@ function AddResidentForm({
                 className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
                 htmlFor="resident-nome"
               >
-                Nome *
+                Name *
               </label>
               <input
                 type="text"
@@ -9837,43 +10171,27 @@ function AddResidentForm({
               />
             </div>
 
-            <div>
-              <label
-                className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
-                htmlFor="resident-car3"
-              >
-                Carro 3
-              </label>
-              <input
-                type="text"
-                id="resident-car3"
-                name="car3"
-                value={formData.car3}
-                onChange={handleInputChange}
-                className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
-                placeholder="Placa do carro"
-              />
-            </div>
-
-            <div>
-              <label
-                className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
-                htmlFor="resident-cargo"
-              >
-                cargo
-              </label>
-              <select
-                id="resident-cargo"
-                name="cargo"
-                value={formData.cargo}
-                onChange={handleInputChange}
-                className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
-              >
-                <option value="0">Resident</option>
-                <option value="1">Owner</option>
-                <option value="2">Inquilino</option>
-              </select>
-            </div>
+            {!editingId && (
+              <div>
+                <label
+                  className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                  htmlFor="resident-cargo"
+                >
+                  cargo
+                </label>
+                <select
+                  id="resident-cargo"
+                  name="cargo"
+                  value={formData.cargo}
+                  onChange={handleInputChange}
+                  className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+                >
+                  <option value="0">Resident</option>
+                  <option value="1">Owner</option>
+                  <option value="2">Inquilino</option>
+                </select>
+              </div>
+            )}
           </div>
 
           <div className="mt-8 flex justify-end gap-4">

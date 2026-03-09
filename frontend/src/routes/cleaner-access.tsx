@@ -100,6 +100,9 @@ function CleanerAccess() {
     activeBuildingId &&
     buildingId &&
     String(activeBuildingId) === String(buildingId)
+  const hasOpenSessionForCurrentContext = Boolean(hasActiveSessionInBuilding)
+  const canOpenSession = !hasOpenSessionForCurrentContext
+  const canCloseSession = hasOpenSessionForCurrentContext
 
   useEffect(() => {
     if (!buildingId) return
@@ -141,10 +144,13 @@ function CleanerAccess() {
   }, [buildingId, hasExplicitOperation, hasUserSelected])
 
   useEffect(() => {
-    if (hasActiveSessionInBuilding && selectedOperation === "in") {
+    if (canCloseSession && selectedOperation === "in") {
       setSelectedOperation("out")
     }
-  }, [hasActiveSessionInBuilding, selectedOperation])
+    if (canOpenSession && selectedOperation === "out") {
+      setSelectedOperation("in")
+    }
+  }, [canCloseSession, canOpenSession, selectedOperation])
 
   const mutation = useMutation({
     mutationFn: (payload: any) =>
@@ -167,7 +173,15 @@ function CleanerAccess() {
     },
   })
 
-  const canSubmit = Boolean(operationLabel) && Boolean(buildingId)
+  const isSelectedOperationAllowed =
+    selectedOperation === "in"
+      ? canOpenSession
+      : selectedOperation === "out"
+        ? canCloseSession
+        : false
+
+  const canSubmit =
+    Boolean(operationLabel) && Boolean(buildingId) && isSelectedOperationAllowed
 
   const handleConfirm = () => {
     if (!canSubmit) {
@@ -209,7 +223,7 @@ function CleanerAccess() {
               Operation
             </p>
             <div className="flex flex-col rounded-2xl bg-[#f5f1ee] p-1 sm:flex-row sm:rounded-full">
-              {!hasActiveSessionInBuilding && (
+              {canOpenSession && (
                 <button
                   type="button"
                   onClick={() => {
@@ -225,27 +239,29 @@ function CleanerAccess() {
                   IN
                 </button>
               )}
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedOperation("out")
-                  setHasUserSelected(true)
-                }}
-                className={`flex-1 rounded-full px-4 py-2 text-sm font-semibold transition-all duration-200 ${
-                  selectedOperation === "out"
-                    ? "bg-[#8c7569] text-white shadow"
-                    : "text-[#55311c] hover:bg-[#e8e1dc]"
-                }`}
-              >
-                OUT
-              </button>
+              {canCloseSession && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedOperation("out")
+                    setHasUserSelected(true)
+                  }}
+                  className={`flex-1 rounded-full px-4 py-2 text-sm font-semibold transition-all duration-200 ${
+                    selectedOperation === "out"
+                      ? "bg-[#8c7569] text-white shadow"
+                      : "text-[#55311c] hover:bg-[#e8e1dc]"
+                  }`}
+                >
+                  OUT
+                </button>
+              )}
             </div>
             {isCheckingSession && (
               <p className="mt-2 text-xs text-[rgba(0,0,0,0.6)]">
-                Verificando sessao ativa...
+                Checking active session...
               </p>
             )}
-            {!isCheckingSession && hasActiveSessionInBuilding && (
+            {!isCheckingSession && canCloseSession && (
               <p className="mt-2 text-xs text-[rgba(0,0,0,0.6)]">
                 Active session in this building. Only OUT available.
               </p>

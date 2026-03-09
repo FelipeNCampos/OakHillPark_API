@@ -5163,9 +5163,18 @@ function RemindsContent() {
 
 function TwilioContent() {
   const { showErrorToast, showSuccessToast } = useCustomToast()
+  const [sendChannel, setSendChannel] = useState<"sms" | "email">("sms")
   const [selectedBuildingIds, setSelectedBuildingIds] = useState<string[]>([])
   const [selectedResidentIds, setSelectedResidentIds] = useState<string[]>([])
+  const [emailSubject, setEmailSubject] = useState("")
   const [messageBody, setMessageBody] = useState("")
+  const [emailAttachments, setEmailAttachments] = useState<
+    Array<{
+      file_name: string
+      file_data_base64: string
+      mime_type: string
+    }>
+  >([])
   const [residentSearch, setResidentSearch] = useState("")
   const [residentBuildingFilter, setResidentBuildingFilter] = useState("all")
   const [residentRoleFilter, setResidentRoleFilter] = useState("all")
@@ -5244,6 +5253,7 @@ function TwilioContent() {
         morador.building_nome,
         String(morador.flat_numero),
         morador.mobile ? String(morador.mobile) : "",
+        morador.email || "",
       ]
       return fields.some((value) => value.toLowerCase().includes(search))
     })
@@ -5306,18 +5316,77 @@ function TwilioContent() {
   const clearSelections = () => {
     setSelectedBuildingIds([])
     setSelectedResidentIds([])
+    setEmailAttachments([])
     setSendReport(null)
   }
 
-  const sendBulkSms = async () => {
+  const readFileAsAttachment = async (file: File) => {
+    const fileDataBase64 = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => {
+        if (typeof reader.result !== "string") {
+          reject(new Error("Could not read file"))
+          return
+        }
+        const base64 = reader.result.split(",", 2)[1]
+        if (!base64) {
+          reject(new Error("Invalid file data"))
+          return
+        }
+        resolve(base64)
+      }
+      reader.onerror = () => reject(new Error("Could not read file"))
+      reader.readAsDataURL(file)
+    })
+
+    return {
+      file_name: file.name,
+      file_data_base64: fileDataBase64,
+      mime_type: file.type || "application/octet-stream",
+    }
+  }
+
+  const handleAttachmentSelection = async (files: FileList | null) => {
+    if (!files || files.length === 0) return
+    try {
+      const attachments = await Promise.all(
+        Array.from(files).map((file) => readFileAsAttachment(file)),
+      )
+      setEmailAttachments((prev) => [...prev, ...attachments])
+    } catch (error) {
+      showErrorToast(
+        error instanceof Error ? error.message : "Could not read attachment",
+      )
+    }
+  }
+
+  const removeAttachment = (fileName: string, index: number) => {
+    setEmailAttachments((prev) =>
+      prev.filter(
+        (attachment, attachmentIndex) =>
+          !(attachment.file_name === fileName && attachmentIndex === index),
+      ),
+    )
+  }
+
+  const sendBulkMessage = async () => {
     const body = messageBody.trim()
     if (!body) {
-      showErrorToast("Write the message before sending.")
+      showErrorToast(
+        sendChannel === "sms"
+          ? "Write the message before sending."
+          : "Write the email message before sending.",
+      )
       return
     }
 
     if (recipients.length === 0) {
       showErrorToast("Select at least one resident or one building.")
+      return
+    }
+
+    if (sendChannel === "email" && !emailSubject.trim()) {
+      showErrorToast("Write the email subject before sending.")
       return
     }
 
@@ -5332,27 +5401,54 @@ function TwilioContent() {
     const base = OpenAPI.BASE || "http://localhost:8000"
 
     for (const recipient of recipients) {
-      const phoneTo = normalizePhoneToE164(recipient.mobile)
-      if (!phoneTo) {
-        skipped += 1
-        errors.push(
-          `${recipient.nome} (${recipient.building_nome} ${recipient.flat_numero}): invalid phone number`,
-        )
-        continue
-      }
-
       try {
-        const response = await fetch(`${base}/api/v1/utils/send-sms/`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${localStorage.getItem("access_token")}`,
-          },
-          body: JSON.stringify({
-            phone_to: phoneTo,
-            body,
-          }),
-        })
+        let response: Response
+
+        if (sendChannel === "sms") {
+          const phoneTo = normalizePhoneToE164(recipient.mobile)
+          if (!phoneTo) {
+            skipped += 1
+            errors.push(
+              `${recipient.nome} (${recipient.building_nome} ${recipient.flat_numero}): invalid phone number`,
+            )
+            continue
+          }
+
+          response = await fetch(`${base}/api/v1/utils/send-sms/`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${localStorage.getItem("access_token")}`,
+            },
+            body: JSON.stringify({
+              phone_to: phoneTo,
+              body,
+            }),
+          })
+        } else {
+          const emailTo = (recipient.email || "").trim()
+          if (!emailTo) {
+            skipped += 1
+            errors.push(
+              `${recipient.nome} (${recipient.building_nome} ${recipient.flat_numero}): invalid email`,
+            )
+            continue
+          }
+
+          response = await fetch(`${base}/api/v1/utils/send-email/`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${localStorage.getItem("access_token")}`,
+            },
+            body: JSON.stringify({
+              email_to: emailTo,
+              subject: emailSubject.trim(),
+              html_content: `<p>${body.replace(/\n/g, "<br />")}</p>`,
+              attachments: emailAttachments,
+            }),
+          })
+        }
 
         if (!response.ok) {
           let detail = `HTTP error ${response.status}`
@@ -5383,7 +5479,9 @@ function TwilioContent() {
     setSendReport({ success, failed, skipped, errors })
 
     if (success > 0) {
-      showSuccessToast(`${success} SMS sent successfully.`)
+      showSuccessToast(
+        `${success} ${sendChannel === "sms" ? "SMS" : "email(s)"} sent successfully.`,
+      )
     }
     if (failed > 0 || skipped > 0) {
       showErrorToast(
@@ -5397,7 +5495,7 @@ function TwilioContent() {
       <div className="mx-auto max-w-7xl">
         <div className="rounded-lg bg-white p-8 shadow-md">
           <p className="font-['Nunito',sans-serif] text-[#55311c]">
-            Loading Twilio data...
+            Loading messaging data...
           </p>
         </div>
       </div>
@@ -5407,9 +5505,35 @@ function TwilioContent() {
   return (
     <div className="mx-auto max-w-7xl space-y-6">
       <div className="rounded-lg bg-white p-8 shadow-md">
-        <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
-          Twilio SMS
-        </h2>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
+            Messaging
+          </h2>
+          <div className="flex rounded-full bg-[#f5f1ee] p-1">
+            <button
+              type="button"
+              onClick={() => setSendChannel("sms")}
+              className={`rounded-full px-4 py-2 text-sm font-semibold transition-all ${
+                sendChannel === "sms"
+                  ? "bg-[#8c7569] text-white"
+                  : "text-[#55311c] hover:bg-[#ebe4df]"
+              }`}
+            >
+              SMS
+            </button>
+            <button
+              type="button"
+              onClick={() => setSendChannel("email")}
+              className={`rounded-full px-4 py-2 text-sm font-semibold transition-all ${
+                sendChannel === "email"
+                  ? "bg-[#8c7569] text-white"
+                  : "text-[#55311c] hover:bg-[#ebe4df]"
+              }`}
+            >
+              Email
+            </button>
+          </div>
+        </div>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
@@ -5477,7 +5601,7 @@ function TwilioContent() {
           <input
             value={residentSearch}
             onChange={(e) => setResidentSearch(e.target.value)}
-            placeholder="Search by name, building, flat or phone"
+            placeholder="Search by name, building, flat, phone or email"
             className="mb-3 w-full rounded border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
           />
 
@@ -5533,7 +5657,9 @@ function TwilioContent() {
                     <p className="truncate text-xs text-[rgba(0,0,0,0.65)]">
                       {getResidentRoleLabel(morador.cargo)} |{" "}
                       {morador.building_nome} {morador.flat_numero} |{" "}
-                      {morador.mobile || "no phone"}
+                      {sendChannel === "sms"
+                        ? morador.mobile || "no phone"
+                        : morador.email || "no email"}
                     </p>
                   </div>
                 </label>
@@ -5547,7 +5673,7 @@ function TwilioContent() {
         <div className="mb-4 grid gap-3 md:grid-cols-3">
           <div className="rounded border border-[#e8ddd6] bg-[#f9f7f5] p-3">
             <p className="text-xs uppercase tracking-wide text-[#8c7569]">
-              Buildings selecionados
+              Selected buildings
             </p>
             <p className="text-2xl font-bold text-[#55311c]">
               {selectedBuildingIds.length}
@@ -5555,7 +5681,7 @@ function TwilioContent() {
           </div>
           <div className="rounded border border-[#e8ddd6] bg-[#f9f7f5] p-3">
             <p className="text-xs uppercase tracking-wide text-[#8c7569]">
-              Residents selecionados
+              Selected residents
             </p>
             <p className="text-2xl font-bold text-[#55311c]">
               {selectedResidentIds.length}
@@ -5571,33 +5697,108 @@ function TwilioContent() {
           </div>
         </div>
 
+        {sendChannel === "email" && (
+          <>
+            <label
+              className="mb-1 block text-sm font-semibold text-[#55311c]"
+              htmlFor="twilio-email-subject"
+            >
+              Subject
+            </label>
+            <input
+              id="twilio-email-subject"
+              value={emailSubject}
+              onChange={(e) => setEmailSubject(e.target.value)}
+              placeholder="Email subject"
+              className="mb-4 w-full rounded border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+            />
+          </>
+        )}
+
         <label
           className="mb-1 block text-sm font-semibold text-[#55311c]"
           htmlFor="twilio-message-body"
         >
-          Message
+          {sendChannel === "sms" ? "Message" : "Email body"}
         </label>
         <textarea
           id="twilio-message-body"
           value={messageBody}
           onChange={(e) => setMessageBody(e.target.value)}
           rows={5}
-          maxLength={1600}
-          placeholder="Digite sua Message..."
+          maxLength={sendChannel === "sms" ? 1600 : undefined}
+          placeholder={
+            sendChannel === "sms"
+              ? "Type your message..."
+              : "Type your email message..."
+          }
           className="w-full rounded border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
         />
         <p className="mt-1 text-xs text-[rgba(0,0,0,0.6)]">
-          {messageBody.length}/1600 caracteres
+          {sendChannel === "sms"
+            ? `${messageBody.length}/1600 characters`
+            : `${messageBody.length} characters`}
         </p>
+
+        {sendChannel === "email" && (
+          <div className="mt-4">
+            <input
+              id="twilio-email-attachments"
+              type="file"
+              multiple
+              onChange={(e) => handleAttachmentSelection(e.target.files)}
+              className="hidden"
+            />
+            <label
+              htmlFor="twilio-email-attachments"
+              className="inline-flex cursor-pointer rounded bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white hover:bg-[#55311c]"
+            >
+              Add files
+            </label>
+            <p className="mt-2 text-xs text-[rgba(0,0,0,0.6)]">
+              Attachments are enabled for email sending.
+            </p>
+            {emailAttachments.length > 0 && (
+              <div className="mt-3 space-y-2 rounded border border-[#e8ddd6] bg-[#f9f7f5] p-3">
+                {emailAttachments.map((attachment, index) => (
+                  <div
+                    key={`${attachment.file_name}-${index}`}
+                    className="flex items-center justify-between gap-3 rounded bg-white px-3 py-2"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-[#55311c]">
+                        {attachment.file_name}
+                      </p>
+                      <p className="text-xs text-[rgba(0,0,0,0.6)]">
+                        {attachment.mime_type}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removeAttachment(attachment.file_name, index)}
+                      className="rounded bg-gray-200 px-3 py-1 text-xs font-semibold text-[#55311c] hover:bg-gray-300"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="mt-4 flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={sendBulkSms}
+            onClick={sendBulkMessage}
             disabled={isSending}
             className="rounded bg-[#8c7569] px-5 py-2 font-semibold text-white transition-all duration-300 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {isSending ? "Sending..." : "Send bulk SMS"}
+            {isSending
+              ? "Sending..."
+              : sendChannel === "sms"
+                ? "Send bulk SMS"
+                : "Send bulk email"}
           </button>
           <button
             type="button"
@@ -5612,7 +5813,7 @@ function TwilioContent() {
         {sendReport && (
           <div className="mt-6 rounded border border-[#e8ddd6] bg-[#f9f7f5] p-4">
             <h4 className="font-['Nunito',sans-serif] text-lg font-bold text-[#55311c]">
-              Resultado do envio
+              Send result
             </h4>
             <p className="mt-1 text-sm text-[rgba(0,0,0,0.7)]">
               {sendReport.success} success(es), {sendReport.failed} failure(s),{" "}
@@ -9841,6 +10042,9 @@ function AddResidentForm({
     flatResidentEntries.find(
       (entry) => String(entry.resident.id) === String(activeEditingId),
     )?.resident ?? null
+  const shouldShowCarFields = activeEditingId
+    ? activePreviewResident?.cargo === 0
+    : Number(formData.cargo) === 0
   const activeEditTitle = activePreviewResident
     ? `Edit ${getResidentRoleEditToken(activePreviewResident.cargo)}`
     : editContext?.editTitle ?? "Edit resident"
@@ -9935,8 +10139,12 @@ function AddResidentForm({
         email: formData.email || null,
         mobile: formData.mobile || "",
         ...(!activeEditingId ? { cargo: formData.cargo } : {}),
-        car1: formData.car1 || null,
-        car2: formData.car2 || null,
+        ...(shouldShowCarFields
+          ? {
+              car1: formData.car1 || null,
+              car2: formData.car2 || null,
+            }
+          : {}),
         flat_id: formData.flat_id,
       }
 
@@ -10103,41 +10311,45 @@ function AddResidentForm({
               </select>
             </div>
 
-            <div>
-              <label
-                className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
-                htmlFor="resident-car1"
-              >
-                Car 1
-              </label>
-              <input
-                type="text"
-                id="resident-car1"
-                name="car1"
-                value={formData.car1}
-                onChange={handleInputChange}
-                className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
-                placeholder="Car registration"
-              />
-            </div>
+            {shouldShowCarFields && (
+              <>
+                <div>
+                  <label
+                    className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                    htmlFor="resident-car1"
+                  >
+                    Car 1
+                  </label>
+                  <input
+                    type="text"
+                    id="resident-car1"
+                    name="car1"
+                    value={formData.car1}
+                    onChange={handleInputChange}
+                    className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+                    placeholder="Car registration"
+                  />
+                </div>
 
-            <div>
-              <label
-                className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
-                htmlFor="resident-car2"
-              >
-                Car 2
-              </label>
-              <input
-                type="text"
-                id="resident-car2"
-                name="car2"
-                value={formData.car2}
-                onChange={handleInputChange}
-                className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
-                placeholder="Car registration"
-              />
-            </div>
+                <div>
+                  <label
+                    className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                    htmlFor="resident-car2"
+                  >
+                    Car 2
+                  </label>
+                  <input
+                    type="text"
+                    id="resident-car2"
+                    name="car2"
+                    value={formData.car2}
+                    onChange={handleInputChange}
+                    className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+                    placeholder="Car registration"
+                  />
+                </div>
+              </>
+            )}
 
             {!activeEditingId && (
               <div>

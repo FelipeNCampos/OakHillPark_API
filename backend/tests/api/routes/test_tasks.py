@@ -146,7 +146,10 @@ def test_manager_creates_task_without_assigned_user(
     )
     assert create_task.status_code == 200
     payload = create_task.json()
-    assert payload["assigned_to_user_id"] == str(caretaker.id)
+    assigned_user = db.get(User, payload["assigned_to_user_id"])
+    assert assigned_user is not None
+    assert assigned_user.cargo == 1
+    assert assigned_user.condominio_id == caretaker.condominio_id
     assert re.fullmatch(r"task-\d{3,}", payload["code"])
 
 
@@ -187,3 +190,99 @@ def test_task_code_auto_increment(client: TestClient, db: Session) -> None:
     second_match = re.fullmatch(r"task-(\d{3,})", second_code)
     assert second_match
     assert int(second_match.group(1)) == int(first_match.group(1)) + 1
+
+
+def test_task_with_creation_photo_requires_completion_photo(
+    client: TestClient, db: Session
+) -> None:
+    _, _, caretaker = _ensure_condominio_and_users(db)
+
+    manager_headers = user_authentication_headers(
+        client=client,
+        email=settings.FIRST_SUPERUSER,
+        password=settings.FIRST_SUPERUSER_PASSWORD,
+    )
+
+    create_task = client.post(
+        f"{settings.API_V1_STR}/tasks/",
+        headers=manager_headers,
+        json={
+            "title": "Photo-based task",
+            "description": "",
+            "image_data": "data:image/png;base64,AAA",
+            "assigned_to_user_id": str(caretaker.id),
+        },
+    )
+    assert create_task.status_code == 200
+    payload = create_task.json()
+    assert payload["cover_image_data"] == "data:image/png;base64,AAA"
+    assert payload["requires_completion_image"] is True
+
+    caretaker_password = random_lower_string()
+    caretaker = crud.update_user(
+        session=db, db_user=caretaker, user_in=UserUpdate(password=caretaker_password)
+    )
+    caretaker_headers = user_authentication_headers(
+        client=client,
+        email=caretaker.email,
+        password=caretaker_password,
+    )
+
+    start_task = client.patch(
+        f"{settings.API_V1_STR}/tasks/{payload['id']}/status",
+        headers=caretaker_headers,
+        json={"status": "in_progress"},
+    )
+    assert start_task.status_code == 200
+
+    finish_without_photo = client.patch(
+        f"{settings.API_V1_STR}/tasks/{payload['id']}/status",
+        headers=caretaker_headers,
+        json={"status": "done"},
+    )
+    assert finish_without_photo.status_code == 400
+    assert (
+        finish_without_photo.json()["detail"]
+        == "A completion photo is required to finish this task"
+    )
+
+    finish_with_photo = client.patch(
+        f"{settings.API_V1_STR}/tasks/{payload['id']}/status",
+        headers=caretaker_headers,
+        json={"status": "done", "image_data": "data:image/png;base64,BBB"},
+    )
+    assert finish_with_photo.status_code == 200
+    assert finish_with_photo.json()["status"] == "done"
+
+    reopen_after_done = client.patch(
+        f"{settings.API_V1_STR}/tasks/{payload['id']}/status",
+        headers=caretaker_headers,
+        json={"status": "paused"},
+    )
+    assert reopen_after_done.status_code == 400
+    assert (
+        reopen_after_done.json()["detail"]
+        == "Completed tasks cannot be changed by caretaker"
+    )
+
+    message_after_done = client.post(
+        f"{settings.API_V1_STR}/tasks/{payload['id']}/messages",
+        headers=caretaker_headers,
+        json={"text": "late update"},
+    )
+    assert message_after_done.status_code == 400
+    assert (
+        message_after_done.json()["detail"]
+        == "Completed tasks cannot be changed by caretaker"
+    )
+
+    messages_response = client.get(
+        f"{settings.API_V1_STR}/tasks/{payload['id']}/messages",
+        headers=manager_headers,
+    )
+    assert messages_response.status_code == 200
+    assert any(
+        message["image_data"] == "data:image/png;base64,BBB"
+        and "Done" in (message.get("text") or "")
+        for message in messages_response.json()["data"]
+    )

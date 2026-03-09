@@ -5,10 +5,16 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic.networks import EmailStr
 
 from app.api.deps import CurrentUser, get_current_active_superuser
-from app.models import Message, ReportEmailCreate, SMSNotificationCreate
+from app.models import (
+    EmailNotificationCreate,
+    Message,
+    ReportEmailCreate,
+    SMSNotificationCreate,
+)
 from app.utils import (
     generate_test_email,
     send_email,
+    send_email_with_attachments,
     send_email_with_attachment,
     send_sms_notification,
 )
@@ -59,6 +65,62 @@ def send_sms(payload: SMSNotificationCreate, current_user: CurrentUser) -> Messa
         raise HTTPException(status_code=403, detail="Not enough permissions")
     sid = send_sms_notification(phone_to=payload.phone_to, body=payload.body)
     return Message(message=f"SMS sent (sid={sid})")
+
+
+@router.post(
+    "/send-email/",
+    status_code=201,
+)
+def send_email_notification(
+    payload: EmailNotificationCreate, current_user: CurrentUser
+) -> Message:
+    """
+    Send email notifications with optional attachments (manager or superuser).
+    """
+    if not current_user.is_superuser and (current_user.cargo or 0) < 1:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    attachments: list[dict[str, str | bytes]] = []
+    total_size = 0
+    for attachment in payload.attachments:
+        try:
+            file_bytes = base64.b64decode(attachment.file_data_base64, validate=True)
+        except (binascii.Error, ValueError):
+            raise HTTPException(status_code=422, detail="Invalid attachment file_data_base64")
+
+        if not file_bytes:
+            raise HTTPException(status_code=422, detail="Empty attachment file")
+        if len(file_bytes) > 10 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Attachment file too large")
+
+        total_size += len(file_bytes)
+        if total_size > 25 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Total attachments too large")
+
+        attachments.append(
+            {
+                "file_name": attachment.file_name.strip(),
+                "file_bytes": file_bytes,
+                "mime_type": attachment.mime_type or "application/octet-stream",
+            }
+        )
+
+    html_content = payload.html_content.strip() or "<p>Hello,</p><p>Please see the attached files.</p>"
+    try:
+        send_email_with_attachments(
+            email_to=str(payload.email_to),
+            subject=payload.subject.strip(),
+            html_content=html_content,
+            attachments=attachments,
+        )
+    except AssertionError:
+        raise HTTPException(
+            status_code=400,
+            detail="Email is not configured. Set SMTP_HOST and EMAILS_FROM_EMAIL.",
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    return Message(message="Email sent successfully")
 
 
 @router.post(

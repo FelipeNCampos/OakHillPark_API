@@ -29,6 +29,7 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 TASK_ALLOWED_STATUSES = {"todo", "in_progress", "paused", "done"}
 STATUS_EVENT_PREFIX = "[STATUS]"
+COVER_IMAGE_PREFIX = "[COVER_IMAGE]"
 TASK_CODE_PATTERN = re.compile(r"^task-(\d+)$")
 
 
@@ -115,6 +116,7 @@ def _resolve_active_caretaker_user(
 
 
 def _task_to_public(session: SessionDep, task: Task) -> TaskPublic:
+    cover_image_data = _get_task_cover_image_data(session, task.id)
     assigned_user = session.get(User, task.assigned_to_user_id)
     assigned_name = (
         assigned_user.full_name
@@ -127,6 +129,8 @@ def _task_to_public(session: SessionDep, task: Task) -> TaskPublic:
         code=task.code,
         title=task.title,
         description=task.description,
+        cover_image_data=cover_image_data,
+        requires_completion_image=bool(cover_image_data),
         status=task.status,
         condominio_id=task.condominio_id,
         created_by_user_id=task.created_by_user_id,
@@ -136,6 +140,21 @@ def _task_to_public(session: SessionDep, task: Task) -> TaskPublic:
         created_at=task.created_at,
         updated_at=task.updated_at,
     )
+
+
+def _get_task_cover_image_data(session: SessionDep, task_id) -> str | None:
+    statement = (
+        select(TaskMessage.image_data)
+        .where(
+            TaskMessage.task_id == task_id,
+            TaskMessage.text.is_not(None),
+            TaskMessage.text.like(f"{COVER_IMAGE_PREFIX}%"),
+            TaskMessage.image_data.is_not(None),
+        )
+        .order_by(TaskMessage.created_at.asc())
+        .limit(1)
+    )
+    return session.exec(statement).first()
 
 
 def _next_task_code(session: SessionDep, condominio_id) -> str:
@@ -165,6 +184,14 @@ def _check_task_access(task: Task, current_user: User) -> None:
         return
 
     raise HTTPException(status_code=403, detail="Not enough permissions")
+
+
+def _ensure_caretaker_can_modify_task(task: Task, current_user: User) -> None:
+    if _is_caretaker(current_user) and task.status == "done":
+        raise HTTPException(
+            status_code=400,
+            detail="Completed tasks cannot be changed by caretaker",
+        )
 
 
 def _status_label(status: str) -> str:
@@ -364,6 +391,8 @@ def create_task(
     if caretaker.condominio_id != condominio_id:
         raise HTTPException(status_code=400, detail="Caretaker outside this condominio")
 
+    cover_image_data = payload.image_data.strip() if payload.image_data else None
+
     for _attempt in range(3):
         now = datetime.now(timezone.utc)
         task = Task(
@@ -379,6 +408,18 @@ def create_task(
         )
         session.add(task)
         try:
+            session.flush()
+            if cover_image_data:
+                session.add(
+                    TaskMessage(
+                        task_id=task.id,
+                        sender_user_id=current_user.id,
+                        sender_role="manager",
+                        text=f"{COVER_IMAGE_PREFIX} Creation photo",
+                        image_data=cover_image_data,
+                        created_at=now,
+                    )
+                )
             session.commit()
             session.refresh(task)
             return _task_to_public(session, task)
@@ -443,6 +484,7 @@ def read_tasks(
 
     data = []
     for task in tasks:
+        cover_image_data = _get_task_cover_image_data(session, task.id)
         assigned_user = assigned_user_map.get(task.assigned_to_user_id)
         assigned_name = (
             assigned_user.full_name
@@ -456,6 +498,8 @@ def read_tasks(
                 code=task.code,
                 title=task.title,
                 description=task.description,
+                cover_image_data=cover_image_data,
+                requires_completion_image=bool(cover_image_data),
                 status=task.status,
                 condominio_id=task.condominio_id,
                 created_by_user_id=task.created_by_user_id,
@@ -489,6 +533,7 @@ def update_task_status(
         raise HTTPException(status_code=404, detail="Task not found")
 
     _check_task_access(task, current_user)
+    _ensure_caretaker_can_modify_task(task, current_user)
 
     next_status = payload.status.strip().lower()
     if next_status not in TASK_ALLOWED_STATUSES:
@@ -496,6 +541,19 @@ def update_task_status(
 
     if _is_caretaker(current_user) and task.assigned_to_user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    image_data = payload.image_data.strip() if payload.image_data else None
+    requires_completion_image = bool(_get_task_cover_image_data(session, task.id))
+    if (
+        next_status == "done"
+        and _is_caretaker(current_user)
+        and requires_completion_image
+        and not image_data
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="A completion photo is required to finish this task",
+        )
 
     previous_status = task.status
     task.status = next_status
@@ -512,7 +570,7 @@ def update_task_status(
                 f"{STATUS_EVENT_PREFIX} {_status_label(previous_status)} -> "
                 f"{_status_label(next_status)}"
             ),
-            image_data=None,
+            image_data=image_data if next_status == "done" else None,
             created_at=task.updated_at,
         )
         session.add(status_event)
@@ -594,6 +652,7 @@ def create_task_message(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     _check_task_access(task, current_user)
+    _ensure_caretaker_can_modify_task(task, current_user)
 
     text = payload.text.strip() if payload.text else None
     image_data = payload.image_data.strip() if payload.image_data else None

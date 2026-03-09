@@ -12,6 +12,8 @@ type Task = {
   code: string
   title: string
   description: string
+  cover_image_data?: string | null
+  requires_completion_image: boolean
   status: TaskStatus
   assigned_to_user_id: string
   assigned_to_name: string
@@ -100,6 +102,7 @@ const statusLabel: Record<TaskStatus, string> = {
 }
 
 const STATUS_EVENT_PREFIX = "[STATUS]"
+const COVER_IMAGE_PREFIX = "[COVER_IMAGE]"
 
 const formatSpentTime = (seconds: number) => {
   const safeSeconds = Math.max(0, Math.floor(seconds || 0))
@@ -115,7 +118,7 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null)
   const [newTitle, setNewTitle] = useState("")
-  const [newDescription, setNewDescription] = useState("")
+  const [newImageData, setNewImageData] = useState<string | null>(null)
   const [chatText, setChatText] = useState("")
   const [chatImageData, setChatImageData] = useState<string | null>(null)
 
@@ -166,7 +169,9 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
   const chatMessages = useMemo(
     () =>
       allMessages.filter(
-        (msg) => !msg.text || !String(msg.text).startsWith(STATUS_EVENT_PREFIX),
+        (msg) =>
+          (!msg.text || !String(msg.text).startsWith(STATUS_EVENT_PREFIX)) &&
+          (!msg.text || !String(msg.text).startsWith(COVER_IMAGE_PREFIX)),
       ),
     [allMessages],
   )
@@ -177,13 +182,14 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
         method: "POST",
         body: {
           title: newTitle.trim(),
-          description: newDescription.trim(),
+          description: "",
+          image_data: newImageData,
         },
       }),
     onSuccess: () => {
-      showSuccessToast("Task criada")
+      showSuccessToast("Task created")
       setNewTitle("")
-      setNewDescription("")
+      setNewImageData(null)
       queryClient.invalidateQueries({ queryKey: ["tasks"] })
     },
     onError: (error: unknown) => {
@@ -194,12 +200,21 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
   })
 
   const updateStatusMutation = useMutation({
-    mutationFn: ({ taskId, status }: { taskId: string; status: TaskStatus }) =>
+    mutationFn: ({
+      taskId,
+      status,
+      imageData,
+    }: {
+      taskId: string
+      status: TaskStatus
+      imageData?: string | null
+    }) =>
       apiCall(`/api/v1/tasks/${taskId}/status`, {
         method: "PATCH",
-        body: { status },
+        body: { status, image_data: imageData || null },
       }),
     onSuccess: () => {
+      setChatImageData(null)
       queryClient.invalidateQueries({ queryKey: ["tasks"] })
       if (selectedTaskId) {
         queryClient.invalidateQueries({
@@ -246,11 +261,18 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
     createTaskMutation.mutate()
   }
 
-  const handleSelectImage = (file: File | null) => {
+  const handleSelectImage = (
+    file: File | null,
+    target: "create" | "chat" = "chat",
+  ) => {
     if (!file) return
     const reader = new FileReader()
     reader.onload = () => {
       if (typeof reader.result === "string") {
+        if (target === "create") {
+          setNewImageData(reader.result)
+          return
+        }
         setChatImageData(reader.result)
       }
     }
@@ -259,6 +281,10 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
 
   const handleSendMessage = () => {
     if (!selectedTaskId) return
+    if (!isManager && selectedTask?.status === "done") {
+      showErrorToast("Completed tasks are locked for the caretaker")
+      return
+    }
     if (!chatText.trim() && !chatImageData) {
       showErrorToast("Type a message or attach an image")
       return
@@ -268,6 +294,18 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
 
   const moveTaskToStatus = (task: Task, nextStatus: TaskStatus) => {
     if (task.status === nextStatus || updateStatusMutation.isPending) return
+    if (!isManager && task.status === "done") return
+    if (
+      nextStatus === "done" &&
+      !isManager &&
+      task.requires_completion_image
+    ) {
+      openTaskPopup(task.id)
+      showErrorToast(
+        "Attach a completion photo in the task panel to mark this task as done",
+      )
+      return
+    }
     updateStatusMutation.mutate({ taskId: task.id, status: nextStatus })
   }
 
@@ -294,6 +332,35 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
     setChatText("")
     setChatImageData(null)
   }
+
+  const handleCompleteSelectedTask = () => {
+    if (!selectedTaskId || !selectedTask) return
+    if (!isManager && selectedTask.status === "done") {
+      showErrorToast("Completed tasks are locked for the caretaker")
+      return
+    }
+    if (
+      !isManager &&
+      selectedTask.requires_completion_image &&
+      !chatImageData
+    ) {
+      showErrorToast("A completion photo is required to finish this task")
+      return
+    }
+    updateStatusMutation.mutate({
+      taskId: selectedTaskId,
+      status: "done",
+      imageData: chatImageData,
+    })
+  }
+
+  const canMarkTaskAsDone = (task: Task) =>
+    task.status !== "done" &&
+    (isManager || task.status === "in_progress" || task.status === "paused")
+
+  const isCaretakerTaskLocked = Boolean(
+    selectedTask && !isManager && selectedTask.status === "done",
+  )
 
   const renderStatusActions = (task: Task) => {
     if (task.status === "done") return null
@@ -324,16 +391,18 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
             Pause
           </button>
         )}
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation()
-            moveTaskToStatus(task, "done")
-          }}
-          className="rounded bg-emerald-600 px-2 py-1 text-xs font-semibold text-white hover:bg-emerald-700"
-        >
-          Done
-        </button>
+        {canMarkTaskAsDone(task) && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              moveTaskToStatus(task, "done")
+            }}
+            className="rounded bg-emerald-600 px-2 py-1 text-xs font-semibold text-white hover:bg-emerald-700"
+          >
+            Done
+          </button>
+        )}
       </div>
     )
   }
@@ -356,13 +425,43 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
               placeholder="Title"
               className="rounded border border-[#ddd] px-3 py-2 text-black"
             />
-            <input
-              value={newDescription}
-              onChange={(e) => setNewDescription(e.target.value)}
-              placeholder="Description"
-              className="rounded border border-[#ddd] px-3 py-2 text-black"
-            />
+            <div className="rounded border border-[#ddd] px-3 py-2">
+              <input
+                id="task-create-image-input"
+                type="file"
+                accept="image/*"
+                onChange={(e) =>
+                  handleSelectImage(e.target.files?.[0] || null, "create")
+                }
+                className="hidden"
+              />
+              <label
+                htmlFor="task-create-image-input"
+                className="cursor-pointer text-sm font-semibold text-[#55311c]"
+              >
+                Add cover photo
+              </label>
+              <p className="mt-1 text-xs text-[rgba(0,0,0,0.6)]">
+                {newImageData ? "1 photo selected" : "No photo selected"}
+              </p>
+            </div>
           </div>
+          {newImageData && (
+            <div className="mt-3 rounded border border-[#ddd] p-2">
+              <img
+                src={newImageData}
+                alt="Task cover preview"
+                className="max-h-48 rounded border border-[#ddd]"
+              />
+              <button
+                type="button"
+                onClick={() => setNewImageData(null)}
+                className="mt-2 rounded bg-gray-200 px-3 py-1 text-xs font-semibold text-[#55311c] hover:bg-gray-300"
+              >
+                Remove photo
+              </button>
+            </div>
+          )}
           <button
             type="button"
             onClick={handleCreateTask}
@@ -395,8 +494,12 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
                   key={task.id}
                   role="button"
                   tabIndex={0}
-                  draggable
+                  draggable={isManager || task.status !== "done"}
                   onDragStart={(e) => {
+                    if (!isManager && task.status === "done") {
+                      e.preventDefault()
+                      return
+                    }
                     e.dataTransfer.setData("text/plain", task.id)
                     setDraggingTaskId(task.id)
                   }}
@@ -414,6 +517,13 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
                       : "border-[#e6ddd7] bg-white hover:bg-[#faf7f4]"
                   }`}
                 >
+                  {task.cover_image_data && (
+                    <img
+                      src={task.cover_image_data}
+                      alt={`${task.title} cover`}
+                      className="mb-3 h-32 w-full rounded object-cover"
+                    />
+                  )}
                   <p className="text-[11px] font-semibold uppercase tracking-wide text-[#8c7569]">
                     Spent: {formatSpentTime(task.spent_seconds)}
                   </p>
@@ -421,9 +531,11 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
                     {task.code}
                   </p>
                   <p className="font-semibold text-[#55311c]">{task.title}</p>
-                  <p className="mt-1 line-clamp-2 text-xs text-[rgba(0,0,0,0.65)]">
-                    {task.description || "No description"}
-                  </p>
+                  {!task.cover_image_data && (
+                    <p className="mt-1 line-clamp-2 text-xs text-[rgba(0,0,0,0.65)]">
+                      {task.description || "No description"}
+                    </p>
+                  )}
                   <p className="mt-2 text-xs text-[#8c7569]">
                     Assigned: {task.assigned_to_name}
                   </p>
@@ -446,9 +558,17 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
                 <h3 className="text-lg font-bold text-[#55311c]">
                   {selectedTask.code} - {selectedTask.title}
                 </h3>
-                <p className="text-sm text-[rgba(0,0,0,0.7)]">
-                  {selectedTask.description || "No description"}
-                </p>
+                {selectedTask.cover_image_data ? (
+                  <img
+                    src={selectedTask.cover_image_data}
+                    alt={`${selectedTask.title} cover`}
+                    className="mt-3 max-h-60 w-full rounded border border-[#ddd] object-cover sm:max-w-xl"
+                  />
+                ) : (
+                  <p className="text-sm text-[rgba(0,0,0,0.7)]">
+                    {selectedTask.description || "No description"}
+                  </p>
+                )}
               </div>
               <button
                 type="button"
@@ -470,8 +590,15 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
                       <p className="text-xs font-semibold text-[#55311c]">
                         {event.text?.replace(STATUS_EVENT_PREFIX, "").trim()}
                       </p>
+                      {event.image_data && (
+                        <img
+                          src={event.image_data}
+                          alt="Task completion evidence"
+                          className="mt-2 max-h-48 rounded border border-[#ddd]"
+                        />
+                      )}
                       <p className="mt-1 text-xs text-[rgba(0,0,0,0.55)]">
-                        {event.sender_name} •{" "}
+                        {event.sender_name} |{" "}
                         {new Date(event.created_at).toLocaleString("en-GB")}
                       </p>
                     </div>
@@ -486,6 +613,13 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
 
               <div className="space-y-3 lg:col-span-2">
                 <h4 className="text-lg font-bold text-[#55311c]">Task Chat</h4>
+                {!isManager &&
+                  selectedTask.requires_completion_image &&
+                  selectedTask.status !== "done" && (
+                    <div className="rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                      A completion photo is required to finish this task.
+                    </div>
+                  )}
 
                 <div className="max-h-[40vh] space-y-3 overflow-y-auto rounded border border-[#e6ddd7] p-3">
                   {messagesLoading && (
@@ -524,69 +658,92 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
                   )}
                 </div>
 
-                <div className="space-y-2">
-                  <textarea
-                    value={chatText}
-                    onChange={(e) => setChatText(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key !== "Enter") return
-                      if (e.shiftKey) return
-                      e.preventDefault()
-                      if (!sendMessageMutation.isPending) {
-                        handleSendMessage()
-                      }
-                    }}
-                    rows={3}
-                    placeholder="Digite uma mensagem..."
-                    className="w-full rounded border border-[#ddd] px-3 py-2 text-black"
-                  />
-                  <div className="flex flex-wrap items-center gap-2">
-                    <input
-                      id="task-chat-image-input"
-                      type="file"
-                      accept="image/*"
-                      onChange={(e) =>
-                        handleSelectImage(e.target.files?.[0] || null)
-                      }
-                      className="hidden"
-                    />
-                    <label
-                      htmlFor="task-chat-image-input"
-                      className="cursor-pointer rounded bg-[#8c7569] px-3 py-2 text-xs font-semibold text-white hover:bg-[#55311c]"
-                    >
-                      Send media
-                    </label>
-                    <span className="text-xs text-[rgba(0,0,0,0.7)]">
-                      {chatImageData ? "1 file selected" : "No media selected"}
-                    </span>
+                {isCaretakerTaskLocked ? (
+                  <div className="rounded border border-[#e6ddd7] bg-[#f9f6f3] p-3 text-sm text-[rgba(0,0,0,0.7)]">
+                    Completed tasks are locked for the caretaker.
                   </div>
-                  {chatImageData && (
-                    <div className="rounded border border-[#ddd] p-2">
-                      <img
-                        src={chatImageData}
-                        alt="Preview"
-                        className="max-h-48 rounded border border-[#ddd]"
+                ) : (
+                  <div className="space-y-2">
+                    <textarea
+                      value={chatText}
+                      onChange={(e) => setChatText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key !== "Enter") return
+                        if (e.shiftKey) return
+                        e.preventDefault()
+                        if (!sendMessageMutation.isPending) {
+                          handleSendMessage()
+                        }
+                      }}
+                      rows={3}
+                      placeholder="Type a message..."
+                      className="w-full rounded border border-[#ddd] px-3 py-2 text-black"
+                    />
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input
+                        id="task-chat-image-input"
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) =>
+                          handleSelectImage(
+                            e.target.files?.[0] || null,
+                            "chat",
+                          )
+                        }
+                        className="hidden"
                       />
+                      <label
+                        htmlFor="task-chat-image-input"
+                        className="cursor-pointer rounded bg-[#8c7569] px-3 py-2 text-xs font-semibold text-white hover:bg-[#55311c]"
+                      >
+                        Send media
+                      </label>
+                      <span className="text-xs text-[rgba(0,0,0,0.7)]">
+                        {chatImageData
+                          ? "1 file selected"
+                          : "No media selected"}
+                      </span>
+                    </div>
+                    {chatImageData && (
+                      <div className="rounded border border-[#ddd] p-2">
+                        <img
+                          src={chatImageData}
+                          alt="Preview"
+                          className="max-h-48 rounded border border-[#ddd]"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setChatImageData(null)}
+                          className="mt-2 rounded bg-gray-200 px-3 py-1 text-xs font-semibold text-[#55311c] hover:bg-gray-300"
+                        >
+                          Remove media
+                        </button>
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleSendMessage}
+                      disabled={sendMessageMutation.isPending}
+                      className="rounded bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white hover:bg-[#55311c] disabled:opacity-60"
+                    >
+                      {sendMessageMutation.isPending
+                        ? "Sending..."
+                        : "Send message"}
+                    </button>
+                    {canMarkTaskAsDone(selectedTask) && (
                       <button
                         type="button"
-                        onClick={() => setChatImageData(null)}
-                        className="mt-2 rounded bg-gray-200 px-3 py-1 text-xs font-semibold text-[#55311c] hover:bg-gray-300"
+                        onClick={handleCompleteSelectedTask}
+                        disabled={updateStatusMutation.isPending}
+                        className="ml-2 rounded bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
                       >
-                        Remove media
+                        {updateStatusMutation.isPending
+                          ? "Saving..."
+                          : "Mark as done"}
                       </button>
-                    </div>
-                  )}
-                  <button
-                    type="button"
-                    onClick={handleSendMessage}
-                    disabled={sendMessageMutation.isPending}
-                    className="rounded bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white hover:bg-[#55311c] disabled:opacity-60"
-                  >
-                    {sendMessageMutation.isPending
-                      ? "Sending..."
-                      : "Send message"}
-                  </button>
-                </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -601,3 +758,4 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
     </div>
   )
 }
+

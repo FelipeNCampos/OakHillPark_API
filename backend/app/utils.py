@@ -137,6 +137,58 @@ def send_email_with_attachment(
         raise RuntimeError("Failed to send email. Check SMTP credentials/settings.") from exc
 
 
+def send_email_with_attachments(
+    *,
+    email_to: str,
+    subject: str = "",
+    html_content: str = "",
+    attachments: list[dict[str, Any]] | None = None,
+) -> None:
+    assert settings.emails_enabled, "no provided configuration for email variables"
+    message = emails.Message(
+        subject=subject,
+        html=html_content,
+        mail_from=(settings.EMAILS_FROM_NAME, settings.EMAILS_FROM_EMAIL),
+    )
+    for attachment in attachments or []:
+        message.attach(
+            data=attachment["file_bytes"],
+            filename=attachment["file_name"],
+            content_type=attachment.get("mime_type") or "application/octet-stream",
+            content_disposition="attachment",
+        )
+
+    smtp_options = {
+        "host": settings.SMTP_HOST,
+        "port": settings.SMTP_PORT,
+        "fail_silently": False,
+    }
+    if settings.SMTP_TLS:
+        smtp_options["tls"] = True
+    elif settings.SMTP_SSL:
+        smtp_options["ssl"] = True
+    if settings.SMTP_USER:
+        smtp_options["user"] = settings.SMTP_USER
+    if settings.SMTP_PASSWORD:
+        smtp_password = settings.SMTP_PASSWORD
+        if settings.SMTP_HOST and "gmail.com" in settings.SMTP_HOST.lower():
+            smtp_password = "".join(smtp_password.split())
+        smtp_options["password"] = smtp_password
+    try:
+        response = message.send(to=email_to, smtp=smtp_options)
+        if not getattr(response, "success", False):
+            error = getattr(response, "error", None)
+            status_code = getattr(response, "status_code", None)
+            status_text = getattr(response, "status_text", None)
+            raise RuntimeError(
+                f"SMTP did not accept the attachment message (status={status_code}, detail={status_text}, error={error})"
+            )
+        logger.info(f"send email with attachments result: {response}")
+    except Exception as exc:
+        logger.exception("send email with attachments failed")
+        raise RuntimeError("Failed to send email. Check SMTP credentials/settings.") from exc
+
+
 def send_sms_notification(*, phone_to: str, body: str) -> str:
     if not settings.twilio_enabled:
         error_message = "Twilio configuration is missing"

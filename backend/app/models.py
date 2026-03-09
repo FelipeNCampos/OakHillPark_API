@@ -385,6 +385,19 @@ class ReportEmailCreate(SQLModel):
     file_data_base64: str = Field(min_length=1)
 
 
+class EmailAttachmentCreate(SQLModel):
+    file_name: str = Field(min_length=1, max_length=255)
+    file_data_base64: str = Field(min_length=1)
+    mime_type: str | None = Field(default=None, max_length=255)
+
+
+class EmailNotificationCreate(SQLModel):
+    email_to: EmailStr
+    subject: str = Field(min_length=1, max_length=255)
+    html_content: str = Field(default="")
+    attachments: list[EmailAttachmentCreate] = []
+
+
 # JSON payload containing access token
 class Token(SQLModel):
     access_token: str
@@ -715,11 +728,13 @@ class CaretakersPublic(SQLModel):
 class TaskCreate(SQLModel):
     title: str = Field(min_length=1, max_length=255)
     description: str = Field(default="")
+    image_data: str | None = None
     assigned_to_user_id: uuid.UUID | None = None
 
 
 class TaskStatusUpdate(SQLModel):
     status: str = Field(min_length=1, max_length=20)  # todo | in_progress | paused | done
+    image_data: str | None = None
 
 
 class TaskPublic(SQLModel):
@@ -727,6 +742,8 @@ class TaskPublic(SQLModel):
     code: str
     title: str
     description: str
+    cover_image_data: str | None = None
+    requires_completion_image: bool = False
     status: str
     condominio_id: uuid.UUID
     created_by_user_id: uuid.UUID

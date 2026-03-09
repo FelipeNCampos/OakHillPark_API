@@ -7,7 +7,18 @@ from sqlmodel import Session, delete, select
 from app.core.config import settings
 from app.core.db import engine, init_db
 from app.main import app
-from app.models import Acess, Building, Condominio, Flat, Funcionario, Morador, Readings, User
+from app.models import (
+    Acess,
+    Building,
+    Condominio,
+    Flat,
+    Funcionario,
+    Morador,
+    Readings,
+    Task,
+    TaskMessage,
+    User,
+)
 from tests.utils.user import authentication_token_from_email
 from tests.utils.utils import get_superuser_token_headers
 
@@ -47,6 +58,8 @@ def db() -> Generator[Session, None, None]:
         session.exec(delete(Flat).where(Flat.building_id.in_(test_building_ids)))
         session.exec(delete(Building).where(Building.nome.like("%Test%")))
         session.exec(delete(Condominio).where(Condominio.nome.like("%Test%")))
+        session.exec(delete(TaskMessage))
+        session.exec(delete(Task))
         # Keep initial funcionarios but delete test ones if any
         session.exec(delete(Funcionario).where(
             ~Funcionario.nome.in_(["Cleaner", "Caretaker"])

@@ -211,7 +211,7 @@ const AddUser = () => {
                       </FormControl>
                       <SelectContent>
                         <SelectItem value="0">Resident</SelectItem>
-                        <SelectItem value="1">Funcionario</SelectItem>
+                        <SelectItem value="1">Staff</SelectItem>
                         <SelectItem value="2">Manager</SelectItem>
                         <SelectItem value="3">Administrator</SelectItem>
                       </SelectContent>

@@ -83,7 +83,7 @@ function Admin() {
           <TabsTrigger value="flats">Flats</TabsTrigger>
           <TabsTrigger value="moradores">Residents</TabsTrigger>
           <TabsTrigger value="funcionarios">Staff</TabsTrigger>
-          <TabsTrigger value="acess">Acess</TabsTrigger>
+          <TabsTrigger value="acess">Access</TabsTrigger>
           <TabsTrigger value="readings">Readings</TabsTrigger>
         </TabsList>
 
@@ -241,7 +241,7 @@ function Admin() {
         <TabsContent value="funcionarios" className="mt-4">
           <CrudSection
             title="Staff"
-            description="CRUD permitido para cargo 0, 1 e 2."
+            description="CRUD allowed for roles 0, 1 and 2."
             queryKey={["funcionarios"]}
             listFn={FuncionariosService.readFuncionarios}
             createFn={(payload) =>
@@ -283,7 +283,7 @@ function Admin() {
 
         <TabsContent value="acess" className="mt-4">
           <CrudSection
-            title="Acess"
+            title="Access"
             description="Create allowed for role 0. CRUD for roles 0 and 1."
             queryKey={["acess"]}
             listFn={AcessService.readAcesses}

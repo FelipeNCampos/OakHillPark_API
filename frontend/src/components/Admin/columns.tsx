@@ -11,7 +11,7 @@ export type UserTableData = UserPublic & {
 
 const cargoLabels: Record<number, string> = {
   0: "Resident",
-  1: "Funcionario",
+  1: "Staff",
   2: "Manager",
   3: "Administrator",
 }

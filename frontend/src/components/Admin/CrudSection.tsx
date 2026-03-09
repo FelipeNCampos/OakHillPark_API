@@ -176,7 +176,7 @@ const CrudSection = <T extends { id: string }>({
         </div>
         <Dialog open={createOpen} onOpenChange={setCreateOpen}>
           <DialogTrigger asChild>
-            <Button>Adicionar</Button>
+            <Button>Add</Button>
           </DialogTrigger>
           <DialogContent className="sm:max-w-xl">
             <DialogHeader>
@@ -216,7 +216,7 @@ const CrudSection = <T extends { id: string }>({
           <TableHeader>
             <TableRow>
               <TableHead>ID</TableHead>
-              <TableHead>Dados</TableHead>
+              <TableHead>Data</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>

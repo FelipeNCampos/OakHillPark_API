@@ -3043,7 +3043,7 @@ function AddReadingsForm({
       <div className="rounded-lg bg-white p-8 shadow-md">
         <div className="mb-6 flex items-center justify-between">
           <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
-            Adicionar Readings
+            Add Readings
           </h2>
           <button
             onClick={onBack}
@@ -3290,7 +3290,7 @@ function AddFlatReadingsForm({
         <div className="rounded-lg bg-white p-8 shadow-md">
           <div className="mb-6 flex items-center justify-between">
             <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
-              Adicionar Flat Readings
+              Add Flat Readings
             </h2>
             <button
               onClick={onBack}
@@ -3313,7 +3313,7 @@ function AddFlatReadingsForm({
       <div className="rounded-lg bg-white p-8 shadow-md">
         <div className="mb-6 flex items-center justify-between">
           <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
-            Adicionar Flat Readings
+            Add Flat Readings
           </h2>
           <button
             onClick={onBack}
@@ -6215,7 +6215,7 @@ function CleanerQrCodesContent() {
           QR Code - Cleaner
         </h2>
         <p className="mt-2 text-[rgba(0,0,0,0.7)]">
-          Baixe um QR Code por building para registrar acesso no painel Cleaner.
+          Download one QR code per building to register access in the Cleaner panel.
         </p>
       </div>
 
@@ -8006,9 +8006,9 @@ function CleanerSummary() {
     })
 
     return [
-      { label: "Hoje", value: formatTotalMinutes(todayMinutes) },
-      { label: "Semana", value: formatTotalMinutes(weekMinutes) },
-      { label: "M�s", value: formatTotalMinutes(monthMinutes) },
+      { label: "Today", value: formatTotalMinutes(todayMinutes) },
+      { label: "Week", value: formatTotalMinutes(weekMinutes) },
+      { label: "Month", value: formatTotalMinutes(monthMinutes) },
     ]
   }, [enrichedSessions, formatTotalMinutes])
 
@@ -8043,7 +8043,7 @@ function CleanerSummary() {
 
       <div className="mb-6 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
         <h4 className="mb-3 text-sm font-semibold text-[#55311c]">
-          Horas por building
+          Hours by building
         </h4>
         <div className="h-72 w-full">
           <ResponsiveContainer width="100%" height="100%">
@@ -8059,7 +8059,7 @@ function CleanerSummary() {
                 tick={{ fill: "#55311c", fontSize: 12 }}
               />
               <Tooltip
-                formatter={(value: number) => [`${value}h`, "Horas"]}
+                formatter={(value: number) => [`${value}h`, "Hours"]}
                 contentStyle={{
                   borderRadius: "10px",
                   border: "1px solid #e5e0dc",
@@ -8801,7 +8801,7 @@ function CaretakerSummary() {
                 tick={{ fill: "#55311c", fontSize: 12 }}
               />
               <Tooltip
-                formatter={(value: number) => [`${value}h`, "Horas"]}
+                formatter={(value: number) => [`${value}h`, "Hours"]}
                 contentStyle={{
                   borderRadius: "10px",
                   border: "1px solid #e5e0dc",
@@ -10108,7 +10108,7 @@ function AddResidentForm({
                 className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
                 htmlFor="resident-car1"
               >
-                Carro 1
+                Car 1
               </label>
               <input
                 type="text"
@@ -10117,7 +10117,7 @@ function AddResidentForm({
                 value={formData.car1}
                 onChange={handleInputChange}
                 className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
-                placeholder="Placa do carro"
+                placeholder="Car registration"
               />
             </div>
 
@@ -10126,7 +10126,7 @@ function AddResidentForm({
                 className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
                 htmlFor="resident-car2"
               >
-                Carro 2
+                Car 2
               </label>
               <input
                 type="text"
@@ -10135,7 +10135,7 @@ function AddResidentForm({
                 value={formData.car2}
                 onChange={handleInputChange}
                 className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
-                placeholder="Placa do carro"
+                placeholder="Car registration"
               />
             </div>
 
@@ -10145,7 +10145,7 @@ function AddResidentForm({
                   className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
                   htmlFor="resident-cargo"
                 >
-                  cargo
+                  Role
                 </label>
                 <select
                   id="resident-cargo"
@@ -10156,7 +10156,7 @@ function AddResidentForm({
                 >
                   <option value="0">Resident</option>
                   <option value="1">Owner</option>
-                  <option value="2">Inquilino</option>
+                  <option value="2">Tenant</option>
                 </select>
               </div>
             )}
@@ -10187,3 +10187,4 @@ function AddResidentForm({
     </div>
   )
 }
+

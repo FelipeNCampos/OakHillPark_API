@@ -6691,11 +6691,6 @@ function FireAlarmSchedulePage() {
     }
   }, [selectedDate])
 
-  const repetition = useMemo(
-    () => getFireAlarmRepetition(selectedDate),
-    [selectedDate],
-  )
-
   const scheduleRows = useMemo(
     () => getFireAlarmScheduleRowsForDate(selectedDate),
     [selectedDate],
@@ -7081,10 +7076,6 @@ function FireAlarmSchedulePage() {
       <div className="flex flex-col gap-3 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h3 className="text-lg font-bold text-[#55311c]">Alarm schedule</h3>
-          <p className="text-sm text-[rgba(0,0,0,0.65)]">
-            Synced with 26/02/2026 (repetition 14): 014, 014, 055, 020, 063,
-            021.
-          </p>
         </div>
         <button
           type="button"
@@ -7093,11 +7084,6 @@ function FireAlarmSchedulePage() {
         >
           View history
         </button>
-      </div>
-
-      <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] px-4 py-3 text-sm text-[#55311c]">
-        Date: <strong>{formatDateToGb(selectedDate)}</strong> | Repetition:{" "}
-        <strong>{repetition}</strong>
       </div>
 
       <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
@@ -7361,10 +7347,6 @@ function BuildingSchedulePage({
     }
   }, [emptyRows, initialLogs, scheduleId, selectedDate, storageKey])
 
-  const repetition = useMemo(
-    () => getFireAlarmRepetition(selectedDate),
-    [selectedDate],
-  )
   const buildingRows = useMemo(() => getBuildingsForSchedule(scheduleId), [scheduleId])
   const historyDates = useMemo(
     () => Object.keys(allLogs).sort((a, b) => b.localeCompare(a)),
@@ -7675,13 +7657,6 @@ function BuildingSchedulePage({
       <div className="flex flex-col gap-3 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h3 className="text-lg font-bold text-[#55311c]">{title}</h3>
-          <p className="text-sm text-[rgba(0,0,0,0.65)]">
-            {scheduleId === "lift"
-              ? "Occurs on day 1 of each month."
-              : scheduleId === "light"
-                ? "Occurs on day 3 of each month."
-              : "Synced weekly with 26/02/2026 (repetition 14)."}
-          </p>
         </div>
         <button
           type="button"
@@ -7690,16 +7665,6 @@ function BuildingSchedulePage({
         >
           View history
         </button>
-      </div>
-
-      <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] px-4 py-3 text-sm text-[#55311c]">
-        Date: <strong>{formatDateToGb(selectedDate)}</strong>
-        {!isMonthlySchedule && (
-          <>
-            {" "}
-            | Repetition: <strong>{repetition}</strong>
-          </>
-        )}
       </div>
 
       <div className="flex flex-wrap items-end justify-center gap-2 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-3">

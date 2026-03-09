@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 import { OpenAPI } from "@/client"
 import useCustomToast from "@/hooks/useCustomToast"
@@ -121,6 +121,10 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
   const [newImageData, setNewImageData] = useState<string | null>(null)
   const [chatText, setChatText] = useState("")
   const [chatImageData, setChatImageData] = useState<string | null>(null)
+  const [showCompletionPhotoPrompt, setShowCompletionPhotoPrompt] =
+    useState(false)
+  const chatComposerRef = useRef<HTMLDivElement | null>(null)
+  const chatImageInputRef = useRef<HTMLInputElement | null>(null)
 
   const isManager = mode === "manager"
 
@@ -274,10 +278,20 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
           return
         }
         setChatImageData(reader.result)
+        setShowCompletionPhotoPrompt(false)
       }
     }
     reader.readAsDataURL(file)
   }
+
+  useEffect(() => {
+    if (!selectedTaskId) return
+    if (!chatImageData && !showCompletionPhotoPrompt) return
+    chatComposerRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "end",
+    })
+  }, [chatImageData, selectedTaskId, showCompletionPhotoPrompt])
 
   const handleSendMessage = () => {
     if (!selectedTaskId) return
@@ -300,10 +314,7 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
       !isManager &&
       task.requires_completion_image
     ) {
-      openTaskPopup(task.id)
-      showErrorToast(
-        "Attach a completion photo in the task panel to mark this task as done",
-      )
+      openTaskPopup(task.id, { promptCompletionPhoto: true })
       return
     }
     updateStatusMutation.mutate({ taskId: task.id, status: nextStatus })
@@ -321,16 +332,21 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
     moveTaskToStatus(task, targetStatus)
   }
 
-  const openTaskPopup = (taskId: string) => {
+  const openTaskPopup = (
+    taskId: string,
+    options?: { promptCompletionPhoto?: boolean },
+  ) => {
     setSelectedTaskId(taskId)
     setChatText("")
     setChatImageData(null)
+    setShowCompletionPhotoPrompt(Boolean(options?.promptCompletionPhoto))
   }
 
   const closeTaskPopup = () => {
     setSelectedTaskId(null)
     setChatText("")
     setChatImageData(null)
+    setShowCompletionPhotoPrompt(false)
   }
 
   const handleCompleteSelectedTask = () => {
@@ -344,7 +360,7 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
       selectedTask.requires_completion_image &&
       !chatImageData
     ) {
-      showErrorToast("A completion photo is required to finish this task")
+      setShowCompletionPhotoPrompt(true)
       return
     }
     updateStatusMutation.mutate({
@@ -552,7 +568,7 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
 
       {selectedTask && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-2 sm:items-center sm:p-4">
-          <div className="max-h-[95vh] w-full max-w-5xl overflow-hidden rounded-lg bg-white shadow-xl sm:max-h-[90vh]">
+          <div className="relative max-h-[95vh] w-full max-w-5xl overflow-y-auto rounded-lg bg-white shadow-xl sm:max-h-[90vh]">
             <div className="flex flex-col items-start justify-between gap-3 border-b border-[#e6ddd7] px-4 py-4 sm:flex-row sm:px-6">
               <div>
                 <h3 className="text-lg font-bold text-[#55311c]">
@@ -562,7 +578,7 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
                   <img
                     src={selectedTask.cover_image_data}
                     alt={`${selectedTask.title} cover`}
-                    className="mt-3 max-h-60 w-full rounded border border-[#ddd] object-cover sm:max-w-xl"
+                    className="mx-auto mt-3 max-h-60 w-full rounded border border-[#ddd] object-cover sm:max-w-xl"
                   />
                 ) : (
                   <p className="text-sm text-[rgba(0,0,0,0.7)]">
@@ -579,7 +595,7 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
               </button>
             </div>
 
-            <div className="grid max-h-[calc(95vh-96px)] gap-4 overflow-y-auto p-3 sm:max-h-[calc(90vh-78px)] sm:p-6 lg:grid-cols-3">
+            <div className="grid gap-4 p-3 sm:p-6 lg:grid-cols-3">
               <div className="rounded border border-[#e6ddd7] bg-[#f9f6f3] p-4 lg:col-span-1">
                 <h4 className="mb-3 text-sm font-bold uppercase tracking-wide text-[#8c7569]">
                   Status History
@@ -663,7 +679,7 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
                     Completed tasks are locked for the caretaker.
                   </div>
                 ) : (
-                  <div className="space-y-2">
+                  <div ref={chatComposerRef} className="space-y-2">
                     <textarea
                       value={chatText}
                       onChange={(e) => setChatText(e.target.value)}
@@ -681,6 +697,7 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
                     />
                     <div className="flex flex-wrap items-center gap-2">
                       <input
+                        ref={chatImageInputRef}
                         id="task-chat-image-input"
                         type="file"
                         accept="image/*"
@@ -696,7 +713,9 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
                         htmlFor="task-chat-image-input"
                         className="cursor-pointer rounded bg-[#8c7569] px-3 py-2 text-xs font-semibold text-white hover:bg-[#55311c]"
                       >
-                        Send media
+                        {selectedTask.requires_completion_image
+                          ? "Select photo"
+                          : "Send media"}
                       </label>
                       <span className="text-xs text-[rgba(0,0,0,0.7)]">
                         {chatImageData
@@ -746,6 +765,35 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
                 )}
               </div>
             </div>
+
+            {showCompletionPhotoPrompt && !isManager && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/30 p-4">
+                <div className="w-full max-w-sm rounded-lg bg-white p-5 shadow-xl">
+                  <h4 className="text-base font-bold text-[#55311c]">
+                    Completion photo required
+                  </h4>
+                  <p className="mt-2 text-sm text-[rgba(0,0,0,0.72)]">
+                    Select a completion photo before marking this task as done.
+                  </p>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => chatImageInputRef.current?.click()}
+                      className="rounded bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white hover:bg-[#55311c]"
+                    >
+                      Select photo
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowCompletionPhotoPrompt(false)}
+                      className="rounded bg-gray-200 px-4 py-2 text-sm font-semibold text-[#55311c] hover:bg-gray-300"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

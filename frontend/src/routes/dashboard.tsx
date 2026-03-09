@@ -225,6 +225,21 @@ interface NewReadingPayload {
   data?: string
 }
 
+const formatFlatNumber = (
+  buildingName?: string | null,
+  flatNumber?: number | null,
+) => {
+  if (flatNumber === null || flatNumber === undefined) return ""
+  return buildingName?.trim().toLowerCase() === "northwood" && flatNumber === 1
+    ? "1A"
+    : String(flatNumber)
+}
+
+const formatFlatLabel = (
+  buildingName?: string | null,
+  flatNumber?: number | null,
+) => `Flat ${formatFlatNumber(buildingName, flatNumber)}`
+
 type ApiQueryParams = Record<
   string,
   string | number | boolean | null | undefined
@@ -1442,7 +1457,7 @@ function ClientDashboard() {
   const renderContent = () => {
     switch (activeTab) {
       case "overview":
-        return <OverviewContent user={user} />
+        return <OverviewContent user={user} onNavigate={setActiveTab} />
       case "buildings":
         return <BuildingsReadingsContent />
       case "flats":
@@ -1476,7 +1491,7 @@ function ClientDashboard() {
       case "twillio":
         return <TwilioContent />
       default:
-        return <OverviewContent user={user} />
+        return <OverviewContent user={user} onNavigate={setActiveTab} />
     }
   }
 
@@ -1666,7 +1681,13 @@ function ClientDashboard() {
   )
 }
 
-function OverviewContent({ user }: { user: UserProfile }) {
+function OverviewContent({
+  user,
+  onNavigate,
+}: {
+  user: UserProfile
+  onNavigate: (tabId: string) => void
+}) {
   return (
     <div className="mx-auto max-w-7xl">
       {/* Welcome Section */}
@@ -1679,12 +1700,16 @@ function OverviewContent({ user }: { user: UserProfile }) {
         </p>
       </div>
 
-      {/* Stats Grid */}
+      {/* Shortcut Grid */}
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
-        <div className="rounded-lg bg-white p-6 shadow-md transition-all duration-300 hover:shadow-lg">
+        <button
+          type="button"
+          onClick={() => onNavigate("buildings")}
+          className="rounded-lg bg-white p-6 text-left shadow-md transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
+        >
           <div className="mb-2 flex items-center justify-between">
             <h3 className="font-['Nunito',sans-serif] text-sm font-semibold uppercase tracking-wide text-[#8c7569]">
-              Unidades
+              Shortcut
             </h3>
             <svg
               className="h-8 w-8 text-[#8c7569]"
@@ -1692,23 +1717,29 @@ function OverviewContent({ user }: { user: UserProfile }) {
               stroke="currentColor"
               viewBox="0 0 24 24"
             >
-              <title>Unidades</title>
+              <title>Add Readings</title>
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 strokeWidth={2}
-                d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"
+                d="M12 4v16m8-8H4"
               />
             </svg>
           </div>
-          <p className="text-3xl font-bold text-[#55311c]">--</p>
-          <p className="mt-1 text-sm text-[rgba(0,0,0,0.6)]">Total flats</p>
-        </div>
+          <p className="text-3xl font-bold text-[#55311c]">Add Readings</p>
+          <p className="mt-1 text-sm text-[rgba(0,0,0,0.6)]">
+            Open the buildings readings screen and add new readings.
+          </p>
+        </button>
 
-        <div className="rounded-lg bg-white p-6 shadow-md transition-all duration-300 hover:shadow-lg">
+        <button
+          type="button"
+          onClick={() => onNavigate("flats")}
+          className="rounded-lg bg-white p-6 text-left shadow-md transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
+        >
           <div className="mb-2 flex items-center justify-between">
             <h3 className="font-['Nunito',sans-serif] text-sm font-semibold uppercase tracking-wide text-[#8c7569]">
-              Residents
+              Shortcut
             </h3>
             <svg
               className="h-8 w-8 text-[#8c7569]"
@@ -1716,66 +1747,22 @@ function OverviewContent({ user }: { user: UserProfile }) {
               stroke="currentColor"
               viewBox="0 0 24 24"
             >
-              <title>Residents</title>
+              <title>Add Flat Readings</title>
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 strokeWidth={2}
-                d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
+                d="M4 7h16M7 4v16m10-10v10M9 20h6"
               />
             </svg>
           </div>
-          <p className="text-3xl font-bold text-[#55311c]">--</p>
-          <p className="mt-1 text-sm text-[rgba(0,0,0,0.6)]">Registered</p>
-        </div>
-
-        <div className="rounded-lg bg-white p-6 shadow-md transition-all duration-300 hover:shadow-lg">
-          <div className="mb-2 flex items-center justify-between">
-            <h3 className="font-['Nunito',sans-serif] text-sm font-semibold uppercase tracking-wide text-[#8c7569]">
-              Avisos
-            </h3>
-            <svg
-              className="h-8 w-8 text-[#8c7569]"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <title>Avisos</title>
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
-              />
-            </svg>
-          </div>
-          <p className="text-3xl font-bold text-[#55311c]">--</p>
-          <p className="mt-1 text-sm text-[rgba(0,0,0,0.6)]">Pendentes</p>
-        </div>
-
-        <div className="rounded-lg bg-white p-6 shadow-md transition-all duration-300 hover:shadow-lg">
-          <div className="mb-2 flex items-center justify-between">
-            <h3 className="font-['Nunito',sans-serif] text-sm font-semibold uppercase tracking-wide text-[#8c7569]">
-              Reservas
-            </h3>
-            <svg
-              className="h-8 w-8 text-[#8c7569]"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <title>Reservas</title>
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-              />
-            </svg>
-          </div>
-          <p className="text-3xl font-bold text-[#55311c]">--</p>
-          <p className="mt-1 text-sm text-[rgba(0,0,0,0.6)]">This month</p>
-        </div>
+          <p className="text-3xl font-bold text-[#55311c]">
+            Add Flat Readings
+          </p>
+          <p className="mt-1 text-sm text-[rgba(0,0,0,0.6)]">
+            Open the flats readings screen and add new flat readings.
+          </p>
+        </button>
       </div>
     </div>
   )
@@ -3349,7 +3336,7 @@ function AddFlatReadingsForm({
                           className="rounded-lg border-2 border-[#ddd] p-4"
                         >
                           <h4 className="mb-3 font-['Nunito',sans-serif] text-lg font-semibold text-[#55311c]">
-                            Flat {flat.numero}
+                            {formatFlatLabel(building.nome, flat.numero)}
                           </h4>
 
                           <div className="grid gap-4 md:grid-cols-3">
@@ -3604,7 +3591,7 @@ function FlatsReadingsContent() {
                         }`}
                         type="button"
                       >
-                        Flat {flat.numero}
+                        {formatFlatLabel(selectedBuilding?.nome, flat.numero)}
                       </button>
                     ))}
                 </div>
@@ -4028,8 +4015,9 @@ function FlatReadingsTable({
       return values
     })
 
-    const reportTitle = `Readings Report - Flat ${flat.numero}`
-    const fileName = `readings-flat-${flat.numero}-${new Date().toISOString().slice(0, 10)}.pdf`
+    const flatNumberLabel = formatFlatNumber(flat.building?.nome, flat.numero)
+    const reportTitle = `Readings Report - Flat ${flatNumberLabel}`
+    const fileName = `readings-flat-${flatNumberLabel}-${new Date().toISOString().slice(0, 10)}.pdf`
     const fileDataBase64 = generatePdfTableReportBase64({
       title: reportTitle,
       dateRange: buildDateRangeLabel(reportDateFrom, reportDateTo),
@@ -4050,7 +4038,7 @@ function FlatReadingsTable({
           subject: reportTitle,
           html_content: buildReadingsReportEmailHtml({
             reportType: "Flat",
-            locationLabel: `${flat.building?.nome || "Building"} - Flat ${flat.numero}`,
+            locationLabel: `${flat.building?.nome || "Building"} - ${formatFlatLabel(flat.building?.nome, flat.numero)}`,
             periodLabel: buildDateRangeLabel(reportDateFrom, reportDateTo),
           }),
           file_name: fileName,
@@ -4104,7 +4092,7 @@ function FlatReadingsTable({
         {/* Flat Info */}
         <div className="flex-1 px-1 text-center md:px-0">
           <h3 className="text-xl font-bold font-['Nunito',sans-serif] sm:text-2xl">
-            Flat {flat.numero}
+            {formatFlatLabel(flat.building?.nome, flat.numero)}
           </h3>
           <p className="mt-1 text-xs sm:text-sm">
             Building: {flat.building?.nome || "N/A"}
@@ -5252,6 +5240,7 @@ function TwilioContent() {
         morador.nome,
         morador.building_nome,
         String(morador.flat_numero),
+        formatFlatNumber(morador.building_nome, morador.flat_numero),
         morador.mobile ? String(morador.mobile) : "",
         morador.email || "",
       ]
@@ -5409,7 +5398,7 @@ function TwilioContent() {
           if (!phoneTo) {
             skipped += 1
             errors.push(
-              `${recipient.nome} (${recipient.building_nome} ${recipient.flat_numero}): invalid phone number`,
+              `${recipient.nome} (${recipient.building_nome} ${formatFlatNumber(recipient.building_nome, recipient.flat_numero)}): invalid phone number`,
             )
             continue
           }
@@ -5430,7 +5419,7 @@ function TwilioContent() {
           if (!emailTo) {
             skipped += 1
             errors.push(
-              `${recipient.nome} (${recipient.building_nome} ${recipient.flat_numero}): invalid email`,
+              `${recipient.nome} (${recipient.building_nome} ${formatFlatNumber(recipient.building_nome, recipient.flat_numero)}): invalid email`,
             )
             continue
           }
@@ -5468,7 +5457,7 @@ function TwilioContent() {
       } catch (error) {
         failed += 1
         errors.push(
-          `${recipient.nome} (${recipient.building_nome} ${recipient.flat_numero}): ${
+          `${recipient.nome} (${recipient.building_nome} ${formatFlatNumber(recipient.building_nome, recipient.flat_numero)}): ${
             error instanceof Error ? error.message : "failed to send"
           }`,
         )
@@ -5656,7 +5645,12 @@ function TwilioContent() {
                     </p>
                     <p className="truncate text-xs text-[rgba(0,0,0,0.65)]">
                       {getResidentRoleLabel(morador.cargo)} |{" "}
-                      {morador.building_nome} {morador.flat_numero} |{" "}
+                      {morador.building_nome}{" "}
+                      {formatFlatNumber(
+                        morador.building_nome,
+                        morador.flat_numero,
+                      )}{" "}
+                      |{" "}
                       {sendChannel === "sms"
                         ? morador.mobile || "no phone"
                         : morador.email || "no email"}
@@ -9768,7 +9762,7 @@ function ResidentsContent() {
                             {row.building_nome}
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
-                            {row.flat_numero}
+                            {formatFlatNumber(row.building_nome, row.flat_numero)}
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
                             {row.owner_1?.nome || "-"}
@@ -9861,7 +9855,10 @@ function ResidentsContent() {
                             {morador.building_nome}
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
-                            {morador.flat_numero}
+                            {formatFlatNumber(
+                              morador.building_nome,
+                              morador.flat_numero,
+                            )}
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
                             {morador.nome}
@@ -10106,7 +10103,10 @@ function AddResidentForm({
       sortedFlats.forEach((flat) => {
         allFlats.push({
           id: flat.id,
-          label: `${building.nome} - Flat ${flat.numero}`,
+          label: `${building.nome} - ${formatFlatLabel(
+            building.nome,
+            flat.numero,
+          )}`,
         })
       })
     })

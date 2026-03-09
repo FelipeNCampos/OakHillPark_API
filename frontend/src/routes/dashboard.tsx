@@ -7101,43 +7101,7 @@ function FireAlarmSchedulePage() {
       </div>
 
       <div className="flex flex-wrap items-end justify-center gap-2 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-3">
-        <button
-          type="button"
-          onClick={() =>
-            setSelectedDate((previous) => shiftFireAlarmCycleDate(previous, -1))
-          }
-          className="rounded-lg border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
-        >
-          Back
-        </button>
-        <div>
-          <label
-            htmlFor="fire-alarm-date"
-            className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
-          >
-            Date
-          </label>
-          <input
-            id="fire-alarm-date"
-            type="date"
-            value={selectedDate}
-            onChange={(event) => setSelectedDate(event.target.value)}
-            className={`rounded-lg border px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569] ${
-              datesWithLogs.has(selectedDate)
-                ? "border-[#5f9f7d] bg-[#eef7f1]"
-                : "border-[#d9d0ca] bg-white"
-            }`}
-          />
-        </div>
-        <button
-          type="button"
-          onClick={() =>
-            setSelectedDate((previous) => shiftFireAlarmCycleDate(previous, 1))
-          }
-          className="rounded-lg border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
-        >
-          Next
-        </button>
+        
       </div>
 
       <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">

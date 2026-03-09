@@ -74,6 +74,24 @@ def get_last_work_time_session(
     ).first()
 
 
+def _has_work_time_operation_for_day(
+    session: SessionDep,
+    funcionario_id: uuid.UUID,
+    target_date: datetime.date,
+    operacao: int,
+) -> bool:
+    statement = (
+        select(func.count())
+        .select_from(WorkTimeSession)
+        .where(
+            WorkTimeSession.funcionario_id == funcionario_id,
+            WorkTimeSession.operacao == operacao,
+            func.date(WorkTimeSession.data) == target_date,
+        )
+    )
+    return session.exec(statement).one() > 0
+
+
 def _has_cleaner_in_for_day(
     session: SessionDep,
     funcionario_id: uuid.UUID,
@@ -374,17 +392,23 @@ def create_caretaker_work_time(
     last_session = get_last_work_time_session(session, caretaker.id)
     session_time = payload.data if payload.data else datetime.datetime.now(datetime.timezone.utc)
     session_date = session_time.date()
-    should_send_work_time_in_sms = (
+    should_send_caretaker_in_sms = (
         payload.operacao == 0
-        and not session.exec(
-            select(func.count())
-            .select_from(WorkTimeSession)
-            .where(
-                WorkTimeSession.funcionario_id == caretaker.id,
-                WorkTimeSession.operacao == 0,
-                func.date(WorkTimeSession.data) == session_date,
-            )
-        ).one()
+        and not _has_work_time_operation_for_day(
+            session,
+            caretaker.id,
+            session_date,
+            0,
+        )
+    )
+    should_send_caretaker_out_sms = (
+        payload.operacao == 1
+        and not _has_work_time_operation_for_day(
+            session,
+            caretaker.id,
+            session_date,
+            1,
+        )
     )
 
     if payload.operacao == 0 and last_session and last_session.operacao == 0:
@@ -408,10 +432,10 @@ def create_caretaker_work_time(
     session.commit()
     session.refresh(item)
 
-    if should_send_work_time_in_sms:
-        _send_staff_status_sms("WORK TIME IN")
-    elif payload.operacao == 1:
-        _send_staff_status_sms("WORK TIME OUT")
+    if should_send_caretaker_in_sms:
+        _send_staff_status_sms("Caretaker IN")
+    elif should_send_caretaker_out_sms:
+        _send_staff_status_sms("Caretaker OUT")
 
     return WorkTimeSessionPublic(
         id=item.id,

@@ -244,7 +244,7 @@ def test_create_caretaker_work_time_sends_sms_on_first_in(
     assert response.status_code == 201
     sms_mock.assert_called_once_with(
         phone_to="+447952474965",
-        body="WORK TIME IN",
+        body="Caretaker IN",
     )
 
 
@@ -305,5 +305,43 @@ def test_create_caretaker_work_time_sends_sms_on_out(
     assert response.status_code == 201
     sms_mock.assert_called_once_with(
         phone_to="+447952474965",
-        body="WORK TIME OUT",
+        body="Caretaker OUT",
     )
+
+
+def test_create_caretaker_work_time_does_not_resend_out_same_day(
+    client: TestClient,
+    caretaker_sms_setup: Funcionario,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "CLEANER_STATUS_SMS_TO", "7952474965")
+
+    with patch("app.api.routes.acess.get_default_funcionario", return_value=caretaker_sms_setup):
+        with patch("app.api.routes.acess.send_sms_notification", return_value="SM123") as sms_mock:
+            first_in = client.post(
+                f"{settings.API_V1_STR}/acess/caretaker/work-time",
+                json={"operacao": 0},
+            )
+            assert first_in.status_code == 201
+
+            first_out = client.post(
+                f"{settings.API_V1_STR}/acess/caretaker/work-time",
+                json={"operacao": 1},
+            )
+            assert first_out.status_code == 201
+
+            second_in = client.post(
+                f"{settings.API_V1_STR}/acess/caretaker/work-time",
+                json={"operacao": 0},
+            )
+            assert second_in.status_code == 201
+
+            sms_mock.reset_mock()
+
+            second_out = client.post(
+                f"{settings.API_V1_STR}/acess/caretaker/work-time",
+                json={"operacao": 1},
+            )
+
+    assert second_out.status_code == 201
+    sms_mock.assert_not_called()

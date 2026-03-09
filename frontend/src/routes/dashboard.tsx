@@ -49,6 +49,7 @@ interface Building {
 interface Flat {
   id: EntityId
   numero: number
+  label?: string | null
   reading_types: number
   building?: Building
 }
@@ -111,6 +112,7 @@ interface Morador {
   cargo: number
   building_nome: string
   flat_numero: number
+  flat_label?: string | null
   flat_id: EntityId
   nome: string
   email?: string | null
@@ -180,6 +182,7 @@ type FlatResidentRow = {
   key: string
   building_nome: string
   flat_numero: number
+  flat_label?: string | null
   reading_types: number
   owner_1?: Morador
   owner_2?: Morador
@@ -226,17 +229,18 @@ interface NewReadingPayload {
 }
 
 const formatFlatNumber = (
-  _buildingName?: string | null,
   flatNumber?: number | null,
+  flatLabel?: string | null,
 ) => {
+  if (flatLabel && flatLabel.trim()) return flatLabel.trim()
   if (flatNumber === null || flatNumber === undefined) return ""
   return String(flatNumber)
 }
 
 const formatFlatLabel = (
-  buildingName?: string | null,
   flatNumber?: number | null,
-) => `Flat ${formatFlatNumber(buildingName, flatNumber)}`
+  flatLabel?: string | null,
+) => `Flat ${formatFlatNumber(flatNumber, flatLabel)}`
 
 type ApiQueryParams = Record<
   string,
@@ -3351,7 +3355,7 @@ function AddFlatReadingsForm({
                           className="rounded-lg border-2 border-[#ddd] p-4"
                         >
                           <h4 className="mb-3 font-['Nunito',sans-serif] text-lg font-semibold text-[#55311c]">
-                            {formatFlatLabel(building.nome, flat.numero)}
+                            {formatFlatLabel(flat.numero, flat.label)}
                           </h4>
 
                           <div className="grid gap-4 md:grid-cols-3">
@@ -3616,7 +3620,7 @@ function FlatsReadingsContent({
                         }`}
                         type="button"
                       >
-                        {formatFlatLabel(selectedBuilding?.nome, flat.numero)}
+                        {formatFlatLabel(flat.numero, flat.label)}
                       </button>
                     ))}
                 </div>
@@ -4040,7 +4044,7 @@ function FlatReadingsTable({
       return values
     })
 
-    const flatNumberLabel = formatFlatNumber(flat.building?.nome, flat.numero)
+    const flatNumberLabel = formatFlatNumber(flat.numero, flat.label)
     const reportTitle = `Readings Report - Flat ${flatNumberLabel}`
     const fileName = `readings-flat-${flatNumberLabel}-${new Date().toISOString().slice(0, 10)}.pdf`
     const fileDataBase64 = generatePdfTableReportBase64({
@@ -4063,7 +4067,7 @@ function FlatReadingsTable({
           subject: reportTitle,
           html_content: buildReadingsReportEmailHtml({
             reportType: "Flat",
-            locationLabel: `${flat.building?.nome || "Building"} - ${formatFlatLabel(flat.building?.nome, flat.numero)}`,
+            locationLabel: `${flat.building?.nome || "Building"} - ${formatFlatLabel(flat.numero, flat.label)}`,
             periodLabel: buildDateRangeLabel(reportDateFrom, reportDateTo),
           }),
           file_name: fileName,
@@ -4117,7 +4121,7 @@ function FlatReadingsTable({
         {/* Flat Info */}
         <div className="flex-1 px-1 text-center md:px-0">
           <h3 className="text-xl font-bold font-['Nunito',sans-serif] sm:text-2xl">
-            {formatFlatLabel(flat.building?.nome, flat.numero)}
+            {formatFlatLabel(flat.numero, flat.label)}
           </h3>
           <p className="mt-1 text-xs sm:text-sm">
             Building: {flat.building?.nome || "N/A"}
@@ -5265,7 +5269,7 @@ function TwilioContent() {
         morador.nome,
         morador.building_nome,
         String(morador.flat_numero),
-        formatFlatNumber(morador.building_nome, morador.flat_numero),
+        formatFlatNumber(morador.flat_numero, morador.flat_label),
         morador.mobile ? String(morador.mobile) : "",
         morador.email || "",
       ]
@@ -5302,6 +5306,10 @@ function TwilioContent() {
       if (a.flat_numero !== b.flat_numero) {
         return a.flat_numero - b.flat_numero
       }
+      const flatLabelCompare = (a.flat_label || "").localeCompare(
+        b.flat_label || "",
+      )
+      if (flatLabelCompare !== 0) return flatLabelCompare
       return a.nome.localeCompare(b.nome)
     })
   }, [Residents, selectedResidentIds, selectedBuildingIds, buildingNameById])
@@ -5423,7 +5431,7 @@ function TwilioContent() {
           if (!phoneTo) {
             skipped += 1
             errors.push(
-              `${recipient.nome} (${recipient.building_nome} ${formatFlatNumber(recipient.building_nome, recipient.flat_numero)}): invalid phone number`,
+              `${recipient.nome} (${recipient.building_nome} ${formatFlatNumber(recipient.flat_numero, recipient.flat_label)}): invalid phone number`,
             )
             continue
           }
@@ -5444,7 +5452,7 @@ function TwilioContent() {
           if (!emailTo) {
             skipped += 1
             errors.push(
-              `${recipient.nome} (${recipient.building_nome} ${formatFlatNumber(recipient.building_nome, recipient.flat_numero)}): invalid email`,
+              `${recipient.nome} (${recipient.building_nome} ${formatFlatNumber(recipient.flat_numero, recipient.flat_label)}): invalid email`,
             )
             continue
           }
@@ -5482,7 +5490,7 @@ function TwilioContent() {
       } catch (error) {
         failed += 1
         errors.push(
-          `${recipient.nome} (${recipient.building_nome} ${formatFlatNumber(recipient.building_nome, recipient.flat_numero)}): ${
+          `${recipient.nome} (${recipient.building_nome} ${formatFlatNumber(recipient.flat_numero, recipient.flat_label)}): ${
             error instanceof Error ? error.message : "failed to send"
           }`,
         )
@@ -5672,8 +5680,8 @@ function TwilioContent() {
                       {getResidentRoleLabel(morador.cargo)} |{" "}
                       {morador.building_nome}{" "}
                       {formatFlatNumber(
-                        morador.building_nome,
                         morador.flat_numero,
+                        morador.flat_label,
                       )}{" "}
                       |{" "}
                       {sendChannel === "sms"
@@ -9464,6 +9472,10 @@ function ResidentsContent() {
         if (buildingCompare !== 0) return buildingCompare
         if (a.flat_numero !== b.flat_numero)
           return a.flat_numero - b.flat_numero
+        const flatLabelCompare = (a.flat_label || "").localeCompare(
+          b.flat_label || "",
+        )
+        if (flatLabelCompare !== 0) return flatLabelCompare
         return a.nome.localeCompare(b.nome)
       }),
     [Residents],
@@ -9494,6 +9506,7 @@ function ResidentsContent() {
         key,
         building_nome: morador.building_nome,
         flat_numero: morador.flat_numero,
+        flat_label: morador.flat_label,
         reading_types: morador.reading_types,
         edit_target_id: null,
       }
@@ -9516,7 +9529,8 @@ function ResidentsContent() {
     return [...groups.values()].sort((a, b) => {
       const buildingCompare = a.building_nome.localeCompare(b.building_nome)
       if (buildingCompare !== 0) return buildingCompare
-      return a.flat_numero - b.flat_numero
+      if (a.flat_numero !== b.flat_numero) return a.flat_numero - b.flat_numero
+      return (a.flat_label || "").localeCompare(b.flat_label || "")
     })
   }, [filteredResidents, residentTypeFilter])
 
@@ -9787,7 +9801,10 @@ function ResidentsContent() {
                             {row.building_nome}
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
-                            {formatFlatNumber(row.building_nome, row.flat_numero)}
+                            {formatFlatNumber(
+                              row.flat_numero,
+                              row.flat_label,
+                            )}
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
                             {row.owner_1?.nome || "-"}
@@ -9881,8 +9898,8 @@ function ResidentsContent() {
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
                             {formatFlatNumber(
-                              morador.building_nome,
                               morador.flat_numero,
+                              morador.flat_label,
                             )}
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
@@ -10129,19 +10146,10 @@ function AddResidentForm({
         allFlats.push({
           id: String(flat.id),
           label: `${building.nome} - ${formatFlatLabel(
-            building.nome,
             flat.numero,
+            flat.label,
           )}`,
         })
-        if (
-          building.nome.trim().toLowerCase() === "northwood" &&
-          flat.numero === 1
-        ) {
-          allFlats.push({
-            id: `${flat.id}::northwood-1a`,
-            label: `${building.nome} - Flat 1A`,
-          })
-        }
       })
     })
     setFlats(allFlats)
@@ -10179,7 +10187,7 @@ function AddResidentForm({
               car2: formData.car2 || null,
             }
           : {}),
-        flat_id: formData.flat_id.split("::")[0],
+        flat_id: formData.flat_id,
       }
 
       const response = await fetch(url, {

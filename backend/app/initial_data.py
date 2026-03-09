@@ -1,5 +1,6 @@
 import logging
 import csv
+import uuid
 from datetime import date
 from pathlib import Path
 
@@ -23,7 +24,40 @@ logger = logging.getLogger(__name__)
 DEFAULT_MANAGER_EMAIL = "oakhillporter@gmail.com"
 DEFAULT_MANAGER_PASSWORD = "Oakhill@8610"
 DEFAULT_MANAGER_NAME = "Luiz Fernandes"
+OAK_HILL_PARK_CONDOMINIO_ID = uuid.UUID("cef60679-a1e5-4815-9a81-7621cb5a5fa5")
 FIRE_ALARM_SEED_FILE = Path(__file__).resolve().parents[1] / "data" / "fire_alarm_schedule_seed.csv"
+
+
+def ensure_northwood_flat_1a(session: Session, condominio: Condominio) -> None:
+    northwood = session.exec(
+        select(Building).where(
+            Building.condominio_id == condominio.id,
+            Building.nome == "Northwood",
+        )
+    ).first()
+    if not northwood:
+        return
+
+    existing = session.exec(
+        select(Flat).where(
+            Flat.building_id == northwood.id,
+            Flat.numero == 1,
+            Flat.label == "1A",
+        )
+    ).first()
+    if existing:
+        return
+
+    session.add(
+        Flat(
+            numero=1,
+            label="1A",
+            status=True,
+            building_id=northwood.id,
+        )
+    )
+    session.commit()
+    logger.info("Ensured Northwood flat 1A exists")
 
 
 def init() -> None:
@@ -62,9 +96,11 @@ def create_initial_data() -> None:
     """Create initial data for the application."""
     with Session(engine) as session:
         # Check if condominio already exists
-        condominio = session.exec(
-            select(Condominio).where(Condominio.nome == "Oak Hill Park")
-        ).first()
+        condominio = session.get(Condominio, OAK_HILL_PARK_CONDOMINIO_ID)
+        if not condominio:
+            condominio = session.exec(
+                select(Condominio).where(Condominio.nome == "Oak Hill Park")
+            ).first()
         if condominio:
             cleaner = session.exec(
                 select(Funcionario).where(
@@ -91,12 +127,16 @@ def create_initial_data() -> None:
                 session.add(caretaker)
 
             session.commit()
+            ensure_northwood_flat_1a(session, condominio)
             ensure_fire_alarm_schedule_seed(session)
             ensure_default_manager_user(session, condominio)
             logger.info("Initial data already exists, ensured default staff are active")
             return
         # Create condominio
-        condominio = Condominio(nome="Oak Hill Park")
+        condominio = Condominio(
+            id=OAK_HILL_PARK_CONDOMINIO_ID,
+            nome="Oak Hill Park",
+        )
         session.add(condominio)
         session.flush()
         # Buildings data: name -> number of flats
@@ -140,6 +180,16 @@ def create_initial_data() -> None:
                     building_id=building.id
                 )
                 session.add(flat)
+
+            if building_name == "Northwood":
+                session.add(
+                    Flat(
+                        numero=1,
+                        label="1A",
+                        status=True,
+                        building_id=building.id,
+                    )
+                )
 
         session.commit()
         logger.info(f"Created condominio: {condominio.nome}")

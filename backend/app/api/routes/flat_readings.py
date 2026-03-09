@@ -44,6 +44,7 @@ def _normalize_phone_to_e164(raw_phone: str | None, default_country_code: str = 
 def _build_flat_readings_sms_message(
     *,
     flat_number: int | None,
+    flat_label: str | None,
     reading_date: datetime,
     normal_value: int | None,
     gas_value: int | None,
@@ -53,7 +54,13 @@ def _build_flat_readings_sms_message(
         return None
 
     date_str = reading_date.astimezone(timezone.utc).strftime("%d/%m/%Y")
-    flat_label = f"flat {flat_number}" if flat_number is not None else "flat"
+    flat_ref = (
+        f"flat {flat_label.strip()}"
+        if flat_label and flat_label.strip()
+        else f"flat {flat_number}"
+        if flat_number is not None
+        else "flat"
+    )
     parts: list[str] = []
     if normal_value is not None:
         parts.append(f"Normal: {normal_value}")
@@ -61,7 +68,7 @@ def _build_flat_readings_sms_message(
         parts.append(f"Gas: {gas_value}")
     values = " | ".join(parts)
     return (
-        f"OakHill Park: reading update for {flat_label} on {date_str}. "
+        f"OakHill Park: reading update for {flat_ref} on {date_str}. "
         f"{values}. Please keep this record."
     )
 
@@ -128,6 +135,7 @@ def _send_owner1_flat_reading_sms(session: SessionDep, flat_reading: FlatReading
 
     message = _build_flat_readings_sms_message(
         flat_number=flat.numero if flat else None,
+        flat_label=flat.label if flat else None,
         reading_date=flat_reading.data,
         normal_value=latest_normal,
         gas_value=latest_gas,

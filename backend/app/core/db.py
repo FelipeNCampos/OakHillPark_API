@@ -1,10 +1,52 @@
+from sqlalchemy import inspect, text
 from sqlmodel import Session, create_engine, select
 
 from app import crud
 from app.core.config import settings
-from app.models import Condominio, User, UserCreate
+from app.models import Building, Condominio, Flat, User, UserCreate
 
 engine = create_engine(str(settings.SQLALCHEMY_DATABASE_URI))
+
+
+def _ensure_flat_label_schema(session: Session) -> None:
+    bind = session.get_bind()
+    inspector = inspect(bind)
+    if not inspector.has_table("flat"):
+        return
+
+    columns = {column["name"] for column in inspector.get_columns("flat")}
+    if "label" not in columns:
+        session.execute(text("ALTER TABLE flat ADD COLUMN label VARCHAR(20)"))
+        session.commit()
+
+    if not inspector.has_table("building"):
+        return
+
+    northwood = session.exec(select(Building).where(Building.nome == "Northwood")).first()
+    if not northwood:
+        return
+
+    existing = session.exec(
+        select(Flat).where(
+            Flat.building_id == northwood.id,
+            Flat.numero == 1,
+            Flat.label == "1A",
+        )
+    ).first()
+    if existing:
+        return
+
+    session.add(
+        Flat(
+            numero=1,
+            label="1A",
+            status=True,
+            building_id=northwood.id,
+            occupied=False,
+            reading_types=0,
+        )
+    )
+    session.commit()
 
 
 # make sure all SQLModel models are imported (app.models) before initializing DB
@@ -20,6 +62,8 @@ def init_db(session: Session) -> None:
 
     # This works because the models are already imported and registered from app.models
     # SQLModel.metadata.create_all(engine)
+
+    _ensure_flat_label_schema(session)
 
     user = session.exec(
         select(User).where(User.email == settings.FIRST_SUPERUSER)

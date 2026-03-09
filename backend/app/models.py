@@ -118,6 +118,7 @@ class Building(SQLModel, table=True):
 
 class FlatBase(SQLModel):
     numero: int = Field(default=0, ge=0, le=999)
+    label: str | None = Field(default=None, max_length=20)
     status: bool = Field(default=False)
     building_id: uuid.UUID
     reading_types: int = Field(default=0, ge=0, le=7)  # Bitmask: 1=Low, 2=Normal, 4=Gas
@@ -462,6 +463,7 @@ class BuildingPublic(BuildingBase):
 class FlatPublicSimple(SQLModel):
     id: uuid.UUID
     numero: int
+    label: str | None = None
     status: bool
     building_id: uuid.UUID
     reading_types: int
@@ -486,6 +488,7 @@ class FlatCreate(FlatBase):
 
 class FlatUpdate(SQLModel):
     numero: int | None = None
+    label: str | None = Field(default=None, max_length=20)
     status: bool | None = None
     building_id: uuid.UUID | None = None
     reading_types: int | None = Field(default=None, ge=0, le=7)
@@ -563,6 +566,7 @@ class MoradoresPublic(SQLModel):
 class MoradorWithFlatPublic(MoradorBase):
     id: uuid.UUID
     flat_numero: int
+    flat_label: str | None = None
     building_nome: str
     reading_types: int  # Bitmask for reading types: 1=Low, 2=Normal, 4=Gas
     car1: str | None = None

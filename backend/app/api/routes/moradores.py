@@ -32,7 +32,7 @@ def read_moradores(
         select(Morador, Flat, Building)
         .join(Flat, col(Morador.flat_id) == col(Flat.id))
         .join(Building, col(Flat.building_id) == col(Building.id))
-        .order_by(Building.nome, Flat.numero)
+        .order_by(Building.nome, Flat.numero, Flat.label)
     )
 
     # Filter by building if provided
@@ -46,6 +46,7 @@ def read_moradores(
             col(Morador.nome).ilike(search_term),
             col(Morador.mobile).ilike(search_term),
             col(Morador.email).ilike(search_term),
+            col(Flat.label).ilike(search_term),
         ]
         if search.isdigit():
             search_clauses.append(col(Flat.numero) == int(search))
@@ -66,6 +67,7 @@ def read_moradores(
             col(Morador.nome).ilike(search_term),
             col(Morador.mobile).ilike(search_term),
             col(Morador.email).ilike(search_term),
+            col(Flat.label).ilike(search_term),
         ]
         if search.isdigit():
             search_clauses.append(col(Flat.numero) == int(search))
@@ -86,6 +88,7 @@ def read_moradores(
             car3=flat.car3 if flat.car3 and flat.car3.strip() else None,
             flat_id=morador.flat_id,
             flat_numero=flat.numero,
+            flat_label=flat.label,
             building_nome=building.nome,
             reading_types=flat.reading_types,
         )
@@ -166,6 +169,7 @@ def update_morador_reading_types(
         car3=flat.car3,
         flat_id=morador.flat_id,
         flat_numero=flat.numero,
+        flat_label=flat.label,
         building_nome=building.nome,
         reading_types=flat.reading_types,
     )

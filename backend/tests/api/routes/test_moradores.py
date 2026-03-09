@@ -196,6 +196,46 @@ def test_update_morador(
     assert updated_morador["email"] == update_data["email"]
 
 
+def test_update_morador_to_labeled_flat(
+    client: TestClient, superuser_token_headers: dict[str, str], db: Session
+) -> None:
+    _, building, flat = _create_test_condominio_flat(db)
+    labeled_flat = Flat.model_validate(
+        FlatCreate(
+            numero=101,
+            label="1A",
+            status=True,
+            building_id=building.id,
+        )
+    )
+    db.add(labeled_flat)
+    db.commit()
+    db.refresh(labeled_flat)
+
+    morador = _create_test_morador(db, flat.id)
+
+    response = client.patch(
+        f"{settings.API_V1_STR}/moradores/{morador.id}",
+        headers=superuser_token_headers,
+        json={"flat_id": str(labeled_flat.id)},
+    )
+    assert response.status_code == 200
+    assert response.json()["flat_id"] == str(labeled_flat.id)
+
+    list_response = client.get(
+        f"{settings.API_V1_STR}/moradores/",
+        headers=superuser_token_headers,
+    )
+    assert list_response.status_code == 200
+    listed = next(
+        item
+        for item in list_response.json()["data"]
+        if item["id"] == str(morador.id)
+    )
+    assert listed["flat_numero"] == 101
+    assert listed["flat_label"] == "1A"
+
+
 def test_update_morador_partial(
     client: TestClient, superuser_token_headers: dict[str, str], db: Session
 ) -> None:

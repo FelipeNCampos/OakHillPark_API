@@ -1,4 +1,6 @@
 import datetime
+import logging
+import re
 import uuid
 from typing import Any
 
@@ -7,6 +9,7 @@ from sqlalchemy import desc
 from sqlmodel import col, func, select
 
 from app.api.deps import SessionDep, get_current_user, require_cargo
+from app.core.config import settings
 from app.models import (
     Acess,
     AcessActiveStatus,
@@ -14,6 +17,7 @@ from app.models import (
     AcessesPublic,
     AcessPublic,
     AcessUpdate,
+    Building,
     Funcionario,
     Message,
     User,
@@ -22,8 +26,11 @@ from app.models import (
     WorkTimeSessionPublic,
     WorkTimeSessionsPublic,
 )
+from app.utils import send_sms_notification
 
 router = APIRouter(prefix="/acess", tags=["acess"])
+logger = logging.getLogger(__name__)
+E164_PHONE_REGEX = re.compile(r"^\+[1-9]\d{8,19}$")
 
 
 def get_default_funcionario(session: SessionDep, cargo: int) -> Funcionario | None:
@@ -65,6 +72,86 @@ def get_last_work_time_session(
         .order_by(desc(col(WorkTimeSession.data)))
         .limit(1)
     ).first()
+
+
+def _has_cleaner_in_for_day(
+    session: SessionDep,
+    funcionario_id: uuid.UUID,
+    target_date: datetime.date,
+) -> bool:
+    statement = (
+        select(func.count())
+        .select_from(Acess)
+        .where(
+            Acess.funcionario_id == funcionario_id,
+            Acess.operacao == 0,
+            func.date(Acess.data) == target_date,
+        )
+    )
+    return session.exec(statement).one() > 0
+
+
+def _has_all_buildings_cleaner_in_and_out_for_day(
+    session: SessionDep,
+    cleaner: Funcionario,
+    target_date: datetime.date,
+) -> bool:
+    building_ids = set(
+        session.exec(
+            select(Building.id).where(Building.condominio_id == cleaner.condominio_id)
+        ).all()
+    )
+    if not building_ids:
+        return False
+
+    day_accesses = session.exec(
+        select(Acess.building_id, Acess.operacao).where(
+            Acess.funcionario_id == cleaner.id,
+            func.date(Acess.data) == target_date,
+        )
+    ).all()
+
+    operations_by_building: dict[uuid.UUID, set[int]] = {}
+    for building_id, operacao in day_accesses:
+        operations_by_building.setdefault(building_id, set()).add(operacao)
+
+    return all(
+        {0, 1}.issubset(operations_by_building.get(building_id, set()))
+        for building_id in building_ids
+    )
+
+
+def _normalize_status_sms_phone(
+    raw_phone: str | None, default_country_code: str = "+44"
+) -> str | None:
+    if raw_phone is None:
+        return None
+
+    cleaned = re.sub(r"[^\d+]", "", str(raw_phone).strip())
+    if not cleaned:
+        return None
+    if cleaned.startswith("+"):
+        return cleaned if E164_PHONE_REGEX.fullmatch(cleaned) else None
+
+    digits_only = re.sub(r"\D", "", cleaned)
+    if digits_only.startswith("0"):
+        digits_only = digits_only[1:]
+    normalized = f"{default_country_code}{digits_only}"
+    return normalized if E164_PHONE_REGEX.fullmatch(normalized) else None
+
+
+def _send_staff_status_sms(body: str) -> None:
+    phone_to = _normalize_status_sms_phone(settings.CLEANER_STATUS_SMS_TO)
+    if not phone_to:
+        logger.info(
+            "Skipping cleaner status SMS because CLEANER_STATUS_SMS_TO is not configured"
+        )
+        return
+
+    try:
+        send_sms_notification(phone_to=phone_to, body=body)
+    except Exception:
+        logger.exception("Failed to send staff status SMS", extra={"body": body})
 
 
 @router.get("/active", response_model=AcessActiveStatus)
@@ -131,6 +218,19 @@ def create_acess(*, session: SessionDep, acess_in: AcessCreate) -> Any:
 
     if not default_cleaner:
         raise HTTPException(status_code=404, detail="Default cleaner not found")
+
+    access_time = datetime.datetime.now()
+    access_date = access_time.date()
+    should_send_cleaner_in_sms = (
+        acess_in.operacao == 0
+        and not _has_cleaner_in_for_day(session, default_cleaner.id, access_date)
+    )
+    had_completed_all_buildings = False
+    if acess_in.operacao == 1:
+        had_completed_all_buildings = _has_all_buildings_cleaner_in_and_out_for_day(
+            session, default_cleaner, access_date
+        )
+
     last_acess = get_last_acess(session, default_cleaner.id)
 
     if acess_in.operacao == 0:
@@ -143,7 +243,7 @@ def create_acess(*, session: SessionDep, acess_in: AcessCreate) -> Any:
             auto_close = {
                 "id": uuid.uuid4(),
                 "status": True,
-                "data": datetime.datetime.now(),
+                "data": access_time,
                 "operacao": 1,
                 "building_id": last_acess.building_id,
                 "funcionario_id": default_cleaner.id,
@@ -165,7 +265,7 @@ def create_acess(*, session: SessionDep, acess_in: AcessCreate) -> Any:
     final: dict = {
         "id": uuid.uuid4(),
         "status": True,
-        "data": datetime.datetime.now(),
+        "data": access_time,
         "operacao": acess_in.operacao,
         "building_id": acess_in.building_id,
         "funcionario_id": default_cleaner.id,
@@ -176,6 +276,18 @@ def create_acess(*, session: SessionDep, acess_in: AcessCreate) -> Any:
     session.add(acess)
     session.commit()
     session.refresh(acess)
+
+    if should_send_cleaner_in_sms:
+        _send_staff_status_sms("Cleaner IN")
+    elif (
+        acess_in.operacao == 1
+        and not had_completed_all_buildings
+        and _has_all_buildings_cleaner_in_and_out_for_day(
+            session, default_cleaner, access_date
+        )
+    ):
+        _send_staff_status_sms("Cleaner OUT")
+
     return acess
 
 
@@ -260,6 +372,20 @@ def create_caretaker_work_time(
         raise HTTPException(status_code=422, detail="Invalid operacao")
 
     last_session = get_last_work_time_session(session, caretaker.id)
+    session_time = payload.data if payload.data else datetime.datetime.now(datetime.timezone.utc)
+    session_date = session_time.date()
+    should_send_work_time_in_sms = (
+        payload.operacao == 0
+        and not session.exec(
+            select(func.count())
+            .select_from(WorkTimeSession)
+            .where(
+                WorkTimeSession.funcionario_id == caretaker.id,
+                WorkTimeSession.operacao == 0,
+                func.date(WorkTimeSession.data) == session_date,
+            )
+        ).one()
+    )
 
     if payload.operacao == 0 and last_session and last_session.operacao == 0:
         raise HTTPException(status_code=400, detail="Caretaker already has an open work time session")
@@ -274,12 +400,19 @@ def create_caretaker_work_time(
         payload,
         update={
             "status": True,
+            "data": session_time,
             "funcionario_id": caretaker.id,
         },
     )
     session.add(item)
     session.commit()
     session.refresh(item)
+
+    if should_send_work_time_in_sms:
+        _send_staff_status_sms("WORK TIME IN")
+    elif payload.operacao == 1:
+        _send_staff_status_sms("WORK TIME OUT")
+
     return WorkTimeSessionPublic(
         id=item.id,
         status=item.status,

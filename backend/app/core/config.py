@@ -95,6 +95,7 @@ class Settings(BaseSettings):
     FIRST_SUPERUSER_PASSWORD: str
     CARETAKER_USER_EMAIL: EmailStr = "caretaker@example.com"
     CARETAKER_USER_PASSWORD: str = "changethis"
+    CLEANER_STATUS_SMS_TO: str | None = None
     TWILIO_ACCOUNT_SID: str | None = None
     TWILIO_AUTH_TOKEN: str | None = None
     TWILIO_FROM_NUMBER: str | None = None

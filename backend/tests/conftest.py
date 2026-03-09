@@ -2,7 +2,7 @@ from collections.abc import Generator
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlmodel import Session, delete
+from sqlmodel import Session, delete, select
 
 from app.core.config import settings
 from app.core.db import engine, init_db
@@ -20,17 +20,31 @@ def db() -> Generator[Session, None, None]:
         yield session
         
         # Clean up only test data at the end of test session
+        test_condominio_ids = session.exec(
+            select(Condominio.id).where(Condominio.nome.like("%Test%"))
+        ).all()
+
+        if test_condominio_ids:
+            users_linked_to_test_condos = session.exec(
+                select(User).where(User.condominio_id.in_(test_condominio_ids))
+            ).all()
+            for user in users_linked_to_test_condos:
+                user.condominio_id = None
+                session.add(user)
+            session.commit()
+
+        test_building_ids = select(Building.id).where(Building.nome.like("%Test%"))
+        test_acess_ids = (
+            select(Acess.id)
+            .join(Building, Acess.building_id == Building.id)
+            .where(Building.nome.like("%Test%"))
+        )
+
         # Delete test buildings (those with "Test" in the name)
-        session.exec(delete(Acess).where(Acess.id.in_(
-            session.query(Acess.id).join(Building).filter(Building.nome.like("%Test%"))
-        )))
-        session.exec(delete(Readings).where(Readings.building_id.in_(
-            session.query(Building.id).filter(Building.nome.like("%Test%"))
-        )))
+        session.exec(delete(Acess).where(Acess.id.in_(test_acess_ids)))
+        session.exec(delete(Readings).where(Readings.building_id.in_(test_building_ids)))
         session.exec(delete(Morador))  # All moradores are test data
-        session.exec(delete(Flat).where(Flat.building_id.in_(
-            session.query(Building.id).filter(Building.nome.like("%Test%"))
-        )))
+        session.exec(delete(Flat).where(Flat.building_id.in_(test_building_ids)))
         session.exec(delete(Building).where(Building.nome.like("%Test%")))
         session.exec(delete(Condominio).where(Condominio.nome.like("%Test%")))
         # Keep initial funcionarios but delete test ones if any

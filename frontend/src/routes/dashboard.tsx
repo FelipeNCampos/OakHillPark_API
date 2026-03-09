@@ -7100,10 +7100,6 @@ function FireAlarmSchedulePage() {
         <strong>{repetition}</strong>
       </div>
 
-      <div className="flex flex-wrap items-end justify-center gap-2 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-3">
-        
-      </div>
-
       <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
         <div className="mb-3 flex items-center justify-between gap-3">
           <div>

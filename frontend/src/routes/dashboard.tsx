@@ -195,6 +195,12 @@ type FlatResidentsPreview = {
   agent?: Morador
 }
 
+type FlatResidentPreviewEntry = {
+  key: keyof FlatResidentsPreview
+  label: string
+  resident: Morador
+}
+
 type ResidentEditContext = {
   editTitle: string
   flatResidents?: FlatResidentsPreview
@@ -9787,15 +9793,61 @@ function AddResidentForm({
     car2: "",
     flat_id: "",
   })
+  const [activeEditingId, setActiveEditingId] = useState<EntityId | null>(editingId)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [flats, setFlats] = useState<Array<{ id: EntityId; label: string }>>([])
   const flatResidentsPreview = editContext?.flatResidents
+  const flatResidentEntries = useMemo<FlatResidentPreviewEntry[]>(
+    () =>
+      [
+        flatResidentsPreview?.owner_1
+          ? {
+              key: "owner_1",
+              label: "Owner 1",
+              resident: flatResidentsPreview.owner_1,
+            }
+          : null,
+        flatResidentsPreview?.owner_2
+          ? {
+              key: "owner_2",
+              label: "Owner 2",
+              resident: flatResidentsPreview.owner_2,
+            }
+          : null,
+        flatResidentsPreview?.tenant
+          ? {
+              key: "tenant",
+              label: "Tenant",
+              resident: flatResidentsPreview.tenant,
+            }
+          : null,
+        flatResidentsPreview?.agent
+          ? {
+              key: "agent",
+              label: "Agent",
+              resident: flatResidentsPreview.agent,
+            }
+          : null,
+      ].filter((entry): entry is FlatResidentPreviewEntry => entry !== null),
+    [flatResidentsPreview],
+  )
   const hasFlatResidentsPreview = Boolean(
     flatResidentsPreview?.owner_1 ||
       flatResidentsPreview?.owner_2 ||
       flatResidentsPreview?.tenant ||
       flatResidentsPreview?.agent,
   )
+  const activePreviewResident =
+    flatResidentEntries.find(
+      (entry) => String(entry.resident.id) === String(activeEditingId),
+    )?.resident ?? null
+  const activeEditTitle = activePreviewResident
+    ? `Edit ${getResidentRoleEditToken(activePreviewResident.cargo)}`
+    : editContext?.editTitle ?? "Edit resident"
+
+  useEffect(() => {
+    setActiveEditingId(editingId)
+  }, [editingId])
 
   const { data: buildingsData } = useQuery<ApiListResponse<Building>>({
     queryKey: ["buildings"],
@@ -9804,11 +9856,11 @@ function AddResidentForm({
 
   // Load editing morador data if editingId is set
   useEffect(() => {
-    if (editingId) {
+    if (activeEditingId) {
       const loadMorador = async () => {
         try {
           const response = await fetch(
-            `${OpenAPI.BASE || "http://localhost:8000"}/api/v1/moradores/${editingId}`,
+            `${OpenAPI.BASE || "http://localhost:8000"}/api/v1/moradores/${activeEditingId}`,
             {
               headers: {
                 Authorization: `Bearer ${localStorage.getItem("access_token")}`,
@@ -9831,7 +9883,7 @@ function AddResidentForm({
       }
       loadMorador()
     }
-  }, [editingId])
+  }, [activeEditingId])
 
   // Build flats list from buildings
   useEffect(() => {
@@ -9872,17 +9924,17 @@ function AddResidentForm({
     setIsSubmitting(true)
 
     try {
-      const url = editingId
-        ? `${OpenAPI.BASE || "http://localhost:8000"}/api/v1/moradores/${editingId}`
+      const url = activeEditingId
+        ? `${OpenAPI.BASE || "http://localhost:8000"}/api/v1/moradores/${activeEditingId}`
         : `${OpenAPI.BASE || "http://localhost:8000"}/api/v1/moradores/`
 
-      const method = editingId ? "PATCH" : "POST"
+      const method = activeEditingId ? "PATCH" : "POST"
 
       const payload = {
         nome: formData.nome,
         email: formData.email || null,
         mobile: formData.mobile || "",
-        ...(!editingId ? { cargo: formData.cargo } : {}),
+        ...(!activeEditingId ? { cargo: formData.cargo } : {}),
         car1: formData.car1 || null,
         car2: formData.car2 || null,
         flat_id: formData.flat_id,
@@ -9902,7 +9954,7 @@ function AddResidentForm({
       }
 
       alert(
-        editingId
+        activeEditingId
           ? "Resident updated successfully!"
           : "Resident created successfully!",
       )
@@ -9922,7 +9974,7 @@ function AddResidentForm({
       <div className="rounded-lg bg-white p-8 shadow-md">
         <div className="mb-6 flex items-center justify-between">
           <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
-            {editingId ? (editContext?.editTitle ?? "Edit resident") : "New Resident"}
+            {activeEditingId ? activeEditTitle : "New Resident"}
           </h2>
           <button
             onClick={onBack}
@@ -9933,48 +9985,39 @@ function AddResidentForm({
           </button>
         </div>
 
-        {editingId && hasFlatResidentsPreview && (
+        {activeEditingId && hasFlatResidentsPreview && (
           <div className="mb-6 rounded-lg border border-[#e5e0dc] bg-[#f9f7f5] p-4">
             <h3 className="text-sm font-semibold text-[#55311c]">
               Residents in this flat
             </h3>
-            <div className="mt-2 grid gap-2 text-sm text-[#55311c] sm:grid-cols-2">
-              {flatResidentsPreview?.owner_1 && (
-                <p>
-                  <span className="font-semibold">Owner 1:</span>{" "}
-                  {flatResidentsPreview.owner_1.nome}
-                  {flatResidentsPreview.owner_1.mobile
-                    ? ` (${flatResidentsPreview.owner_1.mobile})`
-                    : ""}
-                </p>
-              )}
-              {flatResidentsPreview?.owner_2 && (
-                <p>
-                  <span className="font-semibold">Owner 2:</span>{" "}
-                  {flatResidentsPreview.owner_2.nome}
-                  {flatResidentsPreview.owner_2.mobile
-                    ? ` (${flatResidentsPreview.owner_2.mobile})`
-                    : ""}
-                </p>
-              )}
-              {flatResidentsPreview?.tenant && (
-                <p>
-                  <span className="font-semibold">Tenant:</span>{" "}
-                  {flatResidentsPreview.tenant.nome}
-                  {flatResidentsPreview.tenant.mobile
-                    ? ` (${flatResidentsPreview.tenant.mobile})`
-                    : ""}
-                </p>
-              )}
-              {flatResidentsPreview?.agent && (
-                <p>
-                  <span className="font-semibold">Agent:</span>{" "}
-                  {flatResidentsPreview.agent.nome}
-                  {flatResidentsPreview.agent.mobile
-                    ? ` (${flatResidentsPreview.agent.mobile})`
-                    : ""}
-                </p>
-              )}
+            <p className="mt-1 text-xs text-[rgba(85,49,28,0.75)]">
+              Select which resident from this flat you want to edit.
+            </p>
+            <div className="mt-3 grid gap-2 text-sm text-[#55311c] sm:grid-cols-2">
+              {flatResidentEntries.map((entry) => {
+                const isActive =
+                  String(entry.resident.id) === String(activeEditingId)
+                return (
+                  <button
+                    key={entry.key}
+                    type="button"
+                    onClick={() => setActiveEditingId(entry.resident.id)}
+                    className={`rounded-lg border px-3 py-2 text-left transition-all duration-200 ${
+                      isActive
+                        ? "border-[#55311c] bg-[#55311c] text-white"
+                        : "border-[#d9d0ca] bg-white text-[#55311c] hover:bg-[#f0ebe7]"
+                    }`}
+                  >
+                    <div className="text-xs font-semibold uppercase tracking-wide opacity-80">
+                      {entry.label}
+                    </div>
+                    <div className="font-semibold">{entry.resident.nome}</div>
+                    <div className="text-xs opacity-80">
+                      {entry.resident.mobile || "No phone"}
+                    </div>
+                  </button>
+                )
+              })}
             </div>
           </div>
         )}
@@ -10096,7 +10139,7 @@ function AddResidentForm({
               />
             </div>
 
-            {!editingId && (
+            {!activeEditingId && (
               <div>
                 <label
                   className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
@@ -10134,7 +10177,7 @@ function AddResidentForm({
             >
               {isSubmitting
                 ? "Saving..."
-                : editingId
+                : activeEditingId
                   ? "Update Resident"
                   : "Create Resident"}
             </button>

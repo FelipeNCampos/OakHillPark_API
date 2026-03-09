@@ -226,13 +226,11 @@ interface NewReadingPayload {
 }
 
 const formatFlatNumber = (
-  buildingName?: string | null,
+  _buildingName?: string | null,
   flatNumber?: number | null,
 ) => {
   if (flatNumber === null || flatNumber === undefined) return ""
-  return buildingName?.trim().toLowerCase() === "northwood" && flatNumber === 1
-    ? "1A"
-    : String(flatNumber)
+  return String(flatNumber)
 }
 
 const formatFlatLabel = (
@@ -1414,6 +1412,9 @@ function ClientDashboard() {
     }))
   }
 
+  const isTabActive = (targetTab: string) =>
+    activeTab === targetTab || activeTab === `${targetTab}-add`
+
   const menuGroups = [
     {
       name: "Readings",
@@ -1460,8 +1461,12 @@ function ClientDashboard() {
         return <OverviewContent user={user} onNavigate={setActiveTab} />
       case "buildings":
         return <BuildingsReadingsContent />
+      case "buildings-add":
+        return <BuildingsReadingsContent initialShowForm />
       case "flats":
         return <FlatsReadingsContent />
+      case "flats-add":
+        return <FlatsReadingsContent initialShowForm />
       case "qr-cleaner":
         return <CleanerQrCodesContent />
       case "qr-contractor":
@@ -1568,7 +1573,7 @@ function ClientDashboard() {
                         }}
                         type="button"
                         className={`block w-full rounded-lg px-4 py-2 text-left font-['Nunito',sans-serif] text-sm transition-all duration-200 ${
-                          activeTab === item.id
+                          isTabActive(item.id)
                             ? "bg-[#8c7569] text-white"
                             : "text-[rgba(85,49,28,0.7)] hover:bg-[#f9f7f5]"
                         }`}
@@ -1595,7 +1600,7 @@ function ClientDashboard() {
                   }}
                   type="button"
                   className={`w-full rounded-lg px-4 py-2 text-left font-['Nunito',sans-serif] text-sm font-semibold transition-all duration-200 ${
-                    activeTab === item.id
+                    isTabActive(item.id)
                       ? "bg-[#8c7569] text-white"
                       : "text-[#55311c] hover:bg-[#f9f7f5]"
                   }`}
@@ -1704,7 +1709,7 @@ function OverviewContent({
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
         <button
           type="button"
-          onClick={() => onNavigate("buildings")}
+          onClick={() => onNavigate("buildings-add")}
           className="rounded-lg bg-white p-6 text-left shadow-md transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
         >
           <div className="mb-2 flex items-center justify-between">
@@ -1734,7 +1739,7 @@ function OverviewContent({
 
         <button
           type="button"
-          onClick={() => onNavigate("flats")}
+          onClick={() => onNavigate("flats-add")}
           className="rounded-lg bg-white p-6 text-left shadow-md transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
         >
           <div className="mb-2 flex items-center justify-between">
@@ -1768,11 +1773,15 @@ function OverviewContent({
   )
 }
 
-function BuildingsReadingsContent() {
+function BuildingsReadingsContent({
+  initialShowForm = false,
+}: {
+  initialShowForm?: boolean
+}) {
   const [selectedBuildingId, setSelectedBuildingId] = useState<EntityId | null>(
     null,
   )
-  const [showForm, setShowForm] = useState(false)
+  const [showForm, setShowForm] = useState(initialShowForm)
   const [reportTrigger, setReportTrigger] = useState(0)
 
   const {
@@ -1794,6 +1803,12 @@ function BuildingsReadingsContent() {
       setSelectedBuildingId(firstBuildingId)
     }
   }, [firstBuildingId, selectedBuildingId])
+
+  useEffect(() => {
+    if (initialShowForm) {
+      setShowForm(true)
+    }
+  }, [initialShowForm])
 
   if (buildingsLoading) {
     return (
@@ -3447,12 +3462,16 @@ function AddFlatReadingsForm({
   )
 }
 
-function FlatsReadingsContent() {
+function FlatsReadingsContent({
+  initialShowForm = false,
+}: {
+  initialShowForm?: boolean
+}) {
   const [selectedBuildingId, setSelectedBuildingId] = useState<EntityId | null>(
     null,
   )
   const [selectedFlatId, setSelectedFlatId] = useState<EntityId | null>(null)
-  const [showForm, setShowForm] = useState(false)
+  const [showForm, setShowForm] = useState(initialShowForm)
 
   const { data: buildingsData, isLoading: buildingsLoading } = useQuery<
     ApiListResponse<Building>
@@ -3480,6 +3499,12 @@ function FlatsReadingsContent() {
       setSelectedFlatId(null)
     }
   }, [flats, selectedFlatId])
+
+  useEffect(() => {
+    if (initialShowForm) {
+      setShowForm(true)
+    }
+  }, [initialShowForm])
 
   if (buildingsLoading) {
     return (
@@ -9993,7 +10018,7 @@ function AddResidentForm({
   })
   const [activeEditingId, setActiveEditingId] = useState<EntityId | null>(editingId)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [flats, setFlats] = useState<Array<{ id: EntityId; label: string }>>([])
+  const [flats, setFlats] = useState<Array<{ id: string; label: string }>>([])
   const flatResidentsPreview = editContext?.flatResidents
   const flatResidentEntries = useMemo<FlatResidentPreviewEntry[]>(
     () =>
@@ -10088,7 +10113,7 @@ function AddResidentForm({
 
   // Build flats list from buildings
   useEffect(() => {
-    const allFlats: Array<{ id: EntityId; label: string }> = []
+    const allFlats: Array<{ id: string; label: string }> = []
 
     // Sort buildings by nome and flats by numero
     const sortedBuildings = [...(buildingsData?.data || [])].sort((a, b) =>
@@ -10102,12 +10127,21 @@ function AddResidentForm({
 
       sortedFlats.forEach((flat) => {
         allFlats.push({
-          id: flat.id,
+          id: String(flat.id),
           label: `${building.nome} - ${formatFlatLabel(
             building.nome,
             flat.numero,
           )}`,
         })
+        if (
+          building.nome.trim().toLowerCase() === "northwood" &&
+          flat.numero === 1
+        ) {
+          allFlats.push({
+            id: `${flat.id}::northwood-1a`,
+            label: `${building.nome} - Flat 1A`,
+          })
+        }
       })
     })
     setFlats(allFlats)
@@ -10145,7 +10179,7 @@ function AddResidentForm({
               car2: formData.car2 || null,
             }
           : {}),
-        flat_id: formData.flat_id,
+        flat_id: formData.flat_id.split("::")[0],
       }
 
       const response = await fetch(url, {

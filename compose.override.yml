@@ -55,6 +55,14 @@ services:
     ports:
       - "8080:8080"
 
+  prestart:
+    environment:
+      # Force local URLs here so generated links and backend startup checks
+      # match the local docker-compose topology instead of production values.
+      - ENVIRONMENT=local
+      - FRONTEND_HOST=http://localhost:5173
+      - BACKEND_CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,http://localhost,http://127.0.0.1
+
   backend:
     restart: "no"
     ports:
@@ -68,6 +76,10 @@ services:
       - run
       - --reload
       - "app/main.py"
+    environment:
+      - ENVIRONMENT=local
+      - FRONTEND_HOST=http://localhost:5173
+      - BACKEND_CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,http://localhost,http://127.0.0.1
     develop:
       watch:
         - path: ./backend

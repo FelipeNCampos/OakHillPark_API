@@ -406,6 +406,32 @@ const buildScheduleReportEmailHtml = ({
   `.trim()
 }
 
+const buildWorkTimeReportEmailHtml = ({
+  caretakerName,
+  periodLabel,
+}: {
+  caretakerName: string
+  periodLabel: string
+}) => {
+  const safeCaretakerName = escapeHtml(caretakerName)
+  const safePeriod = escapeHtml(periodLabel)
+
+  return `
+  <div style="font-family:Arial,Helvetica,sans-serif;color:#2f2f2f;line-height:1.5;">
+    <h2 style="margin:0 0 12px;color:#55311c;">Hello,</h2>
+    <p style="margin:0 0 10px;">
+      Please find attached the caretaker work time report.
+    </p>
+    <p style="margin:0 0 6px;"><strong>Caretaker:</strong> ${safeCaretakerName}</p>
+    <p style="margin:0 0 16px;"><strong>Period:</strong> ${safePeriod}</p>
+    <p style="margin:0 0 8px;">
+      If you have any questions, please reply to this email.
+    </p>
+    <p style="margin:0;color:#666;">OakHill Park Team</p>
+  </div>
+  `.trim()
+}
+
 const weekdayOptions = [
   { value: 0, label: "Monday" },
   { value: 1, label: "Tuesday" },
@@ -6792,6 +6818,12 @@ function CaretakerContent() {
   const [activeSubTab, setActiveSubTab] = useState<
     "summary" | "register" | "schedules"
   >("summary")
+  const [reportTrigger, setReportTrigger] = useState(0)
+
+  const handleOpenReport = () => {
+    setActiveSubTab("summary")
+    setReportTrigger((current) => current + 1)
+  }
 
   return (
     <div className="mx-auto max-w-7xl">
@@ -6808,6 +6840,13 @@ function CaretakerContent() {
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
+              onClick={handleOpenReport}
+              className="rounded-lg border border-[#8c7569] bg-white px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+            >
+              Report
+            </button>
+            <button
+              type="button"
               onClick={() => setActiveSubTab("summary")}
               className={`rounded-lg px-4 py-2 text-sm font-semibold transition-all duration-200 ${
                 activeSubTab === "summary"
@@ -6817,33 +6856,11 @@ function CaretakerContent() {
             >
               Summary
             </button>
-            <button
-              type="button"
-              onClick={() => setActiveSubTab("register")}
-              className={`rounded-lg px-4 py-2 text-sm font-semibold transition-all duration-200 ${
-                activeSubTab === "register"
-                  ? "bg-[#8c7569] text-white"
-                  : "bg-[#f5f1ee] text-[#55311c] hover:bg-[#e8e1dc]"
-              }`}
-            >
-              Registration
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveSubTab("schedules")}
-              className={`rounded-lg px-4 py-2 text-sm font-semibold transition-all duration-200 ${
-                activeSubTab === "schedules"
-                  ? "bg-[#8c7569] text-white"
-                  : "bg-[#f5f1ee] text-[#55311c] hover:bg-[#e8e1dc]"
-              }`}
-            >
-              Schedules
-            </button>
           </div>
         </div>
       </div>
 
-      {activeSubTab === "summary" && <CaretakerSummary />}
+      {activeSubTab === "summary" && <CaretakerSummary reportTrigger={reportTrigger} />}
       {activeSubTab === "register" && <CaretakerRegister />}
       {activeSubTab === "schedules" && <CaretakerSchedules />}
     </div>
@@ -8657,7 +8674,8 @@ function CleanerRegister() {
   )
 }
 
-function CaretakerSummary() {
+function CaretakerSummary({ reportTrigger = 0 }: { reportTrigger?: number }) {
+  const { showSuccessToast, showErrorToast } = useCustomToast()
   const { data: caretakersData } = useQuery<ApiListResponse<Funcionario>>({
     queryKey: ["funcionarios", "caretakers-summary"],
     queryFn: () => apiCall("/api/v1/funcionarios/", { skip: 0, limit: 500 }),
@@ -8708,6 +8726,18 @@ function CaretakerSummary() {
     )
   }, [caretakersData])
 
+  const activeCaretakerName = useMemo(() => {
+    const caretakers = (caretakersData?.data || []).filter(
+      (funcionario: Funcionario) => funcionario.cargo === 1,
+    )
+    const activeCaretaker = caretakers.find(
+      (caretaker: Funcionario) => caretaker.is_default,
+    )
+    if (activeCaretaker?.nome?.trim()) return activeCaretaker.nome.trim()
+    if (caretakers[0]?.nome?.trim()) return caretakers[0].nome.trim()
+    return "Caretaker"
+  }, [caretakersData])
+
   const workTimeRecords = useMemo(() => {
     if (!activeCaretakerId) return workTimeRecordsRaw
     return workTimeRecordsRaw.filter(
@@ -8728,6 +8758,11 @@ function CaretakerSummary() {
     const day = String(now.getDate()).padStart(2, "0")
     return `${year}-${month}-${day}`
   })
+  const [reportDateFrom, setReportDateFrom] = useState("")
+  const [reportDateTo, setReportDateTo] = useState("")
+  const [reportEmail, setReportEmail] = useState("")
+  const [isSendingReport, setIsSendingReport] = useState(false)
+  const [showReportModal, setShowReportModal] = useState(false)
 
   const workTimeSessionsGrouped = useMemo(() => {
     const sorted = [...workTimeRecords]
@@ -8934,6 +8969,107 @@ function CaretakerSummary() {
       .slice(0, 20)
   }, [binSessionsGrouped, workTimeSessionsGrouped, buildingMap])
 
+  const formatDurationFromMinutes = (minutes: number) => {
+    if (minutes <= 0) return "0m"
+    const hours = Math.floor(minutes / 60)
+    const remainingMinutes = minutes % 60
+    if (hours <= 0) return `${remainingMinutes}m`
+    if (remainingMinutes === 0) return `${hours}h`
+    return `${hours}h ${remainingMinutes}m`
+  }
+
+  const handleSendWorkTimeReport = async () => {
+    if (reportDateFrom && reportDateTo && reportDateFrom > reportDateTo) {
+      showErrorToast("Invalid date range")
+      return
+    }
+    if (!reportEmail.trim()) {
+      showErrorToast("Email is required")
+      return
+    }
+
+    const filteredSessions = workTimeSessionsGrouped.filter((session) =>
+      isDateWithinRange(
+        session.inRecord?.data || session.outRecord?.data || "",
+        reportDateFrom,
+        reportDateTo,
+      ),
+    )
+
+    if (filteredSessions.length === 0) {
+      showErrorToast("No work time sessions found in the selected range")
+      return
+    }
+
+    let totalMinutes = 0
+    const rows = filteredSessions.map((session) => {
+      const usedMinutes = getDurationMinutes(
+        session.inRecord?.data,
+        session.outRecord?.data,
+        false,
+      )
+      totalMinutes += usedMinutes
+
+      return [
+        formatDate(session.inRecord?.data || session.outRecord?.data || null),
+        formatTime(session.inRecord?.data || null),
+        formatTime(session.outRecord?.data || null),
+        formatUsed(session.inRecord?.data || null, session.outRecord?.data || null),
+        session.outRecord?.data ? "Closed" : "Open",
+      ]
+    })
+
+    rows.push(["Total", "-", "-", formatDurationFromMinutes(totalMinutes), "-"])
+
+    const reportTitle = "Caretaker Work Time Report"
+    const periodLabel = buildDateRangeLabel(reportDateFrom, reportDateTo)
+    const fileName = `caretaker-work-time-${new Date().toISOString().slice(0, 10)}.pdf`
+    const fileDataBase64 = generatePdfTableReportBase64({
+      title: `${reportTitle} - ${activeCaretakerName}`,
+      dateRange: `${periodLabel} | Total worked: ${formatDurationFromMinutes(totalMinutes)}`,
+      headers: ["Date", "Time IN", "Time OUT", "Used", "Status"],
+      rows,
+    })
+
+    if (!fileDataBase64) {
+      showErrorToast("Failed to prepare report file")
+      return
+    }
+
+    try {
+      setIsSendingReport(true)
+      await apiCall("/api/v1/utils/send-report-email/", {
+        method: "POST",
+        body: {
+          email_to: reportEmail.trim(),
+          subject: `${reportTitle} - ${activeCaretakerName}`,
+          html_content: buildWorkTimeReportEmailHtml({
+            caretakerName: activeCaretakerName,
+            periodLabel,
+          }),
+          file_name: fileName,
+          file_data_base64: fileDataBase64,
+        },
+      })
+      setShowReportModal(false)
+      showSuccessToast("Work time report sent successfully")
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to send work time report by email"
+      showErrorToast(message)
+    } finally {
+      setIsSendingReport(false)
+    }
+  }
+
+  useEffect(() => {
+    if (reportTrigger > 0) {
+      setShowReportModal(true)
+    }
+  }, [reportTrigger])
+
   return (
     <div className="rounded-lg bg-white p-6 shadow-md">
       <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -9123,6 +9259,87 @@ function CaretakerSummary() {
           </tbody>
         </table>
       </div>
+
+      {showReportModal && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-3 sm:items-center sm:px-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-4 shadow-xl sm:p-6">
+            <h3 className="text-lg font-bold text-[#55311c]">
+              Generate work time report
+            </h3>
+            <p className="mt-1 text-sm text-[rgba(0,0,0,0.7)]">
+              Enter email and optional date range to send the caretaker work time PDF report.
+            </p>
+
+            <div className="mt-4 grid gap-4">
+              <div>
+                <label
+                  className="block text-sm font-semibold text-[#55311c]"
+                  htmlFor="caretaker-report-email"
+                >
+                  Email
+                </label>
+                <input
+                  id="caretaker-report-email"
+                  type="email"
+                  value={reportEmail}
+                  onChange={(event) => setReportEmail(event.target.value)}
+                  placeholder="report@email.com"
+                  className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                />
+              </div>
+              <div>
+                <label
+                  className="block text-sm font-semibold text-[#55311c]"
+                  htmlFor="caretaker-report-date-from"
+                >
+                  Start date
+                </label>
+                <input
+                  id="caretaker-report-date-from"
+                  type="date"
+                  value={reportDateFrom}
+                  onChange={(event) => setReportDateFrom(event.target.value)}
+                  className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                />
+              </div>
+              <div>
+                <label
+                  className="block text-sm font-semibold text-[#55311c]"
+                  htmlFor="caretaker-report-date-to"
+                >
+                  End date
+                </label>
+                <input
+                  id="caretaker-report-date-to"
+                  type="date"
+                  min={reportDateFrom || undefined}
+                  value={reportDateTo}
+                  onChange={(event) => setReportDateTo(event.target.value)}
+                  className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                />
+              </div>
+            </div>
+
+            <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setShowReportModal(false)}
+                className="w-full rounded-lg border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] sm:w-auto"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSendWorkTimeReport}
+                disabled={isSendingReport}
+                className="w-full rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+              >
+                {isSendingReport ? "Sending..." : "Send by email"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -10441,4 +10658,3 @@ function AddResidentForm({
     </div>
   )
 }
-

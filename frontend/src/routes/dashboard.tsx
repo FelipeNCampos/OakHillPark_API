@@ -107,6 +107,19 @@ interface WorkTimeSessionRecord {
   funcionario_id: EntityId
 }
 
+interface CaretakerRecordEditState {
+  recordId: EntityId
+  originalIso: string
+  label: "Time IN" | "Time OUT"
+  recordType: "work-time" | "bins"
+}
+
+interface CleanerRecordEditState {
+  recordId: EntityId
+  originalIso: string
+  label: "Time IN" | "Time OUT"
+}
+
 interface Morador {
   id: EntityId
   cargo: number
@@ -120,6 +133,7 @@ interface Morador {
   car1?: string | null
   car2?: string | null
   car3?: string | null
+  receives_flat_reading_sms: boolean
   reading_types: number
 }
 
@@ -217,7 +231,20 @@ interface MoradorDetail {
   car1?: string | null
   car2?: string | null
   car3?: string | null
+  receives_flat_reading_sms: boolean
   flat_id: EntityId
+}
+
+interface NotificationHistoryEntry {
+  id: EntityId
+  created_at: string
+  notification_type: string
+  recipient_to: string
+  message: string
+  delivery_status: string
+  success: boolean
+  provider_message_id?: string | null
+  error_message?: string | null
 }
 
 interface NewReadingPayload {
@@ -341,6 +368,39 @@ const buildDateRangeLabel = (dateFrom?: string, dateTo?: string) => {
   if (dateTo) return `Until ${formatDateToBr(dateTo)}`
   return "All period"
 }
+
+const toIsoDateString = (date: Date) => {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
+}
+
+const getWeekStartIso = (value: string | Date) => {
+  const date = value instanceof Date ? new Date(value) : new Date(value)
+  if (Number.isNaN(date.getTime())) return ""
+  const normalized = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+  const weekday = normalized.getDay()
+  const offset = weekday === 0 ? -6 : 1 - weekday
+  normalized.setDate(normalized.getDate() + offset)
+  return toIsoDateString(normalized)
+}
+
+const addDaysToIso = (isoDate: string, days: number) => {
+  const date = new Date(`${isoDate}T00:00:00`)
+  if (Number.isNaN(date.getTime())) return isoDate
+  date.setDate(date.getDate() + days)
+  return toIsoDateString(date)
+}
+
+const addWeeksToIso = (isoDate: string, weeks: number) =>
+  addDaysToIso(isoDate, weeks * 7)
+
+const isIsoDateWithinWeek = (isoDate: string, weekStartIso: string) =>
+  Boolean(isoDate) &&
+  Boolean(weekStartIso) &&
+  isoDate >= weekStartIso &&
+  isoDate <= addDaysToIso(weekStartIso, 6)
 
 const escapeHtml = (value: string) =>
   value
@@ -1215,6 +1275,15 @@ const toDateInputValue = (date = new Date()) => {
   const month = String(date.getMonth() + 1).padStart(2, "0")
   const day = String(date.getDate()).padStart(2, "0")
   return `${year}-${month}-${day}`
+}
+
+const toTimeInputValue = (dateValue?: string | null) => {
+  if (!dateValue) return ""
+  const date = new Date(dateValue)
+  if (Number.isNaN(date.getTime())) return ""
+  const hours = String(date.getHours()).padStart(2, "0")
+  const minutes = String(date.getMinutes()).padStart(2, "0")
+  return `${hours}:${minutes}`
 }
 
 const formatDateToGb = (isoDate: string) => {
@@ -2562,6 +2631,17 @@ function BuildingReadingsTable({
                 </p>
               )}
             </div>
+            <div className="mt-3">
+              <button
+                type="button"
+                onClick={() =>
+                  handleOpenEdit(processedData[processedData.length - 1])
+                }
+                className="w-full rounded-lg bg-[#8c7569] px-3 py-2 text-xs font-semibold text-white transition-all duration-200 hover:bg-[#55311c]"
+              >
+                Edit
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -2767,7 +2847,19 @@ function BuildingReadingsTable({
               </>
             )}
             <td className="border border-gray-400 px-3 py-2 text-sm text-gray-800">
-              -
+              {processedData.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleOpenEdit(processedData[processedData.length - 1])
+                  }
+                  className="rounded-lg bg-[#8c7569] px-3 py-1 text-xs font-semibold text-white transition-all duration-200 hover:bg-[#55311c]"
+                >
+                  Edit
+                </button>
+              ) : (
+                "-"
+              )}
             </td>
           </tr>
         </tbody>
@@ -4613,10 +4705,19 @@ function normalizePhoneToE164(
   if (!cleaned) return null
 
   let normalized = cleaned
-  if (!normalized.startsWith("+")) {
+  if (normalized.startsWith("00")) {
+    normalized = `+${normalized.slice(2)}`
+  } else if (!normalized.startsWith("+")) {
     const digitsOnly = normalized.replace(/\D/g, "")
-    const country = defaultCountryCode.replace(/[^\d+]/g, "")
-    normalized = `${country}${digitsOnly}`
+    const countryDigits = defaultCountryCode.replace(/\D/g, "") || "44"
+    if (digitsOnly.startsWith(countryDigits)) {
+      normalized = `+${digitsOnly}`
+    } else {
+      const localDigits = digitsOnly.startsWith("0")
+        ? digitsOnly.slice(1)
+        : digitsOnly
+      normalized = `+${countryDigits}${localDigits}`
+    }
   }
 
   const e164Regex = /^\+[1-9]\d{8,19}$/
@@ -5206,6 +5307,8 @@ function RemindsContent() {
 
 function TwilioContent() {
   const { showErrorToast, showSuccessToast } = useCustomToast()
+  const queryClient = useQueryClient()
+  const [activeTab, setActiveTab] = useState<"compose" | "history">("compose")
   const [sendChannel, setSendChannel] = useState<"sms" | "email">("sms")
   const [selectedBuildingIds, setSelectedBuildingIds] = useState<string[]>([])
   const [selectedResidentIds, setSelectedResidentIds] = useState<string[]>([])
@@ -5228,6 +5331,19 @@ function TwilioContent() {
     skipped: number
     errors: string[]
   } | null>(null)
+  const {
+    data: historyData,
+    isLoading: historyLoading,
+    refetch: refetchHistory,
+  } = useQuery<ApiListResponse<NotificationHistoryEntry>>({
+    queryKey: ["notification-history"],
+    enabled: activeTab === "history",
+    queryFn: () =>
+      apiCall("/api/v1/utils/notification-history/", {
+        skip: 0,
+        limit: 200,
+      }),
+  })
 
   const { data: buildingsData, isLoading: buildingsLoading } = useQuery<
     ApiListResponse<Building>
@@ -5265,6 +5381,7 @@ function TwilioContent() {
 
   const buildings = buildingsData?.data || []
   const Residents = ResidentsData || []
+  const historyRows = historyData?.data || []
 
   const buildingNameById = useMemo(() => {
     const map = new Map<string, string>()
@@ -5525,6 +5642,7 @@ function TwilioContent() {
 
     setIsSending(false)
     setSendReport({ success, failed, skipped, errors })
+    queryClient.invalidateQueries({ queryKey: ["notification-history"] })
 
     if (success > 0) {
       showSuccessToast(
@@ -5550,6 +5668,35 @@ function TwilioContent() {
     )
   }
 
+  const formatHistoryDate = (value: string) => {
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return "-"
+    return date.toLocaleDateString("en-GB")
+  }
+
+  const formatHistoryTime = (value: string) => {
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return "-"
+    return date.toLocaleTimeString("en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
+    })
+  }
+
+  const formatHistoryType = (value: string) =>
+    value.toLowerCase() === "sms" ? "SMS" : "Email"
+
+  const formatDeliveryStatus = (value: string) => {
+    const normalized = (value || "").trim().toLowerCase()
+    if (!normalized) return "-"
+    if (normalized === "queued") return "Queued"
+    if (normalized === "sent") return "Sent"
+    if (normalized === "delivered") return "Delivered"
+    if (normalized === "failed") return "Failed"
+    if (normalized === "undelivered") return "Undelivered"
+    return normalized.charAt(0).toUpperCase() + normalized.slice(1)
+  }
+
   return (
     <div className="mx-auto max-w-7xl space-y-6">
       <div className="rounded-lg bg-white p-8 shadow-md">
@@ -5557,32 +5704,157 @@ function TwilioContent() {
           <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
             Messaging
           </h2>
-          <div className="flex rounded-full bg-[#f5f1ee] p-1">
-            <button
-              type="button"
-              onClick={() => setSendChannel("sms")}
-              className={`rounded-full px-4 py-2 text-sm font-semibold transition-all ${
-                sendChannel === "sms"
-                  ? "bg-[#8c7569] text-white"
-                  : "text-[#55311c] hover:bg-[#ebe4df]"
-              }`}
-            >
-              SMS
-            </button>
-            <button
-              type="button"
-              onClick={() => setSendChannel("email")}
-              className={`rounded-full px-4 py-2 text-sm font-semibold transition-all ${
-                sendChannel === "email"
-                  ? "bg-[#8c7569] text-white"
-                  : "text-[#55311c] hover:bg-[#ebe4df]"
-              }`}
-            >
-              Email
-            </button>
+          <div className="flex flex-wrap gap-3">
+            <div className="flex rounded-full bg-[#f5f1ee] p-1">
+              <button
+                type="button"
+                onClick={() => setActiveTab("compose")}
+                className={`rounded-full px-4 py-2 text-sm font-semibold transition-all ${
+                  activeTab === "compose"
+                    ? "bg-[#8c7569] text-white"
+                    : "text-[#55311c] hover:bg-[#ebe4df]"
+                }`}
+              >
+                Compose
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("history")}
+                className={`rounded-full px-4 py-2 text-sm font-semibold transition-all ${
+                  activeTab === "history"
+                    ? "bg-[#8c7569] text-white"
+                    : "text-[#55311c] hover:bg-[#ebe4df]"
+                }`}
+              >
+                History
+              </button>
+            </div>
+            {activeTab === "compose" && (
+              <div className="flex rounded-full bg-[#f5f1ee] p-1">
+                <button
+                  type="button"
+                  onClick={() => setSendChannel("sms")}
+                  className={`rounded-full px-4 py-2 text-sm font-semibold transition-all ${
+                    sendChannel === "sms"
+                      ? "bg-[#8c7569] text-white"
+                      : "text-[#55311c] hover:bg-[#ebe4df]"
+                  }`}
+                >
+                  SMS
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSendChannel("email")}
+                  className={`rounded-full px-4 py-2 text-sm font-semibold transition-all ${
+                    sendChannel === "email"
+                      ? "bg-[#8c7569] text-white"
+                      : "text-[#55311c] hover:bg-[#ebe4df]"
+                  }`}
+                >
+                  Email
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
+
+      {activeTab === "history" ? (
+        <div className="rounded-lg bg-white p-6 shadow-md">
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h3 className="font-['Nunito',sans-serif] text-xl font-bold text-[#55311c]">
+                History
+              </h3>
+              <p className="text-sm text-[rgba(0,0,0,0.65)]">
+                SMS and email delivery attempts, including failures.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => refetchHistory()}
+              className="rounded-lg border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+            >
+              Refresh
+            </button>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[980px] border-collapse">
+              <thead>
+                <tr className="bg-[#8c7569]">
+                  <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
+                    Date
+                  </th>
+                  <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
+                    Time
+                  </th>
+                  <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
+                    Type
+                  </th>
+                  <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
+                    To
+                  </th>
+                  <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
+                    Message
+                  </th>
+                  <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
+                    Delivered
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {historyLoading && (
+                  <tr>
+                    <td
+                      colSpan={6}
+                      className="border border-[#e5e0dc] bg-white px-3 py-4 text-center text-sm text-[rgba(0,0,0,0.7)]"
+                    >
+                      Loading history...
+                    </td>
+                  </tr>
+                )}
+                {!historyLoading && historyRows.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={6}
+                      className="border border-[#e5e0dc] bg-white px-3 py-4 text-center text-sm text-[rgba(0,0,0,0.7)]"
+                    >
+                      No messages recorded yet.
+                    </td>
+                  </tr>
+                )}
+                {!historyLoading &&
+                  historyRows.map((entry) => (
+                    <tr key={entry.id} className="bg-white hover:bg-[#f8f5f3]">
+                      <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                        {formatHistoryDate(entry.created_at)}
+                      </td>
+                      <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                        {formatHistoryTime(entry.created_at)}
+                      </td>
+                      <td className="border border-[#e5e0dc] px-3 py-2 text-sm font-semibold text-[#55311c]">
+                        {formatHistoryType(entry.notification_type)}
+                      </td>
+                      <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                        {entry.recipient_to}
+                      </td>
+                      <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                        <div className="max-w-[420px] whitespace-normal break-words">
+                          {entry.message || entry.error_message || "-"}
+                        </div>
+                      </td>
+                      <td className="border border-[#e5e0dc] px-3 py-2 text-sm font-semibold text-[#55311c]">
+                        {formatDeliveryStatus(entry.delivery_status)}
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : (
+        <>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <div className="rounded-lg bg-white p-6 shadow-md">
@@ -5885,6 +6157,8 @@ function TwilioContent() {
           </div>
         )}
       </div>
+        </>
+      )}
     </div>
   )
 }
@@ -6816,7 +7090,7 @@ function CleanerContent() {
 
 function CaretakerContent() {
   const [activeSubTab, setActiveSubTab] = useState<
-    "summary" | "register" | "schedules"
+    "summary" | "bins" | "register" | "schedules"
   >("summary")
   const [reportTrigger, setReportTrigger] = useState(0)
 
@@ -6856,11 +7130,25 @@ function CaretakerContent() {
             >
               Summary
             </button>
+            <button
+              type="button"
+              onClick={() => setActiveSubTab("bins")}
+              className={`rounded-lg px-4 py-2 text-sm font-semibold transition-all duration-200 ${
+                activeSubTab === "bins"
+                  ? "bg-[#8c7569] text-white"
+                  : "bg-[#f5f1ee] text-[#55311c] hover:bg-[#e8e1dc]"
+              }`}
+            >
+              Bins
+            </button>
           </div>
         </div>
       </div>
 
-      {activeSubTab === "summary" && <CaretakerSummary reportTrigger={reportTrigger} />}
+      <CaretakerSummary
+        activeTab={activeSubTab === "bins" ? "bins" : "summary"}
+        reportTrigger={reportTrigger}
+      />
       {activeSubTab === "register" && <CaretakerRegister />}
       {activeSubTab === "schedules" && <CaretakerSchedules />}
     </div>
@@ -8047,6 +8335,8 @@ function BuildingSchedulePage({
 }
 
 function CleanerSummary() {
+  const queryClient = useQueryClient()
+  const { showSuccessToast, showErrorToast } = useCustomToast()
   const { data: cleanersData } = useQuery<ApiListResponse<Funcionario>>({
     queryKey: ["funcionarios", "cleaners-summary"],
     queryFn: () => apiCall("/api/v1/funcionarios/", { skip: 0, limit: 500 }),
@@ -8066,6 +8356,11 @@ function CleanerSummary() {
 
   const acesses = (acessData?.data || []) as AcessRecord[]
   const buildings = (buildingsData?.data || []) as Building[]
+  const [editingCleanerRecord, setEditingCleanerRecord] =
+    useState<CleanerRecordEditState | null>(null)
+  const [editedCleanerTimeValue, setEditedCleanerTimeValue] = useState("")
+  const [isSavingCleanerRecordEdit, setIsSavingCleanerRecordEdit] =
+    useState(false)
 
   const buildingMap = useMemo(() => {
     const map = new Map<EntityId, string>()
@@ -8257,6 +8552,69 @@ function CleanerSummary() {
     ]
   }, [enrichedSessions, formatTotalMinutes])
 
+  const handleOpenCleanerRecordEdit = (
+    recordId: EntityId | null,
+    isoValue: string | null,
+    label: "Time IN" | "Time OUT",
+  ) => {
+    if (!recordId || !isoValue) return
+    setEditingCleanerRecord({
+      recordId,
+      originalIso: isoValue,
+      label,
+    })
+    setEditedCleanerTimeValue(toTimeInputValue(isoValue))
+  }
+
+  const handleSaveCleanerRecordEdit = async () => {
+    if (!editingCleanerRecord) return
+    if (!editedCleanerTimeValue) {
+      showErrorToast("Time is required")
+      return
+    }
+
+    const [hoursRaw, minutesRaw] = editedCleanerTimeValue.split(":")
+    const hours = Number(hoursRaw)
+    const minutes = Number(minutesRaw)
+    if (
+      Number.isNaN(hours) ||
+      Number.isNaN(minutes) ||
+      hours < 0 ||
+      hours > 23 ||
+      minutes < 0 ||
+      minutes > 59
+    ) {
+      showErrorToast("Invalid time")
+      return
+    }
+
+    const nextDate = new Date(editingCleanerRecord.originalIso)
+    if (Number.isNaN(nextDate.getTime())) {
+      showErrorToast("Invalid original record date")
+      return
+    }
+    nextDate.setHours(hours, minutes, 0, 0)
+
+    try {
+      setIsSavingCleanerRecordEdit(true)
+      await apiCall(`/api/v1/acess/${editingCleanerRecord.recordId}`, {
+        method: "PATCH",
+        body: { data: nextDate.toISOString() },
+      })
+      await queryClient.invalidateQueries({
+        queryKey: ["acess", "cleaner"],
+      })
+      setEditingCleanerRecord(null)
+      showSuccessToast("Cleaner record updated successfully")
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to update cleaner record"
+      showErrorToast(message)
+    } finally {
+      setIsSavingCleanerRecordEdit(false)
+    }
+  }
+
   return (
     <div className="rounded-lg bg-white p-6 shadow-md">
       <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -8387,9 +8745,39 @@ function CleanerSummary() {
                   </td>
                   <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
                     {formatTime(session.inRecord?.data)}
+                    {session.inRecord?.id && session.inRecord?.data && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleOpenCleanerRecordEdit(
+                            session.inRecord?.id || null,
+                            session.inRecord?.data || null,
+                            "Time IN",
+                          )
+                        }
+                        className="ml-2 rounded bg-[#8c7569] px-2 py-1 text-xs font-semibold text-white transition-all duration-200 hover:bg-[#55311c]"
+                      >
+                        Edit
+                      </button>
+                    )}
                   </td>
                   <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
                     {formatTime(session.outRecord?.data)}
+                    {session.outRecord?.id && session.outRecord?.data && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleOpenCleanerRecordEdit(
+                            session.outRecord?.id || null,
+                            session.outRecord?.data || null,
+                            "Time OUT",
+                          )
+                        }
+                        className="ml-2 rounded bg-[#8c7569] px-2 py-1 text-xs font-semibold text-white transition-all duration-200 hover:bg-[#55311c]"
+                      >
+                        Edit
+                      </button>
+                    )}
                   </td>
                   <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
                     {formatUsed(
@@ -8403,6 +8791,57 @@ function CleanerSummary() {
           </tbody>
         </table>
       </div>
+
+      {editingCleanerRecord && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-3 sm:items-center sm:px-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-4 shadow-xl sm:p-6">
+            <h3 className="text-lg font-bold text-[#55311c]">
+              Edit cleaner record
+            </h3>
+            <p className="mt-1 text-sm text-[rgba(0,0,0,0.7)]">
+              Update the {editingCleanerRecord.label.toLowerCase()} for this cleaner record.
+            </p>
+
+            <div className="mt-4 grid gap-4">
+              <div>
+                <label
+                  className="block text-sm font-semibold text-[#55311c]"
+                  htmlFor="cleaner-edit-time"
+                >
+                  {editingCleanerRecord.label}
+                </label>
+                <input
+                  id="cleaner-edit-time"
+                  type="time"
+                  value={editedCleanerTimeValue}
+                  onChange={(event) =>
+                    setEditedCleanerTimeValue(event.target.value)
+                  }
+                  className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                />
+              </div>
+            </div>
+
+            <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setEditingCleanerRecord(null)}
+                className="w-full rounded-lg border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] sm:w-auto"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveCleanerRecordEdit}
+                disabled={isSavingCleanerRecordEdit}
+                className="w-full rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+              >
+                {isSavingCleanerRecordEdit ? "Saving..." : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -8674,8 +9113,15 @@ function CleanerRegister() {
   )
 }
 
-function CaretakerSummary({ reportTrigger = 0 }: { reportTrigger?: number }) {
+function CaretakerSummary({
+  activeTab,
+  reportTrigger = 0,
+}: {
+  activeTab: "summary" | "bins"
+  reportTrigger?: number
+}) {
   const { showSuccessToast, showErrorToast } = useCustomToast()
+  const queryClient = useQueryClient()
   const { data: caretakersData } = useQuery<ApiListResponse<Funcionario>>({
     queryKey: ["funcionarios", "caretakers-summary"],
     queryFn: () => apiCall("/api/v1/funcionarios/", { skip: 0, limit: 500 }),
@@ -8758,11 +9204,19 @@ function CaretakerSummary({ reportTrigger = 0 }: { reportTrigger?: number }) {
     const day = String(now.getDate()).padStart(2, "0")
     return `${year}-${month}-${day}`
   })
+  const [selectedWeekStart, setSelectedWeekStart] = useState(() =>
+    getWeekStartIso(new Date()),
+  )
   const [reportDateFrom, setReportDateFrom] = useState("")
   const [reportDateTo, setReportDateTo] = useState("")
   const [reportEmail, setReportEmail] = useState("")
   const [isSendingReport, setIsSendingReport] = useState(false)
   const [showReportModal, setShowReportModal] = useState(false)
+  const [editingCaretakerRecord, setEditingCaretakerRecord] =
+    useState<CaretakerRecordEditState | null>(null)
+  const [editedCaretakerTimeValue, setEditedCaretakerTimeValue] = useState("")
+  const [isSavingCaretakerRecordEdit, setIsSavingCaretakerRecordEdit] =
+    useState(false)
 
   const workTimeSessionsGrouped = useMemo(() => {
     const sorted = [...workTimeRecords]
@@ -8812,6 +9266,15 @@ function CaretakerSummary({ reportTrigger = 0 }: { reportTrigger?: number }) {
     })
   }
 
+  const toTimeInputValue = (dateValue?: string | null) => {
+    if (!dateValue) return ""
+    const date = new Date(dateValue)
+    if (Number.isNaN(date.getTime())) return ""
+    const hours = String(date.getHours()).padStart(2, "0")
+    const minutes = String(date.getMinutes()).padStart(2, "0")
+    return `${hours}:${minutes}`
+  }
+
   const formatUsed = (inValue?: string | null, outValue?: string | null) => {
     if (!inValue || !outValue) return "-"
     const start = new Date(inValue).getTime()
@@ -8853,6 +9316,24 @@ function CaretakerSummary({ reportTrigger = 0 }: { reportTrigger?: number }) {
     return `${year}-${month}-${day}`
   }
 
+  const currentWeekStart = useMemo(() => getWeekStartIso(new Date()), [])
+  const selectedWeekEnd = useMemo(
+    () => addDaysToIso(selectedWeekStart, 6),
+    [selectedWeekStart],
+  )
+  const earliestWeekStart = useMemo(() => {
+    const earliestDate = workTimeSessionsGrouped
+      .map((session) => toDateKey(session.inRecord?.data || session.outRecord?.data))
+      .filter(Boolean)
+      .sort()[0]
+    return earliestDate ? getWeekStartIso(earliestDate) : currentWeekStart
+  }, [currentWeekStart, workTimeSessionsGrouped])
+
+  const weekRangeLabel = useMemo(
+    () => `${formatDateToBr(selectedWeekStart)} - ${formatDateToBr(selectedWeekEnd)}`,
+    [selectedWeekEnd, selectedWeekStart],
+  )
+
   const workTimeDayHours = useMemo(() => {
     let totalMinutes = 0
     workTimeSessionsGrouped.forEach((session) => {
@@ -8875,6 +9356,23 @@ function CaretakerSummary({ reportTrigger = 0 }: { reportTrigger?: number }) {
     () => [{ label: "WORK TIME", hours: workTimeDayHours }],
     [workTimeDayHours],
   )
+
+  const workTimeWeekHours = useMemo(() => {
+    let totalMinutes = 0
+    workTimeSessionsGrouped.forEach((session) => {
+      const sessionDate = toDateKey(
+        session.inRecord?.data || session.outRecord?.data,
+      )
+      if (!isIsoDateWithinWeek(sessionDate, selectedWeekStart)) return
+
+      totalMinutes += getDurationMinutes(
+        session.inRecord?.data,
+        session.outRecord?.data,
+        false,
+      )
+    })
+    return Number((totalMinutes / 60).toFixed(2))
+  }, [getDurationMinutes, selectedWeekStart, workTimeSessionsGrouped, toDateKey])
 
   const binSessionsGrouped = useMemo(() => {
     const sorted = [...binSessions]
@@ -8930,8 +9428,8 @@ function CaretakerSummary({ reportTrigger = 0 }: { reportTrigger?: number }) {
       .sort((a, b) => b.hours - a.hours)
   }, [binSessionsGrouped, buildingMap, getDurationMinutes])
 
-  const historyRows = useMemo(() => {
-    const binRows = binSessionsGrouped.map((session, index) => {
+  const binHistoryRows = useMemo(() => {
+    return binSessionsGrouped.map((session, index) => {
       const buildingId =
         session.inRecord?.building_id || session.outRecord?.building_id
       const buildingLabel =
@@ -8944,30 +9442,61 @@ function CaretakerSummary({ reportTrigger = 0 }: { reportTrigger?: number }) {
       const sortTime = dateValue ? new Date(dateValue).getTime() : 0
       return {
         key: `bins-${index}-${session.inRecord?.id || "in"}-${session.outRecord?.id || "out"}`,
+        kind: "bins" as const,
         buildingLabel,
         inValue: session.inRecord?.data || null,
         outValue: session.outRecord?.data || null,
+        inRecordId: session.inRecord?.id || null,
+        outRecordId: session.outRecord?.id || null,
         sortTime,
       }
     })
+  }, [binSessionsGrouped, buildingMap])
 
-    const workTimeRows = workTimeSessionsGrouped.map((session, index) => {
+  const workTimeHistoryRows = useMemo(() => {
+    return workTimeSessionsGrouped.map((session, index) => {
       const dateValue =
         session.inRecord?.data || session.outRecord?.data || null
       const sortTime = dateValue ? new Date(dateValue).getTime() : 0
       return {
         key: `work-time-${index}-${session.inRecord?.id || "in"}-${session.outRecord?.id || "out"}`,
+        kind: "work-time" as const,
         buildingLabel: "WORK TIME",
         inValue: session.inRecord?.data || null,
         outValue: session.outRecord?.data || null,
+        inRecordId: session.inRecord?.id || null,
+        outRecordId: session.outRecord?.id || null,
         sortTime,
       }
     })
+  }, [workTimeSessionsGrouped])
 
-    return [...binRows, ...workTimeRows]
-      .sort((a, b) => b.sortTime - a.sortTime)
-      .slice(0, 20)
-  }, [binSessionsGrouped, workTimeSessionsGrouped, buildingMap])
+  const visibleHistoryRows = useMemo(() => {
+    const sourceRows =
+      activeTab === "summary" ? workTimeHistoryRows : binHistoryRows
+    const filteredRows =
+      activeTab === "summary"
+        ? sourceRows.filter((row) =>
+            isIsoDateWithinWeek(
+              toDateKey(row.inValue || row.outValue),
+              selectedWeekStart,
+            ),
+          )
+        : sourceRows
+    return [...filteredRows].sort((a, b) => b.sortTime - a.sortTime).slice(0, 20)
+  }, [activeTab, binHistoryRows, selectedWeekStart, toDateKey, workTimeHistoryRows])
+
+  useEffect(() => {
+    if (activeTab !== "summary") return
+    if (isIsoDateWithinWeek(selectedWorkDate, selectedWeekStart)) return
+
+    const todayIso = toIsoDateString(new Date())
+    setSelectedWorkDate(
+      isIsoDateWithinWeek(todayIso, selectedWeekStart)
+        ? todayIso
+        : selectedWeekStart,
+    )
+  }, [activeTab, selectedWeekStart, selectedWorkDate])
 
   const formatDurationFromMinutes = (minutes: number) => {
     if (minutes <= 0) return "0m"
@@ -9064,6 +9593,85 @@ function CaretakerSummary({ reportTrigger = 0 }: { reportTrigger?: number }) {
     }
   }
 
+  const handleOpenCaretakerRecordEdit = (
+    recordId: EntityId | null,
+    isoValue: string | null,
+    label: "Time IN" | "Time OUT",
+    recordType: "work-time" | "bins",
+  ) => {
+    if (!recordId || !isoValue) return
+    setEditingCaretakerRecord({
+      recordId,
+      originalIso: isoValue,
+      label,
+      recordType,
+    })
+    setEditedCaretakerTimeValue(toTimeInputValue(isoValue))
+  }
+
+  const handleSaveCaretakerRecordEdit = async () => {
+    if (!editingCaretakerRecord) return
+    if (!editedCaretakerTimeValue) {
+      showErrorToast("Time is required")
+      return
+    }
+
+    const [hoursRaw, minutesRaw] = editedCaretakerTimeValue.split(":")
+    const hours = Number(hoursRaw)
+    const minutes = Number(minutesRaw)
+    if (
+      Number.isNaN(hours) ||
+      Number.isNaN(minutes) ||
+      hours < 0 ||
+      hours > 23 ||
+      minutes < 0 ||
+      minutes > 59
+    ) {
+      showErrorToast("Invalid time")
+      return
+    }
+
+    const nextDate = new Date(editingCaretakerRecord.originalIso)
+    if (Number.isNaN(nextDate.getTime())) {
+      showErrorToast("Invalid original record date")
+      return
+    }
+    nextDate.setHours(hours, minutes, 0, 0)
+
+    const isWorkTimeEdit = editingCaretakerRecord.recordType === "work-time"
+    const apiPath = isWorkTimeEdit
+      ? `/api/v1/acess/caretaker/work-time/${editingCaretakerRecord.recordId}`
+      : `/api/v1/bins/sessions/${editingCaretakerRecord.recordId}`
+    const queryKey = isWorkTimeEdit
+      ? ["acess", "caretaker", "work-time"]
+      : ["bins", "sessions", "caretaker-summary"]
+    const successMessage = isWorkTimeEdit
+      ? "Work time updated successfully"
+      : "Bin session updated successfully"
+    const errorFallback = isWorkTimeEdit
+      ? "Failed to update work time"
+      : "Failed to update bin session"
+
+    try {
+      setIsSavingCaretakerRecordEdit(true)
+      await apiCall(apiPath, {
+        method: "PATCH",
+        body: { data: nextDate.toISOString() },
+      })
+      await queryClient.invalidateQueries({
+        queryKey,
+      })
+      setEditingCaretakerRecord(null)
+      showSuccessToast(successMessage)
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : errorFallback
+      showErrorToast(message)
+    } finally {
+      setIsSavingCaretakerRecordEdit(false)
+    }
+  }
+
   useEffect(() => {
     if (reportTrigger > 0) {
       setShowReportModal(true)
@@ -9074,120 +9682,174 @@ function CaretakerSummary({ reportTrigger = 0 }: { reportTrigger?: number }) {
     <div className="rounded-lg bg-white p-6 shadow-md">
       <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <h3 className="font-['Nunito',sans-serif] text-xl font-bold text-[#55311c]">
-          Work summary
+          {activeTab === "summary" ? "Work summary" : "Bins"}
         </h3>
       </div>
 
-      <div className="mb-6 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
-        <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <h4 className="text-sm font-semibold text-[#55311c]">WORK TIME</h4>
-          <div className="flex items-center gap-2">
-            <label
-              htmlFor="caretaker-worktime-day"
-              className="text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
-            >
-              Day
-            </label>
-            <input
-              id="caretaker-worktime-day"
-              type="date"
-              value={selectedWorkDate}
-              onChange={(event) => setSelectedWorkDate(event.target.value)}
-              className="rounded-lg border border-[#d9d0ca] bg-white px-3 py-1 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
-            />
+      {activeTab === "summary" ? (
+        <>
+          <div className="mb-6 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]">
+                  Weekly Hours
+                </p>
+                <div className="mt-2 flex items-end gap-3">
+                  <span className="font-['Nunito',sans-serif] text-4xl font-bold text-[#55311c]">
+                    {workTimeWeekHours.toFixed(2)}h
+                  </span>
+                  <span className="pb-1 text-sm text-[rgba(85,49,28,0.72)]">
+                    {weekRangeLabel}
+                  </span>
+                </div>
+              </div>
+              <div className="flex flex-col gap-2 md:items-end">
+                <span className="text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]">
+                  Week Filter
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSelectedWeekStart((current) => addWeeksToIso(current, -1))
+                    }
+                    disabled={selectedWeekStart <= earliestWeekStart}
+                    className="rounded-lg border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Previous week
+                  </button>
+                  <div className="min-w-[180px] rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-center text-sm font-semibold text-[#55311c]">
+                    {weekRangeLabel}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSelectedWeekStart((current) => addWeeksToIso(current, 1))
+                    }
+                    disabled={selectedWeekStart >= currentWeekStart}
+                    className="rounded-lg border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Next week
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
-        <div className="h-48 w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart
-              data={workTimeChartData}
-              layout="vertical"
-              margin={{ left: 10, right: 20 }}
-            >
-              <CartesianGrid strokeDasharray="3 3" stroke="#d9d0ca" />
-              <XAxis
-                type="number"
-                stroke="#55311c"
-                tick={{ fill: "#55311c", fontSize: 12 }}
-              />
-              <YAxis
-                type="category"
-                dataKey="label"
-                width={90}
-                stroke="#55311c"
-                tick={{ fill: "#55311c", fontSize: 12 }}
-              />
-              <Tooltip
-                formatter={(value: number) => [`${value}h`, "Hours"]}
-                contentStyle={{
-                  borderRadius: "10px",
-                  border: "1px solid #e5e0dc",
-                  backgroundColor: "#fff",
-                }}
-              />
-              <Bar
-                dataKey="hours"
-                fill="#8c7569"
-                radius={[0, 8, 8, 0]}
-                maxBarSize={36}
-              />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-        {!isLoadingWorkTime && workTimeDayHours === 0 && (
-          <p className="mt-3 text-sm text-[rgba(0,0,0,0.6)]">
-            No WORK TIME sessions on the selected day.
-          </p>
-        )}
-      </div>
 
-      <div className="mb-6 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
-        <h4 className="mb-3 text-sm font-semibold text-[#55311c]">
-          Hour per Building (Bins)
-        </h4>
-        <div className="h-72 w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart
-              data={binsTimeByBuilding}
-              margin={{ left: 10, right: 20 }}
-            >
-              <CartesianGrid strokeDasharray="3 3" stroke="#d9d0ca" />
-              <XAxis
-                type="category"
-                dataKey="building"
-                stroke="#55311c"
-                tick={{ fill: "#55311c", fontSize: 12 }}
-              />
-              <YAxis
-                type="number"
-                width={90}
-                stroke="#55311c"
-                tick={{ fill: "#55311c", fontSize: 12 }}
-              />
-              <Tooltip
-                formatter={(value: number) => [`${value}h`, "Hours"]}
-                contentStyle={{
-                  borderRadius: "10px",
-                  border: "1px solid #e5e0dc",
-                  backgroundColor: "#fff",
-                }}
-              />
-              <Bar
-                dataKey="hours"
-                name="Bins"
-                fill="#2d8659"
-                radius={[8, 8, 0, 0]}
-                maxBarSize={36}
-              />
-            </BarChart>
-          </ResponsiveContainer>
+          <div className="mb-6 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
+            <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <h4 className="text-sm font-semibold text-[#55311c]">WORK TIME</h4>
+              <div className="flex items-center gap-2">
+                <label
+                  htmlFor="caretaker-worktime-day"
+                  className="text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+                >
+                  Day
+                </label>
+                <input
+                  id="caretaker-worktime-day"
+                  type="date"
+                  min={selectedWeekStart}
+                  max={selectedWeekEnd}
+                  value={selectedWorkDate}
+                  onChange={(event) => setSelectedWorkDate(event.target.value)}
+                  className="rounded-lg border border-[#d9d0ca] bg-white px-3 py-1 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                />
+              </div>
+            </div>
+            <div className="h-48 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={workTimeChartData}
+                  layout="vertical"
+                  margin={{ left: 10, right: 20 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#d9d0ca" />
+                  <XAxis
+                    type="number"
+                    stroke="#55311c"
+                    tick={{ fill: "#55311c", fontSize: 12 }}
+                  />
+                  <YAxis
+                    type="category"
+                    dataKey="label"
+                    width={90}
+                    stroke="#55311c"
+                    tick={{ fill: "#55311c", fontSize: 12 }}
+                  />
+                  <Tooltip
+                    formatter={(value: number) => [`${value}h`, "Hours"]}
+                    contentStyle={{
+                      borderRadius: "10px",
+                      border: "1px solid #e5e0dc",
+                      backgroundColor: "#fff",
+                    }}
+                  />
+                  <Bar
+                    dataKey="hours"
+                    fill="#8c7569"
+                    radius={[0, 8, 8, 0]}
+                    maxBarSize={36}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            {!isLoadingWorkTime && workTimeDayHours === 0 && (
+              <p className="mt-3 text-sm text-[rgba(0,0,0,0.6)]">
+                No WORK TIME sessions on the selected day.
+              </p>
+            )}
+          </div>
+        </>
+      ) : (
+        <div className="mb-6 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
+          <h4 className="mb-3 text-sm font-semibold text-[#55311c]">
+            Hour per Building (Bins)
+          </h4>
+          <div className="h-72 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                data={binsTimeByBuilding}
+                margin={{ left: 10, right: 20 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="#d9d0ca" />
+                <XAxis
+                  type="category"
+                  dataKey="building"
+                  stroke="#55311c"
+                  tick={{ fill: "#55311c", fontSize: 12 }}
+                />
+                <YAxis
+                  type="number"
+                  width={90}
+                  stroke="#55311c"
+                  tick={{ fill: "#55311c", fontSize: 12 }}
+                />
+                <Tooltip
+                  formatter={(value: number) => [`${value}h`, "Hours"]}
+                  contentStyle={{
+                    borderRadius: "10px",
+                    border: "1px solid #e5e0dc",
+                    backgroundColor: "#fff",
+                  }}
+                />
+                <Bar
+                  dataKey="hours"
+                  name="Bins"
+                  fill="#2d8659"
+                  radius={[8, 8, 0, 0]}
+                  maxBarSize={36}
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          {!isLoadingBinSessions && binsTimeByBuilding.length === 0 && (
+            <p className="mt-3 text-sm text-[rgba(0,0,0,0.6)]">
+              No sessions to generate chart.
+            </p>
+          )}
         </div>
-        {!isLoadingBinSessions && binsTimeByBuilding.length === 0 && (
-          <p className="mt-3 text-sm text-[rgba(0,0,0,0.6)]">
-            No sessions to generate chart.
-          </p>
-        )}
-      </div>
+      )}
 
       <div className="overflow-x-auto">
         <table className="w-full border-collapse">
@@ -9211,7 +9873,8 @@ function CaretakerSummary({ reportTrigger = 0 }: { reportTrigger?: number }) {
             </tr>
           </thead>
           <tbody>
-            {(isLoadingBinSessions || isLoadingWorkTime) && (
+            {((activeTab === "summary" && isLoadingWorkTime) ||
+              (activeTab === "bins" && isLoadingBinSessions)) && (
               <tr>
                 <td
                   className="border border-gray-400 px-3 py-3 text-center text-sm text-gray-600"
@@ -9223,7 +9886,7 @@ function CaretakerSummary({ reportTrigger = 0 }: { reportTrigger?: number }) {
             )}
             {!isLoadingBinSessions &&
               !isLoadingWorkTime &&
-              historyRows.length === 0 && (
+              visibleHistoryRows.length === 0 && (
                 <tr>
                   <td
                     className="border border-gray-400 px-3 py-3 text-center text-sm text-gray-600"
@@ -9233,7 +9896,7 @@ function CaretakerSummary({ reportTrigger = 0 }: { reportTrigger?: number }) {
                   </td>
                 </tr>
               )}
-            {historyRows.map((row) => {
+            {visibleHistoryRows.map((row) => {
               const dateLabel = formatDate(row.inValue || row.outValue)
 
               return (
@@ -9245,10 +9908,46 @@ function CaretakerSummary({ reportTrigger = 0 }: { reportTrigger?: number }) {
                     {row.buildingLabel}
                   </td>
                   <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
-                    {formatTime(row.inValue)}
+                    <div className="flex items-center justify-between gap-2">
+                      <span>{formatTime(row.inValue)}</span>
+                      {row.inValue && row.inRecordId && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleOpenCaretakerRecordEdit(
+                              row.inRecordId,
+                              row.inValue,
+                              "Time IN",
+                              row.kind,
+                            )
+                          }
+                          className="rounded border border-[#8c7569] px-2 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+                        >
+                          Edit
+                        </button>
+                      )}
+                    </div>
                   </td>
                   <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
-                    {formatTime(row.outValue)}
+                    <div className="flex items-center justify-between gap-2">
+                      <span>{formatTime(row.outValue)}</span>
+                      {row.outValue && row.outRecordId && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleOpenCaretakerRecordEdit(
+                                row.outRecordId,
+                                row.outValue,
+                                "Time OUT",
+                                row.kind,
+                              )
+                            }
+                            className="rounded border border-[#8c7569] px-2 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+                          >
+                            Edit
+                          </button>
+                        )}
+                    </div>
                   </td>
                   <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
                     {formatUsed(row.inValue, row.outValue)}
@@ -9335,6 +10034,61 @@ function CaretakerSummary({ reportTrigger = 0 }: { reportTrigger?: number }) {
                 className="w-full rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
               >
                 {isSendingReport ? "Sending..." : "Send by email"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editingCaretakerRecord && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-3 sm:items-center sm:px-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-4 shadow-xl sm:p-6">
+            <h3 className="text-lg font-bold text-[#55311c]">
+              Edit caretaker record
+            </h3>
+            <p className="mt-1 text-sm text-[rgba(0,0,0,0.7)]">
+              Update the {editingCaretakerRecord.label.toLowerCase()} for this{" "}
+              {editingCaretakerRecord.recordType === "work-time"
+                ? "work time"
+                : "bins"}{" "}
+              record.
+            </p>
+
+            <div className="mt-4 grid gap-4">
+              <div>
+                <label
+                  className="block text-sm font-semibold text-[#55311c]"
+                  htmlFor="caretaker-edit-time"
+                >
+                  {editingCaretakerRecord.label}
+                </label>
+                <input
+                  id="caretaker-edit-time"
+                  type="time"
+                  value={editedCaretakerTimeValue}
+                  onChange={(event) =>
+                    setEditedCaretakerTimeValue(event.target.value)
+                  }
+                  className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                />
+              </div>
+            </div>
+
+            <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setEditingCaretakerRecord(null)}
+                className="w-full rounded-lg border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] sm:w-auto"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveCaretakerRecordEdit}
+                disabled={isSavingCaretakerRecordEdit}
+                className="w-full rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+              >
+                {isSavingCaretakerRecordEdit ? "Saving..." : "Save"}
               </button>
             </div>
           </div>
@@ -9804,6 +10558,33 @@ function ResidentsContent() {
     },
   })
 
+  const updateReadingSmsMutation = useMutation({
+    mutationFn: async ({
+      id,
+      enabled,
+    }: {
+      id: EntityId
+      enabled: boolean
+    }) => {
+      const response = await apiCall(`/api/v1/moradores/${id}`, {
+        method: "PATCH",
+        body: { receives_flat_reading_sms: enabled },
+      })
+      return response
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["Residents"] })
+      showSuccessToast("Reading SMS preference updated successfully!")
+    },
+    onError: (error) => {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Error updating reading SMS preference"
+      showErrorToast(message)
+    },
+  })
+
   const handleCheckboxChange = (
     id: EntityId,
     currentTypes: number,
@@ -9825,6 +10606,28 @@ function ResidentsContent() {
   const handleBuildingChange = (building: string | null) => {
     setSelectedBuilding(building)
     setCurrentPage(0)
+  }
+
+  const handleReadingSmsToggle = (id: EntityId, enabled: boolean) => {
+    updateReadingSmsMutation.mutate({ id, enabled })
+  }
+
+  const renderReadingSmsToggle = (morador?: Morador) => {
+    if (!morador) return <span className="text-xs text-[rgba(85,49,28,0.55)]">-</span>
+    return (
+      <label className="mt-2 inline-flex items-center gap-2 text-xs font-semibold text-[#55311c]">
+        <input
+          type="checkbox"
+          checked={morador.receives_flat_reading_sms}
+          onChange={(event) =>
+            handleReadingSmsToggle(morador.id, event.target.checked)
+          }
+          disabled={updateReadingSmsMutation.isPending}
+          className="h-4 w-4 cursor-pointer"
+        />
+        Receive readings
+      </label>
+    )
   }
 
   const handleSearch = (term: string) => {
@@ -10027,25 +10830,37 @@ function ResidentsContent() {
                             {row.owner_1?.nome || "-"}
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
-                            {row.owner_1?.mobile || "-"}
+                            <div className="flex flex-col">
+                              <span>{row.owner_1?.mobile || "-"}</span>
+                              {renderReadingSmsToggle(row.owner_1)}
+                            </div>
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
                             {row.owner_2?.nome || "-"}
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
-                            {row.owner_2?.mobile || "-"}
+                            <div className="flex flex-col">
+                              <span>{row.owner_2?.mobile || "-"}</span>
+                              {renderReadingSmsToggle(row.owner_2)}
+                            </div>
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
                             {row.tenant?.nome || "-"}
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
-                            {row.tenant?.mobile || "-"}
+                            <div className="flex flex-col">
+                              <span>{row.tenant?.mobile || "-"}</span>
+                              {renderReadingSmsToggle(row.tenant)}
+                            </div>
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
                             {row.agent?.nome || "-"}
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
-                            {row.agent?.mobile || "-"}
+                            <div className="flex flex-col">
+                              <span>{row.agent?.mobile || "-"}</span>
+                              {renderReadingSmsToggle(row.agent)}
+                            </div>
                           </td>
                           <td className="border border-gray-400 px-4 py-3 text-center">
                             <button
@@ -10097,6 +10912,9 @@ function ResidentsContent() {
                           Phone
                         </th>
                         <th className="border border-gray-400 px-4 py-3 text-center font-['Nunito',sans-serif] font-semibold text-white">
+                          Receive readings
+                        </th>
+                        <th className="border border-gray-400 px-4 py-3 text-center font-['Nunito',sans-serif] font-semibold text-white">
                           Normal
                         </th>
                         <th className="border border-gray-400 px-4 py-3 text-center font-['Nunito',sans-serif] font-semibold text-white">
@@ -10124,6 +10942,20 @@ function ResidentsContent() {
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
                             {morador.mobile || "-"}
+                          </td>
+                          <td className="border border-gray-400 px-4 py-3 text-center">
+                            <input
+                              type="checkbox"
+                              checked={morador.receives_flat_reading_sms}
+                              onChange={(event) =>
+                                handleReadingSmsToggle(
+                                  morador.id,
+                                  event.target.checked,
+                                )
+                              }
+                              disabled={updateReadingSmsMutation.isPending}
+                              className="h-4 w-4 cursor-pointer"
+                            />
                           </td>
                           <td className="border border-gray-400 px-4 py-3 text-center">
                             <input
@@ -10241,11 +11073,14 @@ function AddResidentForm({
   editingId: EntityId | null
   editContext: ResidentEditContext | null
 }) {
+  const queryClient = useQueryClient()
+  const { showSuccessToast, showErrorToast } = useCustomToast()
   const [formData, setFormData] = useState({
     nome: "",
     email: "",
     mobile: "",
     cargo: 0,
+    receives_flat_reading_sms: true,
     car1: "",
     car2: "",
     flat_id: "",
@@ -10333,6 +11168,7 @@ function AddResidentForm({
             email: morador.email || "",
             mobile: morador.mobile?.toString() || "",
             cargo: morador.cargo,
+            receives_flat_reading_sms: morador.receives_flat_reading_sms,
             car1: morador.car1 || "",
             car2: morador.car2 || "",
             flat_id: String(morador.flat_id),
@@ -10376,9 +11212,13 @@ function AddResidentForm({
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
   ) => {
     const { name, value } = e.target
+    const nextValue =
+      e.target instanceof HTMLInputElement && e.target.type === "checkbox"
+        ? e.target.checked
+        : value
     setFormData((prev) => ({
       ...prev,
-      [name]: value,
+      [name]: nextValue,
     }))
   }
 
@@ -10397,6 +11237,7 @@ function AddResidentForm({
         nome: formData.nome,
         email: formData.email || null,
         mobile: formData.mobile || "",
+        receives_flat_reading_sms: formData.receives_flat_reading_sms,
         ...(!activeEditingId ? { cargo: formData.cargo } : {}),
         ...(shouldShowCarFields
           ? {
@@ -10420,17 +11261,17 @@ function AddResidentForm({
         throw new Error("Failed to save resident")
       }
 
-      alert(
+      showSuccessToast(
         activeEditingId
           ? "Resident updated successfully!"
           : "Resident created successfully!",
       )
+      await queryClient.invalidateQueries({ queryKey: ["Residents"] })
+      await queryClient.invalidateQueries({ queryKey: ["buildings"] })
       onBack()
-      // Refetch Residents
-      window.location.reload()
     } catch (error) {
       console.error("Error submitting form:", error)
-      alert("Error saving resident")
+      showErrorToast("Error saving resident")
     } finally {
       setIsSubmitting(false)
     }
@@ -10544,6 +11385,23 @@ function AddResidentForm({
                 className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
                 placeholder="Phone number"
               />
+            </div>
+
+            <div className="flex items-center gap-3 rounded-lg border-2 border-[#ddd] bg-[#faf8f6] px-4 py-3 md:col-span-2">
+              <input
+                type="checkbox"
+                id="resident-receives-flat-reading-sms"
+                name="receives_flat_reading_sms"
+                checked={formData.receives_flat_reading_sms}
+                onChange={handleInputChange}
+                className="h-4 w-4 cursor-pointer"
+              />
+              <label
+                className="font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                htmlFor="resident-receives-flat-reading-sms"
+              >
+                Receive flat reading SMS
+              </label>
             </div>
 
             <div>

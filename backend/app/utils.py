@@ -2,6 +2,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from html import unescape
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,96 @@ E164_PHONE_REGEX = re.compile(r"^\+[1-9]\d{8,19}$")
 class EmailData:
     html_content: str
     subject: str
+
+
+def _strip_html(value: str) -> str:
+    no_tags = re.sub(r"<[^>]+>", " ", value or "")
+    return re.sub(r"\s+", " ", unescape(no_tags)).strip()
+
+
+def _truncate_text(value: str, max_length: int = 2000) -> str:
+    compact = re.sub(r"\s+", " ", (value or "").strip())
+    if len(compact) <= max_length:
+        return compact
+    return compact[: max_length - 3].rstrip() + "..."
+
+
+def _build_email_history_message(subject: str, html_content: str) -> str:
+    content = _strip_html(html_content)
+    if subject.strip() and content:
+        return _truncate_text(f"Subject: {subject.strip()} | {content}")
+    if subject.strip():
+        return _truncate_text(f"Subject: {subject.strip()}")
+    return _truncate_text(content)
+
+
+def _record_notification_history(
+    *,
+    notification_type: str,
+    recipient_to: str,
+    message: str,
+    delivery_status: str,
+    success: bool,
+    provider_message_id: str | None = None,
+    error_message: str | None = None,
+) -> None:
+    try:
+        from sqlmodel import Session
+
+        from app.core.db import engine, ensure_notification_history_schema
+        from app.models import NotificationHistory
+
+        with Session(engine) as session:
+            ensure_notification_history_schema(session)
+            session.add(
+                NotificationHistory(
+                    notification_type=notification_type,
+                    recipient_to=recipient_to.strip(),
+                    message=_truncate_text(message),
+                    delivery_status=delivery_status.strip() or "pending",
+                    success=success,
+                    provider_message_id=provider_message_id,
+                    error_message=_truncate_text(error_message or "", 1000)
+                    if error_message
+                    else None,
+                )
+            )
+            session.commit()
+    except Exception:
+        logger.exception("failed to record notification history")
+
+
+def update_notification_history_status(
+    *,
+    provider_message_id: str,
+    delivery_status: str,
+    success: bool,
+    error_message: str | None = None,
+) -> None:
+    try:
+        from sqlmodel import Session, select
+
+        from app.core.db import engine, ensure_notification_history_schema
+        from app.models import NotificationHistory
+
+        with Session(engine) as session:
+            ensure_notification_history_schema(session)
+            item = session.exec(
+                select(NotificationHistory)
+                .where(NotificationHistory.provider_message_id == provider_message_id)
+                .order_by(NotificationHistory.created_at.desc())
+            ).first()
+            if not item:
+                return
+            item.delivery_status = delivery_status.strip() or item.delivery_status
+            item.success = success
+            item.updated_at = datetime.now(timezone.utc)
+            if error_message:
+                item.error_message = _truncate_text(error_message, 1000)
+            session.add(item)
+            session.commit()
+    except Exception:
+        logger.exception("failed to update notification history status")
 
 
 def render_email_template(*, template_name: str, context: dict[str, Any]) -> str:
@@ -76,8 +167,23 @@ def send_email(
                 f"SMTP did not accept the message (status={status_code}, detail={status_text}, error={error})"
             )
         logger.info(f"send email result: {response}")
+        _record_notification_history(
+            notification_type="email",
+            recipient_to=email_to,
+            message=_build_email_history_message(subject, html_content),
+            delivery_status="sent",
+            success=True,
+        )
     except Exception as exc:
         logger.exception("send email failed")
+        _record_notification_history(
+            notification_type="email",
+            recipient_to=email_to,
+            message=_build_email_history_message(subject, html_content),
+            delivery_status="failed",
+            success=False,
+            error_message=str(exc),
+        )
         raise RuntimeError("Failed to send email. Check SMTP credentials/settings.") from exc
 
 
@@ -132,8 +238,23 @@ def send_email_with_attachment(
                 f"SMTP did not accept the attachment message (status={status_code}, detail={status_text}, error={error})"
             )
         logger.info(f"send email with attachment result: {response}")
+        _record_notification_history(
+            notification_type="email",
+            recipient_to=email_to,
+            message=_build_email_history_message(subject, html_content),
+            delivery_status="sent",
+            success=True,
+        )
     except Exception as exc:
         logger.exception("send email with attachment failed")
+        _record_notification_history(
+            notification_type="email",
+            recipient_to=email_to,
+            message=_build_email_history_message(subject, html_content),
+            delivery_status="failed",
+            success=False,
+            error_message=str(exc),
+        )
         raise RuntimeError("Failed to send email. Check SMTP credentials/settings.") from exc
 
 
@@ -184,8 +305,23 @@ def send_email_with_attachments(
                 f"SMTP did not accept the attachment message (status={status_code}, detail={status_text}, error={error})"
             )
         logger.info(f"send email with attachments result: {response}")
+        _record_notification_history(
+            notification_type="email",
+            recipient_to=email_to,
+            message=_build_email_history_message(subject, html_content),
+            delivery_status="sent",
+            success=True,
+        )
     except Exception as exc:
         logger.exception("send email with attachments failed")
+        _record_notification_history(
+            notification_type="email",
+            recipient_to=email_to,
+            message=_build_email_history_message(subject, html_content),
+            delivery_status="failed",
+            success=False,
+            error_message=str(exc),
+        )
         raise RuntimeError("Failed to send email. Check SMTP credentials/settings.") from exc
 
 
@@ -195,6 +331,14 @@ def send_sms_notification(*, phone_to: str, body: str) -> str:
         logger.error(
             f"twilio sms skipped - reason='{error_message}' phone_to='{phone_to}'"
         )
+        _record_notification_history(
+            notification_type="sms",
+            recipient_to=phone_to,
+            message=body,
+            delivery_status="failed",
+            success=False,
+            error_message=error_message,
+        )
         raise ValueError(error_message)
 
     if not body.strip():
@@ -202,12 +346,28 @@ def send_sms_notification(*, phone_to: str, body: str) -> str:
         logger.error(
             f"twilio sms skipped - reason='{error_message}' phone_to='{phone_to}'"
         )
+        _record_notification_history(
+            notification_type="sms",
+            recipient_to=phone_to,
+            message=body,
+            delivery_status="failed",
+            success=False,
+            error_message=error_message,
+        )
         raise ValueError(error_message)
 
     if not E164_PHONE_REGEX.fullmatch(phone_to):
         error_message = "Phone number must be in E.164 format"
         logger.error(
             f"twilio sms skipped - reason='{error_message}' phone_to='{phone_to}'"
+        )
+        _record_notification_history(
+            notification_type="sms",
+            recipient_to=phone_to,
+            message=body,
+            delivery_status="failed",
+            success=False,
+            error_message=error_message,
         )
         raise ValueError(error_message)
 
@@ -235,10 +395,26 @@ def send_sms_notification(*, phone_to: str, body: str) -> str:
         logger.info(
             f"twilio sms sent - sid='{message.sid}' status='{message.status}' to='{phone_to}'"
         )
+        _record_notification_history(
+            notification_type="sms",
+            recipient_to=phone_to,
+            message=body,
+            delivery_status=str(message.status or "queued"),
+            success=str(message.status or "").lower() not in {"failed", "undelivered"},
+            provider_message_id=message.sid,
+        )
         return message.sid
     except TwilioRestException as exc:
         logger.exception(
             f"twilio sms failed - to='{phone_to}' code='{exc.code}' message='{exc.msg}'"
+        )
+        _record_notification_history(
+            notification_type="sms",
+            recipient_to=phone_to,
+            message=body,
+            delivery_status="failed",
+            success=False,
+            error_message=exc.msg or str(exc),
         )
         raise
 

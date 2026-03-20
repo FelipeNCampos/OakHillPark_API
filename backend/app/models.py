@@ -152,6 +152,7 @@ class Morador(SQLModel, table=True):
     nome: str = Field(default="", max_length=255)
     email: EmailStr | None = Field(default=None, max_length=255)
     mobile: str = Field(default="", max_length=20)
+    receives_flat_reading_sms: bool = Field(default=False)
     flat_id: uuid.UUID = Field(
         foreign_key="flat.id", nullable=False, ondelete="CASCADE"
     )
@@ -364,6 +365,26 @@ class FlatReading(SQLModel, table=True):
     flat: Flat | None = Relationship(back_populates="readings")
 
 
+class NotificationHistory(SQLModel, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    created_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+        index=True,
+    )
+    updated_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    notification_type: str = Field(max_length=20, index=True)  # sms | email
+    recipient_to: str = Field(max_length=255, index=True)
+    message: str = Field(default="", max_length=2000)
+    delivery_status: str = Field(default="pending", max_length=50, index=True)
+    success: bool = Field(default=False, index=True)
+    provider_message_id: str | None = Field(default=None, max_length=255, index=True)
+    error_message: str | None = Field(default=None, max_length=1000)
+
+
 # Generic message
 class Message(SQLModel):
     message: str
@@ -397,6 +418,23 @@ class EmailNotificationCreate(SQLModel):
     subject: str = Field(min_length=1, max_length=255)
     html_content: str = Field(default="")
     attachments: list[EmailAttachmentCreate] = []
+
+
+class NotificationHistoryPublic(SQLModel):
+    id: uuid.UUID
+    created_at: datetime
+    notification_type: str
+    recipient_to: str
+    message: str
+    delivery_status: str
+    success: bool
+    provider_message_id: str | None = None
+    error_message: str | None = None
+
+
+class NotificationHistoryPublicList(SQLModel):
+    data: list[NotificationHistoryPublic]
+    count: int
 
 
 # JSON payload containing access token
@@ -538,6 +576,7 @@ class MoradorBase(SQLModel):
     nome: str = Field(default="", max_length=255)
     email: EmailStr | None = Field(default=None, max_length=255)
     mobile: str = Field(default="", max_length=20)  # Changed to str for phone numbers
+    receives_flat_reading_sms: bool = Field(default=False)
     flat_id: uuid.UUID
 
 
@@ -550,6 +589,7 @@ class MoradorUpdate(SQLModel):
     nome: str | None = Field(default=None, max_length=255)
     email: EmailStr | None = Field(default=None, max_length=255)
     mobile: str | None = Field(default=None, max_length=20)
+    receives_flat_reading_sms: bool | None = None
     flat_id: uuid.UUID | None = None
 
 
@@ -684,6 +724,10 @@ class BinSessionCreate(BinSessionBase):
     pass
 
 
+class BinSessionUpdate(SQLModel):
+    data: datetime | None = None
+
+
 class BinSessionPublic(BinSessionBase):
     id: uuid.UUID
     funcionario_id: uuid.UUID
@@ -706,6 +750,10 @@ class WorkTimeSessionBase(SQLModel):
 
 class WorkTimeSessionCreate(WorkTimeSessionBase):
     pass
+
+
+class WorkTimeSessionUpdate(SQLModel):
+    data: datetime | None = None
 
 
 class WorkTimeSessionPublic(WorkTimeSessionBase):

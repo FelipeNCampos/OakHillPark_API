@@ -14,6 +14,7 @@ from app.models import (
     Flat,
     Funcionario,
     Morador,
+    NotificationHistory,
     Readings,
     Task,
     TaskMessage,
@@ -55,6 +56,7 @@ def db() -> Generator[Session, None, None]:
         session.exec(delete(Acess).where(Acess.id.in_(test_acess_ids)))
         session.exec(delete(Readings).where(Readings.building_id.in_(test_building_ids)))
         session.exec(delete(Morador))  # All moradores are test data
+        session.exec(delete(NotificationHistory))
         session.exec(delete(Flat).where(Flat.building_id.in_(test_building_ids)))
         session.exec(delete(Building).where(Building.nome.like("%Test%")))
         session.exec(delete(Condominio).where(Condominio.nome.like("%Test%")))

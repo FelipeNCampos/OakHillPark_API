@@ -1,13 +1,18 @@
 import base64
 import binascii
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Form, HTTPException
 from pydantic.networks import EmailStr
+from sqlmodel import func, select
 
-from app.api.deps import CurrentUser, get_current_active_superuser
+from app.api.deps import CurrentUser, SessionDep, get_current_active_superuser
+from app.core.db import ensure_notification_history_schema
 from app.models import (
     EmailNotificationCreate,
     Message,
+    NotificationHistory,
+    NotificationHistoryPublic,
+    NotificationHistoryPublicList,
     ReportEmailCreate,
     SMSNotificationCreate,
 )
@@ -17,6 +22,7 @@ from app.utils import (
     send_email_with_attachments,
     send_email_with_attachment,
     send_sms_notification,
+    update_notification_history_status,
 )
 
 router = APIRouter(prefix="/utils", tags=["utils"])
@@ -165,6 +171,70 @@ def send_report_email(payload: ReportEmailCreate, current_user: CurrentUser) -> 
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
     return Message(message="Report sent successfully")
+
+
+@router.get(
+    "/notification-history/",
+    response_model=NotificationHistoryPublicList,
+)
+def read_notification_history(
+    session: SessionDep,
+    current_user: CurrentUser,
+    skip: int = 0,
+    limit: int = 100,
+) -> NotificationHistoryPublicList:
+    if not current_user.is_superuser and (current_user.cargo or 0) < 1:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    ensure_notification_history_schema(session)
+
+    count = session.exec(
+        select(func.count()).select_from(NotificationHistory)
+    ).one()
+    rows = session.exec(
+        select(NotificationHistory)
+        .order_by(NotificationHistory.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+    ).all()
+
+    return NotificationHistoryPublicList(
+        data=[
+            NotificationHistoryPublic(
+                id=item.id,
+                created_at=item.created_at,
+                notification_type=item.notification_type,
+                recipient_to=item.recipient_to,
+                message=item.message,
+                delivery_status=item.delivery_status,
+                success=item.success,
+                provider_message_id=item.provider_message_id,
+                error_message=item.error_message,
+            )
+            for item in rows
+        ],
+        count=count,
+    )
+
+
+@router.post("/twilio-status/")
+def twilio_status_callback(
+    MessageSid: str = Form(...),
+    MessageStatus: str = Form(...),
+    ErrorCode: str | None = Form(default=None),
+) -> Message:
+    delivery_status = MessageStatus.strip().lower()
+    success = delivery_status in {"delivered", "sent", "read"}
+    if delivery_status in {"failed", "undelivered"}:
+        success = False
+
+    update_notification_history_status(
+        provider_message_id=MessageSid,
+        delivery_status=delivery_status,
+        success=success,
+        error_message=ErrorCode,
+    )
+    return Message(message="Status received")
 
 
 @router.get("/health-check/")

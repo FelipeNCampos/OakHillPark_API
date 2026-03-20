@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import desc
 from sqlmodel import col, func, select
 
-from app.api.deps import SessionDep, get_current_user, require_cargo
+from app.api.deps import CurrentUser, SessionDep, get_current_user, require_cargo
 from app.core.config import settings
 from app.models import (
     Acess,
@@ -24,6 +24,7 @@ from app.models import (
     WorkTimeSession,
     WorkTimeSessionCreate,
     WorkTimeSessionPublic,
+    WorkTimeSessionUpdate,
     WorkTimeSessionsPublic,
 )
 from app.utils import send_sms_notification
@@ -31,6 +32,12 @@ from app.utils import send_sms_notification
 router = APIRouter(prefix="/acess", tags=["acess"])
 logger = logging.getLogger(__name__)
 E164_PHONE_REGEX = re.compile(r"^\+[1-9]\d{8,19}$")
+
+
+def _is_cleaner_supported_building_name(building_name: str | None) -> bool:
+    if not building_name:
+        return False
+    return building_name.strip().lower() != "office"
 
 
 def get_default_funcionario(session: SessionDep, cargo: int) -> Funcionario | None:
@@ -58,7 +65,7 @@ def get_last_acess(session: SessionDep, funcionario_id: uuid.UUID) -> Acess | No
     return session.exec(
         select(Acess)
         .where(Acess.funcionario_id == funcionario_id)
-        .order_by(desc(col(Acess.data)))
+        .order_by(desc(col(Acess.data)), col(Acess.operacao).asc())
         .limit(1)
     ).first()
 
@@ -116,7 +123,10 @@ def _has_all_buildings_cleaner_in_and_out_for_day(
 ) -> bool:
     building_ids = set(
         session.exec(
-            select(Building.id).where(Building.condominio_id == cleaner.condominio_id)
+            select(Building.id).where(
+                Building.condominio_id == cleaner.condominio_id,
+                func.lower(func.trim(Building.nome)) != "office",
+            )
         ).all()
     )
     if not building_ids:
@@ -236,6 +246,15 @@ def create_acess(*, session: SessionDep, acess_in: AcessCreate) -> Any:
 
     if not default_cleaner:
         raise HTTPException(status_code=404, detail="Default cleaner not found")
+
+    building = session.get(Building, acess_in.building_id)
+    if not building:
+        raise HTTPException(status_code=404, detail="Building not found")
+    if not _is_cleaner_supported_building_name(building.nome):
+        raise HTTPException(
+            status_code=400,
+            detail="Office is not valid for cleaner access",
+        )
 
     access_time = datetime.datetime.now()
     access_date = access_time.date()
@@ -488,6 +507,49 @@ def read_caretaker_work_time(
         for item in rows
     ]
     return WorkTimeSessionsPublic(data=data, count=count)
+
+
+@router.patch(
+    "/caretaker/work-time/{id}",
+    response_model=WorkTimeSessionPublic,
+    dependencies=[Depends(require_cargo(2))],
+)
+def update_caretaker_work_time(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    payload: WorkTimeSessionUpdate,
+) -> Any:
+    item = session.get(WorkTimeSession, id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Work time session not found")
+
+    funcionario = session.get(Funcionario, item.funcionario_id)
+    if not funcionario or funcionario.cargo != 1:
+        raise HTTPException(status_code=404, detail="Caretaker work time session not found")
+
+    if not current_user.is_superuser and (
+        current_user.condominio_id != funcionario.condominio_id
+    ):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    update_dict = payload.model_dump(exclude_unset=True)
+    if not update_dict:
+        raise HTTPException(status_code=422, detail="No fields to update")
+
+    item.sqlmodel_update(update_dict)
+    session.add(item)
+    session.commit()
+    session.refresh(item)
+
+    return WorkTimeSessionPublic(
+        id=item.id,
+        status=item.status,
+        data=item.data,
+        operacao=item.operacao,
+        funcionario_id=item.funcionario_id,
+    )
 
 
 @router.patch("/{id}", response_model=AcessPublic, dependencies=[Depends(require_cargo(1))])

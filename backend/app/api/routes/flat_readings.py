@@ -23,7 +23,9 @@ router = APIRouter(prefix="/flat_readings", tags=["flat_readings"])
 logger = logging.getLogger(__name__)
 
 
-def _normalize_phone_to_e164(raw_phone: str | None, default_country_code: str = "+55") -> str | None:
+def _normalize_phone_to_e164(
+    raw_phone: str | None, default_country_code: str = "+44"
+) -> str | None:
     if raw_phone is None:
         return None
     cleaned = str(raw_phone).strip()
@@ -32,10 +34,17 @@ def _normalize_phone_to_e164(raw_phone: str | None, default_country_code: str = 
         return None
 
     normalized = cleaned
-    if not normalized.startswith("+"):
+    if normalized.startswith("00"):
+        normalized = f"+{normalized[2:]}"
+    elif not normalized.startswith("+"):
         digits_only = re.sub(r"\D", "", normalized)
-        country = re.sub(r"[^\d+]", "", default_country_code) or "+55"
-        normalized = f"{country}{digits_only}"
+        country_digits = re.sub(r"\D", "", default_country_code) or "44"
+        if digits_only.startswith(country_digits):
+            normalized = f"+{digits_only}"
+        else:
+            if digits_only.startswith("0"):
+                digits_only = digits_only[1:]
+            normalized = f"+{country_digits}{digits_only}"
 
     e164_regex = re.compile(r"^\+[1-9]\d{8,19}$")
     return normalized if e164_regex.fullmatch(normalized) else None
@@ -73,7 +82,7 @@ def _build_flat_readings_sms_message(
     )
 
 
-def _send_owner1_flat_reading_sms(session: SessionDep, flat_reading: FlatReading) -> None:
+def _send_flat_reading_sms(session: SessionDep, flat_reading: FlatReading) -> None:
     # Flow applies only to normal/gas flat readings.
     if flat_reading.tipo not in (2, 4):
         return
@@ -82,21 +91,15 @@ def _send_owner1_flat_reading_sms(session: SessionDep, flat_reading: FlatReading
     if not flat:
         return
 
-    owner_1 = session.exec(
+    recipients = session.exec(
         select(Morador)
-        .where(Morador.flat_id == flat_reading.flat_id, Morador.cargo == 0)
-        .order_by(Morador.nome.asc())
-        .limit(1)
-    ).first()
-    if not owner_1:
-        return
-
-    phone_to = _normalize_phone_to_e164(owner_1.mobile)
-    if not phone_to:
-        logger.info(
-            "Skipping flat reading SMS because owner 1 has invalid phone format",
-            extra={"flat_id": str(flat_reading.flat_id), "owner_id": str(owner_1.id)},
+        .where(
+            Morador.flat_id == flat_reading.flat_id,
+            Morador.receives_flat_reading_sms,
         )
+        .order_by(Morador.cargo.asc(), Morador.nome.asc())
+    ).all()
+    if not recipients:
         return
 
     reading_date_utc = flat_reading.data.astimezone(timezone.utc)
@@ -143,14 +146,34 @@ def _send_owner1_flat_reading_sms(session: SessionDep, flat_reading: FlatReading
     if not message:
         return
 
-    try:
-        send_sms_notification(phone_to=phone_to, body=message)
-    except Exception:
-        # SMS failure should not block reading creation.
-        logger.exception(
-            "Failed to send flat reading SMS",
-            extra={"flat_id": str(flat_reading.flat_id), "reading_id": str(flat_reading.id)},
-        )
+    sent_phones: set[str] = set()
+    for recipient in recipients:
+        phone_to = _normalize_phone_to_e164(recipient.mobile)
+        if not phone_to:
+            logger.info(
+                "Skipping flat reading SMS because contact has invalid phone format",
+                extra={
+                    "flat_id": str(flat_reading.flat_id),
+                    "morador_id": str(recipient.id),
+                },
+            )
+            continue
+        if phone_to in sent_phones:
+            continue
+
+        try:
+            send_sms_notification(phone_to=phone_to, body=message)
+            sent_phones.add(phone_to)
+        except Exception:
+            # SMS failure should not block reading creation.
+            logger.exception(
+                "Failed to send flat reading SMS",
+                extra={
+                    "flat_id": str(flat_reading.flat_id),
+                    "reading_id": str(flat_reading.id),
+                    "morador_id": str(recipient.id),
+                },
+            )
 
 
 @router.get("/", response_model=FlatReadingsPublic, dependencies=[Depends(require_cargo(2))])
@@ -181,7 +204,7 @@ def create_flat_reading(*, session: SessionDep, flat_reading_in: FlatReadingCrea
     session.add(flat_reading)
     session.commit()
     session.refresh(flat_reading)
-    _send_owner1_flat_reading_sms(session, flat_reading)
+    _send_flat_reading_sms(session, flat_reading)
     return flat_reading
 
 

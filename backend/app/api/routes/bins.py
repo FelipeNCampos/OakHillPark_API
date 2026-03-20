@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import func, select
 
-from app.api.deps import SessionDep, get_current_user, require_cargo
+from app.api.deps import CurrentUser, SessionDep, get_current_user, require_cargo
 from app.models import (
     AcessActiveStatus,
     BinMissCollection,
@@ -15,6 +15,7 @@ from app.models import (
     BinSession,
     BinSessionCreate,
     BinSessionPublic,
+    BinSessionUpdate,
     BinSessionsPublic,
     Building,
     Funcionario,
@@ -176,6 +177,51 @@ def read_bin_sessions(
         for item, building in rows
     ]
     return BinSessionsPublic(data=data, count=count)
+
+
+@router.patch(
+    "/sessions/{id}",
+    response_model=BinSessionPublic,
+    dependencies=[Depends(require_cargo(2))],
+)
+def update_bin_session(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    payload: BinSessionUpdate,
+) -> Any:
+    item = session.get(BinSession, id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Bin session not found")
+
+    building = session.get(Building, item.building_id)
+    if not building:
+        raise HTTPException(status_code=404, detail="Building not found")
+
+    if not current_user.is_superuser and (
+        current_user.condominio_id != building.condominio_id
+    ):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    update_dict = payload.model_dump(exclude_unset=True)
+    if not update_dict:
+        raise HTTPException(status_code=422, detail="No fields to update")
+
+    item.sqlmodel_update(update_dict)
+    session.add(item)
+    session.commit()
+    session.refresh(item)
+
+    return BinSessionPublic(
+        id=item.id,
+        status=item.status,
+        data=item.data,
+        operacao=item.operacao,
+        building_id=item.building_id,
+        funcionario_id=item.funcionario_id,
+        building_nome=building.nome,
+    )
 
 
 @router.post("/", response_model=Message, status_code=201)

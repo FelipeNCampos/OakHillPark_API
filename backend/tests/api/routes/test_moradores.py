@@ -52,6 +52,7 @@ def _create_test_morador(db: Session, flat_id: uuid.UUID) -> Morador:
         nome="Test Morador",
         email=random_email(),
         mobile="1234567890",
+        receives_flat_reading_sms=False,
         car1="ABC1234",
         flat_id=flat_id
     )
@@ -105,6 +106,7 @@ def test_read_morador_by_id(
     assert data["cargo"] == morador.cargo
     assert data["email"] == morador.email
     assert data["flat_id"] == str(morador.flat_id)
+    assert data["receives_flat_reading_sms"] is False
 
 
 def test_read_nonexistent_morador(
@@ -145,6 +147,7 @@ def test_create_morador(
     assert created_morador["nome"] == data["nome"]
     assert created_morador["cargo"] == data["cargo"]
     assert created_morador["email"] == data["email"]
+    assert created_morador["receives_flat_reading_sms"] is False
 
 
 def test_create_morador_without_permission(
@@ -194,6 +197,23 @@ def test_update_morador(
     assert updated_morador["nome"] == update_data["nome"]
     assert updated_morador["cargo"] == update_data["cargo"]
     assert updated_morador["email"] == update_data["email"]
+
+
+def test_update_morador_sms_preference(
+    client: TestClient, superuser_token_headers: dict[str, str], db: Session
+) -> None:
+    _, _, flat = _create_test_condominio_flat(db)
+    morador = _create_test_morador(db, flat.id)
+
+    response = client.patch(
+        f"{settings.API_V1_STR}/moradores/{morador.id}",
+        headers=superuser_token_headers,
+        json={"receives_flat_reading_sms": True},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["receives_flat_reading_sms"] is True
 
 
 def test_update_morador_to_labeled_flat(

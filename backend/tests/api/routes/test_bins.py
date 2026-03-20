@@ -1,18 +1,27 @@
 from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
+from sqlmodel import delete
 from sqlmodel import select
 from sqlmodel import Session
+import pytest
+from unittest.mock import patch
 
+from app import crud
 from app.core.config import settings
 from app.models import (
     BinMissCollection,
+    BinSession,
     Building,
     BuildingCreate,
     Condominio,
     CondominioCreate,
+    Funcionario,
     User,
+    UserCreate,
 )
+from tests.utils.user import user_authentication_headers
+from tests.utils.utils import random_email, random_lower_string
 
 
 def _create_test_condominio_and_building(db: Session) -> Building:
@@ -31,6 +40,38 @@ def _create_test_condominio_and_building(db: Session) -> Building:
     db.commit()
     db.refresh(building)
     return building
+
+
+@pytest.fixture
+def caretaker_bins_setup(db: Session) -> tuple[Funcionario, Building]:
+    building = _create_test_condominio_and_building(db)
+    caretaker = Funcionario(
+        nome="Test Bins Caretaker",
+        cargo=1,
+        status=True,
+        is_default=True,
+        mobile=0,
+        email=None,
+        condominio_id=building.condominio_id,
+    )
+    db.add(caretaker)
+    db.commit()
+    db.refresh(caretaker)
+
+    yield caretaker, building
+
+    linked_users = db.exec(
+        select(User).where(User.condominio_id == building.condominio_id)
+    ).all()
+    for user in linked_users:
+        user.condominio_id = None
+        db.add(user)
+    db.commit()
+    db.exec(delete(BinSession).where(BinSession.funcionario_id == caretaker.id))
+    db.exec(delete(Funcionario).where(Funcionario.id == caretaker.id))
+    db.exec(delete(Building).where(Building.id == building.id))
+    db.exec(delete(Condominio).where(Condominio.id == building.condominio_id))
+    db.commit()
 
 
 def test_create_bin_miss_collection(client: TestClient, db: Session) -> None:
@@ -147,3 +188,95 @@ def test_read_bin_miss_collections_filters(
     )
     assert by_date.status_code == 200
     assert by_date.json()["count"] == 0
+
+
+def test_update_caretaker_bin_session_record(
+    client: TestClient,
+    db: Session,
+    caretaker_bins_setup: tuple[Funcionario, Building],
+    superuser_token_headers: dict[str, str],
+) -> None:
+    caretaker, building = caretaker_bins_setup
+
+    superuser = db.exec(
+        select(User).where(User.email == settings.FIRST_SUPERUSER)
+    ).first()
+    assert superuser is not None
+    superuser.condominio_id = building.condominio_id
+    db.add(superuser)
+    db.commit()
+
+    with patch("app.api.routes.bins.get_default_caretaker", return_value=caretaker):
+        create_response = client.post(
+            f"{settings.API_V1_STR}/bins/sessions",
+            json={
+                "building_id": str(building.id),
+                "operacao": 0,
+                "data": "2026-03-15T08:00:00Z",
+            },
+        )
+
+    assert create_response.status_code == 201
+    record_id = create_response.json()["id"]
+
+    update_response = client.patch(
+        f"{settings.API_V1_STR}/bins/sessions/{record_id}",
+        headers=superuser_token_headers,
+        json={"data": "2026-03-15T09:30:00Z"},
+    )
+
+    assert update_response.status_code == 200
+    payload = update_response.json()
+    assert payload["id"] == record_id
+    updated_at = datetime.fromisoformat(payload["data"])
+    assert updated_at.astimezone(timezone.utc) == datetime(
+        2026, 3, 15, 9, 30, tzinfo=timezone.utc
+    )
+
+
+def test_update_caretaker_bin_session_requires_manager_permissions(
+    client: TestClient,
+    db: Session,
+    caretaker_bins_setup: tuple[Funcionario, Building],
+) -> None:
+    caretaker, building = caretaker_bins_setup
+
+    normal_user_password = random_lower_string()
+    normal_user_email = random_email()
+    crud.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=normal_user_email,
+            password=normal_user_password,
+            is_active=True,
+            is_superuser=False,
+            cargo=1,
+            condominio_id=building.condominio_id,
+        ),
+    )
+    normal_user_headers = user_authentication_headers(
+        client=client,
+        email=normal_user_email,
+        password=normal_user_password,
+    )
+
+    with patch("app.api.routes.bins.get_default_caretaker", return_value=caretaker):
+        create_response = client.post(
+            f"{settings.API_V1_STR}/bins/sessions",
+            json={
+                "building_id": str(building.id),
+                "operacao": 0,
+                "data": "2026-03-15T08:00:00Z",
+            },
+        )
+
+    assert create_response.status_code == 201
+    record_id = create_response.json()["id"]
+
+    update_response = client.patch(
+        f"{settings.API_V1_STR}/bins/sessions/{record_id}",
+        headers=normal_user_headers,
+        json={"data": "2026-03-15T09:30:00Z"},
+    )
+
+    assert update_response.status_code == 403

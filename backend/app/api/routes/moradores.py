@@ -20,7 +20,11 @@ from app.models import (
 router = APIRouter(prefix="/moradores", tags=["moradores"])
 
 
-@router.get("/", response_model=MoradoresWithFlatPublic)
+@router.get(
+    "/",
+    response_model=MoradoresWithFlatPublic,
+    dependencies=[Depends(require_cargo(1))],
+)
 def read_moradores(
     session: SessionDep,
     skip: int = Query(0, ge=0),
@@ -83,6 +87,7 @@ def read_moradores(
             nome=morador.nome,
             email=morador.email if morador.email and morador.email.strip() else None,
             mobile=morador.mobile,
+            receives_flat_reading_sms=morador.receives_flat_reading_sms,
             car1=flat.car1 if flat.car1 and flat.car1.strip() else None,
             car2=flat.car2 if flat.car2 and flat.car2.strip() else None,
             car3=flat.car3 if flat.car3 and flat.car3.strip() else None,
@@ -97,7 +102,11 @@ def read_moradores(
     return MoradoresWithFlatPublic(data=moradores_with_flat, count=count)
 
 
-@router.get("/{id}", response_model=MoradorPublic)
+@router.get(
+    "/{id}",
+    response_model=MoradorPublic,
+    dependencies=[Depends(require_cargo(1))],
+)
 def read_morador(session: SessionDep, id: uuid.UUID) -> Any:
     morador = session.get(Morador, id)
     if not morador:
@@ -164,6 +173,7 @@ def update_morador_reading_types(
         nome=morador.nome,
         email=morador.email,
         mobile=morador.mobile,
+        receives_flat_reading_sms=morador.receives_flat_reading_sms,
         car1=flat.car1,
         car2=flat.car2,
         car3=flat.car3,

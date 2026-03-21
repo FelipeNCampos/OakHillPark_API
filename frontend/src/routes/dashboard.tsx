@@ -115,9 +115,10 @@ interface CaretakerRecordEditState {
 }
 
 interface CleanerRecordEditState {
-  recordId: EntityId
-  originalIso: string
-  label: "Time IN" | "Time OUT"
+  inRecordId: EntityId | null
+  inOriginalIso: string | null
+  outRecordId: EntityId | null
+  outOriginalIso: string | null
 }
 
 interface Morador {
@@ -8359,9 +8360,13 @@ function CleanerSummary() {
   const buildings = (buildingsData?.data || []) as Building[]
   const [editingCleanerRecord, setEditingCleanerRecord] =
     useState<CleanerRecordEditState | null>(null)
-  const [editedCleanerTimeValue, setEditedCleanerTimeValue] = useState("")
+  const [editedCleanerInTimeValue, setEditedCleanerInTimeValue] = useState("")
+  const [editedCleanerOutTimeValue, setEditedCleanerOutTimeValue] = useState("")
   const [isSavingCleanerRecordEdit, setIsSavingCleanerRecordEdit] =
     useState(false)
+  const [isCreatingCleanerTimeout, setIsCreatingCleanerTimeout] = useState<
+    string | null
+  >(null)
 
   const buildingMap = useMemo(() => {
     const map = new Map<EntityId, string>()
@@ -8554,54 +8559,106 @@ function CleanerSummary() {
   }, [enrichedSessions, formatTotalMinutes])
 
   const handleOpenCleanerRecordEdit = (
-    recordId: EntityId | null,
-    isoValue: string | null,
-    label: "Time IN" | "Time OUT",
+    inRecordId: EntityId | null,
+    inIsoValue: string | null,
+    outRecordId: EntityId | null,
+    outIsoValue: string | null,
   ) => {
-    if (!recordId || !isoValue) return
+    if (!inRecordId && !outRecordId) return
     setEditingCleanerRecord({
-      recordId,
-      originalIso: isoValue,
-      label,
+      inRecordId,
+      inOriginalIso: inIsoValue,
+      outRecordId,
+      outOriginalIso: outIsoValue,
     })
-    setEditedCleanerTimeValue(toTimeInputValue(isoValue))
+    setEditedCleanerInTimeValue(toTimeInputValue(inIsoValue))
+    setEditedCleanerOutTimeValue(toTimeInputValue(outIsoValue))
   }
 
   const handleSaveCleanerRecordEdit = async () => {
     if (!editingCleanerRecord) return
-    if (!editedCleanerTimeValue) {
-      showErrorToast("Time is required")
-      return
-    }
-
-    const [hoursRaw, minutesRaw] = editedCleanerTimeValue.split(":")
-    const hours = Number(hoursRaw)
-    const minutes = Number(minutesRaw)
-    if (
-      Number.isNaN(hours) ||
-      Number.isNaN(minutes) ||
-      hours < 0 ||
-      hours > 23 ||
-      minutes < 0 ||
-      minutes > 59
-    ) {
-      showErrorToast("Invalid time")
-      return
-    }
-
-    const nextDate = new Date(editingCleanerRecord.originalIso)
-    if (Number.isNaN(nextDate.getTime())) {
-      showErrorToast("Invalid original record date")
-      return
-    }
-    nextDate.setHours(hours, minutes, 0, 0)
 
     try {
       setIsSavingCleanerRecordEdit(true)
-      await apiCall(`/api/v1/acess/${editingCleanerRecord.recordId}`, {
-        method: "PATCH",
-        body: { data: nextDate.toISOString() },
-      })
+
+      const updates: Promise<unknown>[] = []
+
+      if (editingCleanerRecord.inRecordId && editingCleanerRecord.inOriginalIso) {
+        if (!editedCleanerInTimeValue) {
+          showErrorToast("Time IN is required")
+          return
+        }
+
+        const [hoursRaw, minutesRaw] = editedCleanerInTimeValue.split(":")
+        const hours = Number(hoursRaw)
+        const minutes = Number(minutesRaw)
+        if (
+          Number.isNaN(hours) ||
+          Number.isNaN(minutes) ||
+          hours < 0 ||
+          hours > 23 ||
+          minutes < 0 ||
+          minutes > 59
+        ) {
+          showErrorToast("Invalid Time IN")
+          return
+        }
+
+        const nextInDate = new Date(editingCleanerRecord.inOriginalIso)
+        if (Number.isNaN(nextInDate.getTime())) {
+          showErrorToast("Invalid Time IN record date")
+          return
+        }
+        nextInDate.setHours(hours, minutes, 0, 0)
+
+        updates.push(
+          apiCall(`/api/v1/acess/${editingCleanerRecord.inRecordId}`, {
+            method: "PATCH",
+            body: { data: nextInDate.toISOString() },
+          }),
+        )
+      }
+
+      if (
+        editingCleanerRecord.outRecordId &&
+        editingCleanerRecord.outOriginalIso
+      ) {
+        if (!editedCleanerOutTimeValue) {
+          showErrorToast("Time OUT is required")
+          return
+        }
+
+        const [hoursRaw, minutesRaw] = editedCleanerOutTimeValue.split(":")
+        const hours = Number(hoursRaw)
+        const minutes = Number(minutesRaw)
+        if (
+          Number.isNaN(hours) ||
+          Number.isNaN(minutes) ||
+          hours < 0 ||
+          hours > 23 ||
+          minutes < 0 ||
+          minutes > 59
+        ) {
+          showErrorToast("Invalid Time OUT")
+          return
+        }
+
+        const nextOutDate = new Date(editingCleanerRecord.outOriginalIso)
+        if (Number.isNaN(nextOutDate.getTime())) {
+          showErrorToast("Invalid Time OUT record date")
+          return
+        }
+        nextOutDate.setHours(hours, minutes, 0, 0)
+
+        updates.push(
+          apiCall(`/api/v1/acess/${editingCleanerRecord.outRecordId}`, {
+            method: "PATCH",
+            body: { data: nextOutDate.toISOString() },
+          }),
+        )
+      }
+
+      await Promise.all(updates)
       await queryClient.invalidateQueries({
         queryKey: ["acess", "cleaner"],
       })
@@ -8613,6 +8670,36 @@ function CleanerSummary() {
       showErrorToast(message)
     } finally {
       setIsSavingCleanerRecordEdit(false)
+    }
+  }
+
+  const handleCleanerTimeOut = async (session: {
+    inRecord?: AcessRecord
+    outRecord?: AcessRecord
+  }) => {
+    if (!session.inRecord?.building_id || session.outRecord?.id) return
+
+    const inRecordKey = String(session.inRecord.id)
+
+    try {
+      setIsCreatingCleanerTimeout(inRecordKey)
+      await apiCall("/api/v1/acess/", {
+        method: "POST",
+        body: {
+          building_id: session.inRecord.building_id,
+          operacao: 1,
+        },
+      })
+      await queryClient.invalidateQueries({
+        queryKey: ["acess", "cleaner"],
+      })
+      showSuccessToast("Cleaner time out created successfully")
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to create cleaner time out"
+      showErrorToast(message)
+    } finally {
+      setIsCreatingCleanerTimeout(null)
     }
   }
 
@@ -8705,6 +8792,9 @@ function CleanerSummary() {
               <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700">
                 Used
               </th>
+              <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700">
+                Actions
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -8712,7 +8802,7 @@ function CleanerSummary() {
               <tr>
                 <td
                   className="border border-gray-400 px-3 py-3 text-center text-sm text-gray-600"
-                  colSpan={5}
+                  colSpan={6}
                 >
                   Loading...
                 </td>
@@ -8722,7 +8812,7 @@ function CleanerSummary() {
               <tr>
                 <td
                   className="border border-gray-400 px-3 py-3 text-center text-sm text-gray-600"
-                  colSpan={5}
+                  colSpan={6}
                 >
                   No records found.
                 </td>
@@ -8732,6 +8822,12 @@ function CleanerSummary() {
               const dateLabel = formatDate(
                 session.inRecord?.data || session.outRecord?.data,
               )
+              const canTimeOut = Boolean(
+                session.inRecord?.id && !session.outRecord?.id,
+              )
+              const isTimingOut =
+                isCreatingCleanerTimeout !== null &&
+                isCreatingCleanerTimeout === String(session.inRecord?.id)
 
               return (
                 <tr
@@ -8746,45 +8842,44 @@ function CleanerSummary() {
                   </td>
                   <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
                     {formatTime(session.inRecord?.data)}
-                    {session.inRecord?.id && session.inRecord?.data && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleOpenCleanerRecordEdit(
-                            session.inRecord?.id || null,
-                            session.inRecord?.data || null,
-                            "Time IN",
-                          )
-                        }
-                        className="ml-2 rounded bg-[#8c7569] px-2 py-1 text-xs font-semibold text-white transition-all duration-200 hover:bg-[#55311c]"
-                      >
-                        Edit
-                      </button>
-                    )}
                   </td>
                   <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
                     {formatTime(session.outRecord?.data)}
-                    {session.outRecord?.id && session.outRecord?.data && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleOpenCleanerRecordEdit(
-                            session.outRecord?.id || null,
-                            session.outRecord?.data || null,
-                            "Time OUT",
-                          )
-                        }
-                        className="ml-2 rounded bg-[#8c7569] px-2 py-1 text-xs font-semibold text-white transition-all duration-200 hover:bg-[#55311c]"
-                      >
-                        Edit
-                      </button>
-                    )}
                   </td>
                   <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
                     {formatUsed(
                       session.inRecord?.data,
                       session.outRecord?.data,
                     )}
+                  </td>
+                  <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleOpenCleanerRecordEdit(
+                            session.inRecord?.id || null,
+                            session.inRecord?.data || null,
+                            session.outRecord?.id || null,
+                            session.outRecord?.data || null,
+                          )
+                        }
+                        disabled={!session.inRecord?.id && !session.outRecord?.id}
+                        className="rounded bg-[#8c7569] px-2 py-1 text-xs font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Edit
+                      </button>
+                      {canTimeOut && (
+                        <button
+                          type="button"
+                          onClick={() => handleCleanerTimeOut(session)}
+                          disabled={isTimingOut}
+                          className="rounded border border-[#8c7569] px-2 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {isTimingOut ? "Saving..." : "Time out"}
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               )
@@ -8800,27 +8895,49 @@ function CleanerSummary() {
               Edit cleaner record
             </h3>
             <p className="mt-1 text-sm text-[rgba(0,0,0,0.7)]">
-              Update the {editingCleanerRecord.label.toLowerCase()} for this cleaner record.
+              Update the available times for this cleaner record.
             </p>
 
             <div className="mt-4 grid gap-4">
-              <div>
-                <label
-                  className="block text-sm font-semibold text-[#55311c]"
-                  htmlFor="cleaner-edit-time"
-                >
-                  {editingCleanerRecord.label}
-                </label>
-                <input
-                  id="cleaner-edit-time"
-                  type="time"
-                  value={editedCleanerTimeValue}
-                  onChange={(event) =>
-                    setEditedCleanerTimeValue(event.target.value)
-                  }
-                  className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
-                />
-              </div>
+              {editingCleanerRecord.inRecordId && editingCleanerRecord.inOriginalIso && (
+                <div>
+                  <label
+                    className="block text-sm font-semibold text-[#55311c]"
+                    htmlFor="cleaner-edit-time-in"
+                  >
+                    Time IN
+                  </label>
+                  <input
+                    id="cleaner-edit-time-in"
+                    type="time"
+                    value={editedCleanerInTimeValue}
+                    onChange={(event) =>
+                      setEditedCleanerInTimeValue(event.target.value)
+                    }
+                    className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                  />
+                </div>
+              )}
+              {editingCleanerRecord.outRecordId &&
+                editingCleanerRecord.outOriginalIso && (
+                  <div>
+                    <label
+                      className="block text-sm font-semibold text-[#55311c]"
+                      htmlFor="cleaner-edit-time-out"
+                    >
+                      Time OUT
+                    </label>
+                    <input
+                      id="cleaner-edit-time-out"
+                      type="time"
+                      value={editedCleanerOutTimeValue}
+                      onChange={(event) =>
+                        setEditedCleanerOutTimeValue(event.target.value)
+                      }
+                      className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                    />
+                  </div>
+                )}
             </div>
 
             <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end">

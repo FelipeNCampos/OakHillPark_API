@@ -1129,6 +1129,7 @@ const FIRE_ALARM_BUILDINGS: FireAlarmBuildingConfig[] = [
       "GF",
       "1F",
       "2F",
+      "3F",
       "4F",
       "5F",
       "6F",
@@ -9204,6 +9205,7 @@ function CaretakerSummary({
     const day = String(now.getDate()).padStart(2, "0")
     return `${year}-${month}-${day}`
   })
+  const [selectedBinsDate, setSelectedBinsDate] = useState("")
   const [selectedWeekStart, setSelectedWeekStart] = useState(() =>
     getWeekStartIso(new Date()),
   )
@@ -9374,6 +9376,11 @@ function CaretakerSummary({
     return Number((totalMinutes / 60).toFixed(2))
   }, [getDurationMinutes, selectedWeekStart, workTimeSessionsGrouped, toDateKey])
 
+  const remainingWeeklyTargetHours = useMemo(
+    () => Math.max(20 - workTimeWeekHours, 0),
+    [workTimeWeekHours],
+  )
+
   const binSessionsGrouped = useMemo(() => {
     const sorted = [...binSessions]
       .filter((record) => record?.data)
@@ -9401,9 +9408,26 @@ function CaretakerSummary({
     return result
   }, [binSessions])
 
+  const { earliestBinSessionDate, latestBinSessionDate } = useMemo(() => {
+    const dates = binSessionsGrouped
+      .map((session) => toDateKey(session.inRecord?.data || session.outRecord?.data))
+      .filter(Boolean)
+      .sort()
+
+    return {
+      earliestBinSessionDate: dates[0] || "",
+      latestBinSessionDate: dates[dates.length - 1] || "",
+    }
+  }, [binSessionsGrouped, toDateKey])
+
   const binsTimeByBuilding = useMemo(() => {
     const totals = new Map<string, number>()
     binSessionsGrouped.forEach((session) => {
+      const sessionDate = toDateKey(
+        session.inRecord?.data || session.outRecord?.data,
+      )
+      if (selectedBinsDate && sessionDate !== selectedBinsDate) return
+
       const duration = getDurationMinutes(
         session.inRecord?.data,
         session.outRecord?.data,
@@ -9426,7 +9450,13 @@ function CaretakerSummary({
         hours: Number((minutes / 60).toFixed(2)),
       }))
       .sort((a, b) => b.hours - a.hours)
-  }, [binSessionsGrouped, buildingMap, getDurationMinutes])
+  }, [
+    binSessionsGrouped,
+    buildingMap,
+    getDurationMinutes,
+    selectedBinsDate,
+    toDateKey,
+  ])
 
   const binHistoryRows = useMemo(() => {
     return binSessionsGrouped.map((session, index) => {
@@ -9702,6 +9732,9 @@ function CaretakerSummary({
                     {weekRangeLabel}
                   </span>
                 </div>
+                <p className="mt-2 text-sm text-[rgba(85,49,28,0.72)]">
+                  {remainingWeeklyTargetHours.toFixed(2)}h left to reach 20h
+                </p>
               </div>
               <div className="flex flex-col gap-2 md:items-end">
                 <span className="text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]">
@@ -9803,9 +9836,37 @@ function CaretakerSummary({
         </>
       ) : (
         <div className="mb-6 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
-          <h4 className="mb-3 text-sm font-semibold text-[#55311c]">
-            Hour per Building (Bins)
-          </h4>
+          <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <h4 className="text-sm font-semibold text-[#55311c]">
+              Hour per Building (Bins)
+            </h4>
+            <div className="flex flex-wrap items-center gap-2">
+              <label
+                htmlFor="bins-building-day"
+                className="text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+              >
+                Day
+              </label>
+              <input
+                id="bins-building-day"
+                type="date"
+                min={earliestBinSessionDate || undefined}
+                max={latestBinSessionDate || undefined}
+                value={selectedBinsDate}
+                onChange={(event) => setSelectedBinsDate(event.target.value)}
+                className="rounded-lg border border-[#d9d0ca] bg-white px-3 py-1 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+              />
+              {selectedBinsDate && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedBinsDate("")}
+                  className="rounded-lg border border-[#d9d0ca] px-3 py-1 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
           <div className="h-72 w-full">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
@@ -9845,7 +9906,9 @@ function CaretakerSummary({
           </div>
           {!isLoadingBinSessions && binsTimeByBuilding.length === 0 && (
             <p className="mt-3 text-sm text-[rgba(0,0,0,0.6)]">
-              No sessions to generate chart.
+              {selectedBinsDate
+                ? "No sessions on the selected day."
+                : "No sessions to generate chart."}
             </p>
           )}
         </div>
@@ -10758,7 +10821,7 @@ function ResidentsContent() {
               <option value="owner_2">Owner 2</option>
               <option value="tenant">Tenant</option>
               <option value="agent">Agent</option>
-              <option value="all">Todos</option>
+              <option value="all">All</option>
             </select>
           </div>
         </div>

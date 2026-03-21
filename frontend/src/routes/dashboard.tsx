@@ -454,7 +454,7 @@ const buildScheduleReportEmailHtml = ({
   <div style="font-family:Arial,Helvetica,sans-serif;color:#2f2f2f;line-height:1.5;">
     <h2 style="margin:0 0 12px;color:#55311c;">Hello,</h2>
     <p style="margin:0 0 10px;">
-      Please find attached your schedule report.
+      Please find attached your report.
     </p>
     <p style="margin:0 0 6px;"><strong>Schedule:</strong> ${safeSchedule}</p>
     <p style="margin:0 0 16px;"><strong>Period:</strong> ${safePeriod}</p>

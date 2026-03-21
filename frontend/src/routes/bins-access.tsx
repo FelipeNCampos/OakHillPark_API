@@ -194,7 +194,7 @@ function BinsAccess() {
                     : "text-[#55311c] hover:bg-[#e8e1dc]"
                 }`}
               >
-                Late Collection
+                Collected
               </button>
             </div>
           </div>

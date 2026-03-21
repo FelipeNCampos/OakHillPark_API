@@ -11,6 +11,7 @@ from app.models import (
     Acess,
     Building,
     Condominio,
+    ContractorVisit,
     Flat,
     Funcionario,
     Morador,
@@ -54,6 +55,11 @@ def db() -> Generator[Session, None, None]:
 
         # Delete test buildings (those with "Test" in the name)
         session.exec(delete(Acess).where(Acess.id.in_(test_acess_ids)))
+        session.exec(
+            delete(ContractorVisit).where(
+                ContractorVisit.condominio_id.in_(test_condominio_ids)
+            )
+        )
         session.exec(delete(Readings).where(Readings.building_id.in_(test_building_ids)))
         session.exec(delete(Morador))  # All moradores are test data
         session.exec(delete(NotificationHistory))

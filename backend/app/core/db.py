@@ -135,6 +135,50 @@ def ensure_notification_history_schema(session: Session) -> None:
         session.commit()
 
 
+def ensure_contractor_visit_schema(session: Session) -> None:
+    bind = session.get_bind()
+    inspector = inspect(bind)
+    if inspector.has_table("contractorvisit"):
+        return
+
+    session.execute(
+        text(
+            """
+            CREATE TABLE contractorvisit (
+                id UUID PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                company VARCHAR(255) NOT NULL,
+                car_reg VARCHAR(50) NOT NULL,
+                block VARCHAR(100) NOT NULL,
+                mobile VARCHAR(30) NOT NULL,
+                in_at TIMESTAMPTZ NOT NULL,
+                out_at TIMESTAMPTZ,
+                condominio_id UUID NOT NULL REFERENCES condominio (id) ON DELETE CASCADE
+            )
+            """
+        )
+    )
+    session.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_contractorvisit_condominio_id "
+            "ON contractorvisit (condominio_id)"
+        )
+    )
+    session.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_contractorvisit_in_at "
+            "ON contractorvisit (in_at)"
+        )
+    )
+    session.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_contractorvisit_out_at "
+            "ON contractorvisit (out_at)"
+        )
+    )
+    session.commit()
+
+
 # make sure all SQLModel models are imported (app.models) before initializing DB
 # otherwise, SQLModel might fail to initialize relationships properly
 # for more details: https://github.com/fastapi/full-stack-fastapi-template/issues/28
@@ -152,6 +196,7 @@ def init_db(session: Session) -> None:
     _ensure_flat_label_schema(session)
     _ensure_morador_sms_schema(session)
     ensure_notification_history_schema(session)
+    ensure_contractor_visit_schema(session)
 
     user = session.exec(
         select(User).where(User.email == settings.FIRST_SUPERUSER)

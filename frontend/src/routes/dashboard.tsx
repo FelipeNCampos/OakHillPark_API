@@ -1571,7 +1571,7 @@ function ClientDashboard() {
       case "qr-cleaner":
         return <CleanerQrCodesContent />
       case "qr-contractor":
-        return <TabContent title="QR Code - Contractor" />
+        return <ContractorQrCodesContent />
       case "qr-caretaker":
         return <CaretakerQrCodesContent />
       case "qr-bins":
@@ -4677,25 +4677,6 @@ function FlatReadingsTable({
   )
 }
 
-function TabContent({ title }: { title: string }) {
-  if (title === "Cleaner") {
-    return <CleanerContent />
-  }
-
-  return (
-    <div className="mx-auto max-w-7xl">
-      <div className="rounded-lg bg-white p-8 shadow-md">
-        <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
-          {title}
-        </h2>
-        <p className="mt-2 text-[rgba(0,0,0,0.7)]">
-          Content for {title} will be displayed here.
-        </p>
-      </div>
-    </div>
-  )
-}
-
 function normalizePhoneToE164(
   rawPhone: string | number | null | undefined,
 ): string | null {
@@ -6821,6 +6802,126 @@ function CleanerQrCodesContent() {
             )
           })}
       </div>
+    </div>
+  )
+}
+
+function ContractorQrCodesContent() {
+  const { user } = useAuth()
+
+  const baseUrl = useMemo(() => {
+    if (typeof window === "undefined") return ""
+    return window.location.origin
+  }, [])
+
+  const [qrItem, setQrItem] = useState<{ dataUrl: string; link: string } | null>(
+    null,
+  )
+  const [isGenerating, setIsGenerating] = useState(false)
+
+  useEffect(() => {
+    let isActive = true
+
+    const generateQRCode = async () => {
+      if (!baseUrl || !user?.condominio_id) {
+        setQrItem(null)
+        return
+      }
+
+      setIsGenerating(true)
+
+      const params = new URLSearchParams()
+      params.set("condominioId", String(user.condominio_id))
+      const link = `${baseUrl}/contractor-access?${params.toString()}`
+      const dataUrl = await QRCode.toDataURL(link, {
+        width: 240,
+        margin: 1,
+      })
+
+      if (!isActive) return
+
+      setQrItem({ dataUrl, link })
+      setIsGenerating(false)
+    }
+
+    generateQRCode().catch(() => {
+      if (!isActive) return
+      setQrItem(null)
+      setIsGenerating(false)
+    })
+
+    return () => {
+      isActive = false
+    }
+  }, [baseUrl, user?.condominio_id])
+
+  return (
+    <div className="mx-auto max-w-4xl">
+      <div className="mb-6 rounded-lg bg-white p-6 shadow-md">
+        <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
+          QR Code - Contractor
+        </h2>
+        <p className="mt-2 text-[rgba(0,0,0,0.7)]">
+          Single QR code for contractor check in and check out.
+        </p>
+      </div>
+
+      {isGenerating && (
+        <div className="rounded-lg bg-white p-6 text-center text-sm text-[#55311c] shadow-md">
+          Generating QR Code...
+        </div>
+      )}
+
+      {!user?.condominio_id && !isGenerating && (
+        <div className="rounded-lg bg-white p-6 text-center text-sm text-[#55311c] shadow-md">
+          User is not linked to a condominio.
+        </div>
+      )}
+
+      {user?.condominio_id && !isGenerating && (
+        <div className="mx-auto max-w-md rounded-lg bg-white p-6 shadow-md">
+          <div className="flex flex-col items-center justify-center gap-4">
+            {qrItem?.dataUrl ? (
+              <img
+                src={qrItem.dataUrl}
+                alt="QR Code Contractor"
+                className="h-56 w-56 rounded-lg border border-[#e5e0dc] bg-white p-2"
+              />
+            ) : (
+              <div className="flex h-56 w-56 items-center justify-center rounded-lg border border-dashed border-[#e5e0dc] text-xs text-[rgba(0,0,0,0.6)]">
+                QR Code unavailable
+              </div>
+            )}
+
+            <div className="flex w-full flex-col gap-2">
+              <a
+                href={qrItem?.dataUrl || "#"}
+                download="qr-contractor.png"
+                className={`w-full rounded-lg px-4 py-2 text-center text-sm font-semibold transition-all duration-200 ${
+                  qrItem?.dataUrl
+                    ? "bg-[#8c7569] text-white hover:bg-[#55311c]"
+                    : "cursor-not-allowed bg-[#e5e0dc] text-[#8c7569]"
+                }`}
+                onClick={(event) => {
+                  if (!qrItem?.dataUrl) event.preventDefault()
+                }}
+              >
+                Download QR Code
+              </a>
+              {qrItem?.link && (
+                <a
+                  href={qrItem.link}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block rounded-lg border border-[#8c7569] px-4 py-2 text-center text-sm font-semibold text-[#55311c] transition-all duration-300 hover:bg-[#f3eeea]"
+                >
+                  Open link
+                </a>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

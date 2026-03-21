@@ -5,6 +5,7 @@ from app.api.routes import (
     bins,
     buildings,
     condominios,
+    contractor_access,
     flat_readings,
     flats,
     funcionarios,
@@ -30,6 +31,7 @@ api_router.include_router(moradores.router)
 api_router.include_router(funcionarios.router)
 api_router.include_router(reminds.router)
 api_router.include_router(acess.router)
+api_router.include_router(contractor_access.router)
 api_router.include_router(bins.router)
 api_router.include_router(readings.router)
 api_router.include_router(flat_readings.router)

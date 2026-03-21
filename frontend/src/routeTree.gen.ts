@@ -14,6 +14,7 @@ import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as RecoverPasswordRouteImport } from './routes/recover-password'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as DashboardRouteImport } from './routes/dashboard'
+import { Route as ContractorAccessRouteImport } from './routes/contractor-access'
 import { Route as CleanerAccessRouteImport } from './routes/cleaner-access'
 import { Route as CaretakerTasksRouteImport } from './routes/caretaker-tasks'
 import { Route as CaretakerLoginRouteImport } from './routes/caretaker-login'
@@ -47,6 +48,11 @@ const LoginRoute = LoginRouteImport.update({
 const DashboardRoute = DashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ContractorAccessRoute = ContractorAccessRouteImport.update({
+  id: '/contractor-access',
+  path: '/contractor-access',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CleanerAccessRoute = CleanerAccessRouteImport.update({
@@ -101,6 +107,7 @@ export interface FileRoutesByFullPath {
   '/caretaker-login': typeof CaretakerLoginRoute
   '/caretaker-tasks': typeof CaretakerTasksRoute
   '/cleaner-access': typeof CleanerAccessRoute
+  '/contractor-access': typeof ContractorAccessRoute
   '/dashboard': typeof DashboardRoute
   '/login': typeof LoginRoute
   '/recover-password': typeof RecoverPasswordRoute
@@ -115,6 +122,7 @@ export interface FileRoutesByTo {
   '/caretaker-login': typeof CaretakerLoginRoute
   '/caretaker-tasks': typeof CaretakerTasksRoute
   '/cleaner-access': typeof CleanerAccessRoute
+  '/contractor-access': typeof ContractorAccessRoute
   '/dashboard': typeof DashboardRoute
   '/login': typeof LoginRoute
   '/recover-password': typeof RecoverPasswordRoute
@@ -132,6 +140,7 @@ export interface FileRoutesById {
   '/caretaker-login': typeof CaretakerLoginRoute
   '/caretaker-tasks': typeof CaretakerTasksRoute
   '/cleaner-access': typeof CleanerAccessRoute
+  '/contractor-access': typeof ContractorAccessRoute
   '/dashboard': typeof DashboardRoute
   '/login': typeof LoginRoute
   '/recover-password': typeof RecoverPasswordRoute
@@ -150,6 +159,7 @@ export interface FileRouteTypes {
     | '/caretaker-login'
     | '/caretaker-tasks'
     | '/cleaner-access'
+    | '/contractor-access'
     | '/dashboard'
     | '/login'
     | '/recover-password'
@@ -164,6 +174,7 @@ export interface FileRouteTypes {
     | '/caretaker-login'
     | '/caretaker-tasks'
     | '/cleaner-access'
+    | '/contractor-access'
     | '/dashboard'
     | '/login'
     | '/recover-password'
@@ -180,6 +191,7 @@ export interface FileRouteTypes {
     | '/caretaker-login'
     | '/caretaker-tasks'
     | '/cleaner-access'
+    | '/contractor-access'
     | '/dashboard'
     | '/login'
     | '/recover-password'
@@ -197,6 +209,7 @@ export interface RootRouteChildren {
   CaretakerLoginRoute: typeof CaretakerLoginRoute
   CaretakerTasksRoute: typeof CaretakerTasksRoute
   CleanerAccessRoute: typeof CleanerAccessRoute
+  ContractorAccessRoute: typeof ContractorAccessRoute
   DashboardRoute: typeof DashboardRoute
   LoginRoute: typeof LoginRoute
   RecoverPasswordRoute: typeof RecoverPasswordRoute
@@ -239,6 +252,13 @@ declare module '@tanstack/react-router' {
       path: '/dashboard'
       fullPath: '/dashboard'
       preLoaderRoute: typeof DashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/contractor-access': {
+      id: '/contractor-access'
+      path: '/contractor-access'
+      fullPath: '/contractor-access'
+      preLoaderRoute: typeof ContractorAccessRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/cleaner-access': {
@@ -329,6 +349,7 @@ const rootRouteChildren: RootRouteChildren = {
   CaretakerLoginRoute: CaretakerLoginRoute,
   CaretakerTasksRoute: CaretakerTasksRoute,
   CleanerAccessRoute: CleanerAccessRoute,
+  ContractorAccessRoute: ContractorAccessRoute,
   DashboardRoute: DashboardRoute,
   LoginRoute: LoginRoute,
   RecoverPasswordRoute: RecoverPasswordRoute,

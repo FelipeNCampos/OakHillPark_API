@@ -87,6 +87,9 @@ class Condominio(SQLModel, table=True):
     reminders: list["Reminder"] = Relationship(
         back_populates="condominio", cascade_delete=True
     )
+    contractor_visits: list["ContractorVisit"] = Relationship(
+        back_populates="condominio", cascade_delete=True
+    )
 
 
 class Building(SQLModel, table=True):
@@ -245,6 +248,27 @@ class WorkTimeSession(SQLModel, table=True):
         foreign_key="funcionario.id", nullable=False, ondelete="CASCADE"
     )
     funcionario: Funcionario | None = Relationship(back_populates="work_time_sessions")
+
+
+class ContractorVisit(SQLModel, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    name: str = Field(default="", max_length=255)
+    company: str = Field(default="", max_length=255)
+    car_reg: str = Field(default="", max_length=50)
+    block: str = Field(default="", max_length=100)
+    mobile: str = Field(default="", max_length=30)
+    in_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    out_at: datetime | None = Field(
+        default=None,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    condominio_id: uuid.UUID = Field(
+        foreign_key="condominio.id", nullable=False, ondelete="CASCADE"
+    )
+    condominio: Condominio | None = Relationship(back_populates="contractor_visits")
 
 
 class Task(SQLModel, table=True):
@@ -763,6 +787,46 @@ class WorkTimeSessionPublic(WorkTimeSessionBase):
 
 class WorkTimeSessionsPublic(SQLModel):
     data: list[WorkTimeSessionPublic]
+    count: int
+
+
+class ContractorVisitCheckInCreate(SQLModel):
+    condominio_id: uuid.UUID
+    name: str = Field(min_length=1, max_length=255)
+    company: str = Field(min_length=1, max_length=255)
+    car_reg: str = Field(min_length=1, max_length=50)
+    block: str = Field(min_length=1, max_length=100)
+    mobile: str = Field(min_length=1, max_length=30)
+
+
+class ContractorVisitCheckOutCreate(SQLModel):
+    condominio_id: uuid.UUID
+    visit_id: uuid.UUID
+
+
+class ContractorVisitPublic(SQLModel):
+    id: uuid.UUID
+    name: str
+    company: str
+    car_reg: str
+    block: str
+    mobile: str
+    in_at: datetime
+    out_at: datetime | None
+    condominio_id: uuid.UUID
+
+
+class ContractorOpenVisitPublic(SQLModel):
+    id: uuid.UUID
+    name: str
+    company: str
+    block: str
+    mobile: str
+    in_at: datetime
+
+
+class ContractorOpenVisitsPublic(SQLModel):
+    data: list[ContractorOpenVisitPublic]
     count: int
 
 

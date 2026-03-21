@@ -19,6 +19,7 @@ import { LoadingButton } from "@/components/ui/loading-button"
 import { PasswordInput } from "@/components/ui/password-input"
 import { isLoggedIn } from "@/hooks/useAuth"
 import useCustomToast from "@/hooks/useCustomToast"
+import { clearAuthSession, isAuthSessionError } from "@/utils"
 
 const formSchema = z.object({
   username: z.email(),
@@ -39,7 +40,7 @@ export const Route = createFileRoute("/caretaker-login" as any)({
       try {
         current = await UsersService.readUserMe()
       } catch {
-        localStorage.removeItem("access_token")
+        clearAuthSession()
         return
       }
       if (current.cargo === 1 && !current.is_superuser) {
@@ -102,9 +103,18 @@ function CaretakerLogin() {
       const tokenPayload = (await response.json()) as { access_token: string }
       localStorage.setItem("access_token", tokenPayload.access_token)
 
-      const me = await UsersService.readUserMe()
+      let me
+      try {
+        me = await UsersService.readUserMe()
+      } catch (error) {
+        if (isAuthSessionError(error)) {
+          clearAuthSession()
+          throw new Error("Session expired, please log in again.")
+        }
+        throw error
+      }
       if (me.cargo !== 1 || me.is_superuser) {
-        localStorage.removeItem("access_token")
+        clearAuthSession()
         throw new Error("Account is not a caretaker account.")
       }
       window.location.href = "/caretaker-tasks"

@@ -8,7 +8,7 @@ import {
   type UserRegister,
   UsersService,
 } from "@/client"
-import { handleError } from "@/utils"
+import { clearAuthSession, handleError, isAuthSessionError } from "@/utils"
 import useCustomToast from "./useCustomToast"
 
 const isLoggedIn = () => {
@@ -19,11 +19,23 @@ const useAuth = () => {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { showErrorToast } = useCustomToast()
+  const readCurrentUser = async () => {
+    try {
+      return await UsersService.readUserMe()
+    } catch (error) {
+      if (isAuthSessionError(error)) {
+        clearAuthSession()
+        return null
+      }
+      throw error
+    }
+  }
 
   const { data: user } = useQuery<UserPublic | null, Error>({
     queryKey: ["currentUser"],
-    queryFn: UsersService.readUserMe,
+    queryFn: readCurrentUser,
     enabled: isLoggedIn(),
+    retry: false,
   })
 
   const signUpMutation = useMutation({
@@ -43,10 +55,19 @@ const useAuth = () => {
       formData: data,
     })
     localStorage.setItem("access_token", response.access_token)
-    const userData = await UsersService.readUserMe()
+    let userData: UserPublic
+    try {
+      userData = await UsersService.readUserMe()
+    } catch (error) {
+      if (isAuthSessionError(error)) {
+        clearAuthSession()
+        throw new Error("Session expired, please log in again.")
+      }
+      throw error
+    }
 
     if ((userData.cargo ?? 0) < 1 && !userData.is_superuser) {
-      localStorage.removeItem("access_token")
+      clearAuthSession()
       throw new Error("Access denied.")
     }
 
@@ -71,7 +92,7 @@ const useAuth = () => {
   })
 
   const logout = () => {
-    localStorage.removeItem("access_token")
+    clearAuthSession()
     navigate({ to: "/login" })
   }
 

@@ -10693,6 +10693,19 @@ function ResidentsContent() {
     )
   }
 
+  const renderResidentIdentity = (morador?: Morador) => {
+    if (!morador) return "-"
+
+    return (
+      <div className="flex flex-col">
+        <span>{morador.nome}</span>
+        <span className="text-xs text-[rgba(85,49,28,0.72)]">
+          {morador.email || "no email"}
+        </span>
+      </div>
+    )
+  }
+
   const handleSearch = (term: string) => {
     setSearchTerm(term)
     setCurrentPage(0)
@@ -10890,7 +10903,7 @@ function ResidentsContent() {
                             )}
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
-                            {row.owner_1?.nome || "-"}
+                            {renderResidentIdentity(row.owner_1)}
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
                             <div className="flex flex-col">
@@ -10899,7 +10912,7 @@ function ResidentsContent() {
                             </div>
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
-                            {row.owner_2?.nome || "-"}
+                            {renderResidentIdentity(row.owner_2)}
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
                             <div className="flex flex-col">
@@ -10908,7 +10921,7 @@ function ResidentsContent() {
                             </div>
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
-                            {row.tenant?.nome || "-"}
+                            {renderResidentIdentity(row.tenant)}
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
                             <div className="flex flex-col">
@@ -10917,7 +10930,7 @@ function ResidentsContent() {
                             </div>
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
-                            {row.agent?.nome || "-"}
+                            {renderResidentIdentity(row.agent)}
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
                             <div className="flex flex-col">
@@ -11001,7 +11014,7 @@ function ResidentsContent() {
                             )}
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
-                            {morador.nome}
+                            {renderResidentIdentity(morador)}
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
                             {morador.mobile || "-"}

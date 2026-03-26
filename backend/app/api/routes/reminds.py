@@ -1,6 +1,6 @@
-from datetime import datetime, timezone
-from typing import Any
 import uuid
+from datetime import date, datetime, timezone
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import or_
@@ -23,6 +23,8 @@ from app.models import (
 from app.utils import send_sms_notification
 
 router = APIRouter(prefix="/reminds", tags=["reminds"])
+REMINDER_SCHEDULE_UNITS = {"day", "week", "month"}
+REMINDER_SCHEDULE_MODES = {"interval", "fixed"}
 
 
 def _is_manager(user: User) -> bool:
@@ -46,7 +48,11 @@ def _reminder_to_public(reminder: Reminder) -> ReminderPublic:
     return ReminderPublic(
         id=reminder.id,
         name=reminder.name,
+        schedule_unit=reminder.schedule_unit,
+        schedule_mode=reminder.schedule_mode,
+        interval_value=reminder.interval_value,
         weekday_mask=reminder.weekday_mask,
+        month_mask=reminder.month_mask,
         is_active=reminder.is_active,
         action_sms=reminder.action_sms,
         sms_to=reminder.sms_to,
@@ -95,6 +101,92 @@ def _validate_reminder_actions(
 def _validate_weekday_mask(weekday_mask: int) -> None:
     if weekday_mask < 1 or weekday_mask > 127:
         raise HTTPException(status_code=400, detail="Invalid weekday mask")
+
+
+def _validate_month_mask(month_mask: int) -> None:
+    if month_mask < 1 or month_mask > 4095:
+        raise HTTPException(status_code=400, detail="Invalid month mask")
+
+
+def _validate_schedule_config(
+    *,
+    schedule_unit: str,
+    schedule_mode: str,
+    interval_value: int | None,
+    weekday_mask: int,
+    month_mask: int | None,
+) -> None:
+    if schedule_unit not in REMINDER_SCHEDULE_UNITS:
+        raise HTTPException(status_code=400, detail="Invalid schedule unit")
+    if schedule_mode not in REMINDER_SCHEDULE_MODES:
+        raise HTTPException(status_code=400, detail="Invalid schedule mode")
+
+    if schedule_mode == "interval":
+        if interval_value is None or interval_value < 1:
+            raise HTTPException(
+                status_code=400,
+                detail="Interval value is required for interval mode",
+            )
+    if schedule_unit == "week" and schedule_mode == "fixed":
+        _validate_weekday_mask(weekday_mask)
+    if schedule_unit == "month" and schedule_mode == "fixed":
+        if month_mask is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Select at least one month for fixed monthly reminders",
+            )
+        _validate_month_mask(month_mask)
+
+
+def _start_of_week(value: date) -> date:
+    return date.fromordinal(value.toordinal() - value.weekday())
+
+
+def _month_index(value: date) -> int:
+    return value.year * 12 + (value.month - 1)
+
+
+def _is_reminder_due_today(reminder: Reminder, today_date: date) -> bool:
+    schedule_unit = (reminder.schedule_unit or "week").strip().lower()
+    schedule_mode = (reminder.schedule_mode or "fixed").strip().lower()
+
+    if schedule_unit == "day":
+        if schedule_mode == "fixed":
+            return True
+        if not reminder.interval_value:
+            return False
+        anchor_date = reminder.created_at.date()
+        diff_days = (today_date - anchor_date).days
+        return diff_days >= 0 and diff_days % reminder.interval_value == 0
+
+    if schedule_unit == "week":
+        if schedule_mode == "fixed":
+            weekday_bit = 1 << today_date.weekday()
+            if (reminder.weekday_mask & weekday_bit) == 0:
+                return False
+            return True
+        if not reminder.interval_value:
+            return False
+        anchor_date = reminder.created_at.date()
+        if today_date.weekday() != anchor_date.weekday():
+            return False
+        anchor_week = _start_of_week(reminder.created_at.date())
+        current_week = _start_of_week(today_date)
+        diff_weeks = (current_week - anchor_week).days // 7
+        return diff_weeks >= 0 and diff_weeks % reminder.interval_value == 0
+
+    if schedule_unit == "month":
+        if today_date.day != 1:
+            return False
+        if schedule_mode == "fixed":
+            month_bit = 1 << (today_date.month - 1)
+            return bool(reminder.month_mask and (reminder.month_mask & month_bit) != 0)
+        if not reminder.interval_value:
+            return False
+        diff_months = _month_index(today_date) - _month_index(reminder.created_at.date())
+        return diff_months >= 0 and diff_months % reminder.interval_value == 0
+
+    return False
 
 
 def _next_task_code(session: SessionDep, condominio_id) -> str:
@@ -215,12 +307,22 @@ def create_reminder(
         action_task=payload.action_task,
         task_title=payload.task_title,
     )
-    _validate_weekday_mask(payload.weekday_mask)
+    _validate_schedule_config(
+        schedule_unit=payload.schedule_unit.strip().lower(),
+        schedule_mode=payload.schedule_mode.strip().lower(),
+        interval_value=payload.interval_value,
+        weekday_mask=payload.weekday_mask,
+        month_mask=payload.month_mask,
+    )
 
     now = datetime.now(timezone.utc)
     reminder = Reminder(
         name=payload.name.strip(),
+        schedule_unit=payload.schedule_unit.strip().lower(),
+        schedule_mode=payload.schedule_mode.strip().lower(),
+        interval_value=payload.interval_value,
         weekday_mask=payload.weekday_mask,
+        month_mask=payload.month_mask,
         is_active=payload.is_active,
         action_sms=payload.action_sms,
         sms_to=payload.sms_to.strip() if payload.sms_to else None,
@@ -268,9 +370,16 @@ def update_reminder(
 
     if payload.name is not None:
         reminder.name = payload.name.strip()
+    if payload.schedule_unit is not None:
+        reminder.schedule_unit = payload.schedule_unit.strip().lower()
+    if payload.schedule_mode is not None:
+        reminder.schedule_mode = payload.schedule_mode.strip().lower()
+    if "interval_value" in payload.model_fields_set:
+        reminder.interval_value = payload.interval_value
     if payload.weekday_mask is not None:
-        _validate_weekday_mask(payload.weekday_mask)
         reminder.weekday_mask = payload.weekday_mask
+    if "month_mask" in payload.model_fields_set:
+        reminder.month_mask = payload.month_mask
     if payload.is_active is not None:
         reminder.is_active = payload.is_active
     if payload.action_sms is not None:
@@ -278,14 +387,22 @@ def update_reminder(
     if payload.action_task is not None:
         reminder.action_task = payload.action_task
 
-    if payload.sms_to is not None:
-        reminder.sms_to = payload.sms_to.strip() or None
-    if payload.sms_message is not None:
-        reminder.sms_message = payload.sms_message.strip() or None
-    if payload.task_title is not None:
-        reminder.task_title = payload.task_title.strip() or None
-    if payload.task_description is not None:
-        reminder.task_description = payload.task_description.strip() or None
+    if "sms_to" in payload.model_fields_set:
+        reminder.sms_to = (payload.sms_to or "").strip() or None
+    if "sms_message" in payload.model_fields_set:
+        reminder.sms_message = (payload.sms_message or "").strip() or None
+    if "task_title" in payload.model_fields_set:
+        reminder.task_title = (payload.task_title or "").strip() or None
+    if "task_description" in payload.model_fields_set:
+        reminder.task_description = (payload.task_description or "").strip() or None
+
+    _validate_schedule_config(
+        schedule_unit=reminder.schedule_unit,
+        schedule_mode=reminder.schedule_mode,
+        interval_value=reminder.interval_value,
+        weekday_mask=reminder.weekday_mask,
+        month_mask=reminder.month_mask,
+    )
 
     _validate_reminder_actions(
         action_sms=reminder.action_sms,
@@ -346,8 +463,6 @@ def execute_due_reminders(
 
     today_utc = datetime.now(timezone.utc)
     today_date = today_utc.date()
-    weekday = today_date.weekday()
-
     due_candidates = session.exec(
         select(Reminder).where(
             Reminder.condominio_id == condominio_id,
@@ -358,11 +473,10 @@ def execute_due_reminders(
             ),
         )
     ).all()
-    weekday_bit = 1 << weekday
     due_reminders = [
         reminder
         for reminder in due_candidates
-        if (reminder.weekday_mask & weekday_bit) != 0
+        if _is_reminder_due_today(reminder, today_date)
     ]
 
     sms_sent = 0

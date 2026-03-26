@@ -156,6 +156,7 @@ class Morador(SQLModel, table=True):
     email: EmailStr | None = Field(default=None, max_length=255)
     mobile: str = Field(default="", max_length=20)
     receives_flat_reading_sms: bool = Field(default=False)
+    receives_twilio_sms: bool = Field(default=True)
     flat_id: uuid.UUID = Field(
         foreign_key="flat.id", nullable=False, ondelete="CASCADE"
     )
@@ -256,7 +257,10 @@ class ContractorVisit(SQLModel, table=True):
     company: str = Field(default="", max_length=255)
     car_reg: str = Field(default="", max_length=50)
     block: str = Field(default="", max_length=100)
+    job_description: str = Field(default="", max_length=255)
     mobile: str = Field(default="", max_length=30)
+    extra_media_name: str | None = Field(default=None, max_length=255)
+    extra_media_data: str | None = Field(default=None)
     in_at: datetime = Field(
         default_factory=get_datetime_utc,
         sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
@@ -315,7 +319,11 @@ class TaskMessage(SQLModel, table=True):
 class Reminder(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     name: str = Field(max_length=255)
+    schedule_unit: str = Field(default="week", max_length=20)
+    schedule_mode: str = Field(default="fixed", max_length=20)
+    interval_value: int | None = Field(default=None)
     weekday_mask: int = Field(default=2, ge=1, le=127)  # bitmask for weekdays
+    month_mask: int | None = Field(default=None)
     is_active: bool = Field(default=True)
     action_sms: bool = Field(default=False)
     sms_to: str | None = Field(default=None, max_length=20)
@@ -355,6 +363,28 @@ class FireAlarmScheduleRecord(SQLModel, table=True):
     location: str | None = Field(default=None, max_length=100)
     action_required: bool = Field(default=False)
     comments: str | None = Field(default=None, max_length=500)
+    created_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+
+
+class FireAlarmExternalCertificate(SQLModel, table=True):
+    __tablename__ = "fire_alarm_external_certificate"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    condominio_id: uuid.UUID = Field(
+        foreign_key="condominio.id", nullable=False, ondelete="CASCADE", index=True
+    )
+    certificate_date: date = Field(index=True)
+    certificate_time: str = Field(default="", max_length=5)
+    company: str = Field(default="", max_length=255, index=True)
+    professional: str = Field(default="", max_length=255, index=True)
+    media_1_name: str | None = Field(default=None, max_length=255)
+    media_1_data: str | None = Field(default=None)
+    media_2_name: str | None = Field(default=None, max_length=255)
+    media_2_data: str | None = Field(default=None)
+    created_by_user_id: uuid.UUID = Field(foreign_key="user.id", nullable=False)
     created_at: datetime = Field(
         default_factory=get_datetime_utc,
         sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
@@ -601,6 +631,7 @@ class MoradorBase(SQLModel):
     email: EmailStr | None = Field(default=None, max_length=255)
     mobile: str = Field(default="", max_length=20)  # Changed to str for phone numbers
     receives_flat_reading_sms: bool = Field(default=False)
+    receives_twilio_sms: bool = Field(default=True)
     flat_id: uuid.UUID
 
 
@@ -614,6 +645,7 @@ class MoradorUpdate(SQLModel):
     email: EmailStr | None = Field(default=None, max_length=255)
     mobile: str | None = Field(default=None, max_length=20)
     receives_flat_reading_sms: bool | None = None
+    receives_twilio_sms: bool | None = None
     flat_id: uuid.UUID | None = None
 
 
@@ -794,8 +826,8 @@ class ContractorVisitCheckInCreate(SQLModel):
     condominio_id: uuid.UUID
     name: str = Field(min_length=1, max_length=255)
     company: str = Field(min_length=1, max_length=255)
-    car_reg: str = Field(min_length=1, max_length=50)
-    block: str = Field(min_length=1, max_length=100)
+    building_id: uuid.UUID
+    job_description: str = Field(min_length=1, max_length=255)
     mobile: str = Field(min_length=1, max_length=30)
 
 
@@ -804,29 +836,96 @@ class ContractorVisitCheckOutCreate(SQLModel):
     visit_id: uuid.UUID
 
 
+class ContractorAccessBuildingPublic(SQLModel):
+    id: uuid.UUID
+    name: str
+
+
+class ContractorAccessBuildingsPublic(SQLModel):
+    data: list[ContractorAccessBuildingPublic]
+    count: int
+
+
 class ContractorVisitPublic(SQLModel):
     id: uuid.UUID
     name: str
     company: str
-    car_reg: str
-    block: str
+    building_name: str
+    door_code: str | None = None
+    job_description: str
     mobile: str
     in_at: datetime
     out_at: datetime | None
     condominio_id: uuid.UUID
 
 
+class ContractorVisitMediaUpdate(SQLModel):
+    extra_media_name: str | None = Field(default=None, max_length=255)
+    extra_media_data: str | None = None
+
+
+class ContractorVisitAdminPublic(SQLModel):
+    id: uuid.UUID
+    name: str
+    company: str
+    building_name: str
+    job_description: str
+    mobile: str
+    extra_media_name: str | None
+    extra_media_data: str | None
+    in_at: datetime
+    out_at: datetime | None
+    condominio_id: uuid.UUID
+
+
+class ContractorVisitsPublic(SQLModel):
+    data: list[ContractorVisitAdminPublic]
+    count: int
+
+
 class ContractorOpenVisitPublic(SQLModel):
     id: uuid.UUID
     name: str
     company: str
-    block: str
+    building_name: str
+    job_description: str
     mobile: str
     in_at: datetime
 
 
 class ContractorOpenVisitsPublic(SQLModel):
     data: list[ContractorOpenVisitPublic]
+    count: int
+
+
+class FireAlarmExternalCertificateCreate(SQLModel):
+    certificate_date: date
+    certificate_time: str = Field(min_length=1, max_length=5)
+    company: str = Field(min_length=1, max_length=255)
+    professional: str = Field(min_length=1, max_length=255)
+    media_1_name: str | None = Field(default=None, max_length=255)
+    media_1_data: str | None = None
+    media_2_name: str | None = Field(default=None, max_length=255)
+    media_2_data: str | None = None
+
+
+class FireAlarmExternalCertificatePublic(SQLModel):
+    id: uuid.UUID
+    condominio_id: uuid.UUID
+    certificate_date: date
+    certificate_time: str
+    company: str
+    professional: str
+    media_1_name: str | None
+    media_1_data: str | None
+    media_2_name: str | None
+    media_2_data: str | None
+    created_by_user_id: uuid.UUID
+    created_at: datetime
+
+
+class FireAlarmExternalCertificatesPublic(SQLModel):
+    data: list[FireAlarmExternalCertificatePublic]
     count: int
 
 
@@ -898,7 +997,11 @@ class TaskMessagesPublic(SQLModel):
 
 class ReminderCreate(SQLModel):
     name: str = Field(min_length=1, max_length=255)
-    weekday_mask: int = Field(ge=1, le=127)
+    schedule_unit: str = Field(default="week", min_length=1, max_length=20)
+    schedule_mode: str = Field(default="fixed", min_length=1, max_length=20)
+    interval_value: int | None = Field(default=None, ge=1)
+    weekday_mask: int = Field(default=2, ge=1, le=127)
+    month_mask: int | None = Field(default=None, ge=1, le=4095)
     is_active: bool = True
     action_sms: bool = False
     sms_to: str | None = Field(default=None, max_length=20)
@@ -910,7 +1013,11 @@ class ReminderCreate(SQLModel):
 
 class ReminderUpdate(SQLModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
+    schedule_unit: str | None = Field(default=None, min_length=1, max_length=20)
+    schedule_mode: str | None = Field(default=None, min_length=1, max_length=20)
+    interval_value: int | None = Field(default=None, ge=1)
     weekday_mask: int | None = Field(default=None, ge=1, le=127)
+    month_mask: int | None = Field(default=None, ge=1, le=4095)
     is_active: bool | None = None
     action_sms: bool | None = None
     sms_to: str | None = Field(default=None, max_length=20)
@@ -923,7 +1030,11 @@ class ReminderUpdate(SQLModel):
 class ReminderPublic(SQLModel):
     id: uuid.UUID
     name: str
+    schedule_unit: str
+    schedule_mode: str
+    interval_value: int | None
     weekday_mask: int
+    month_mask: int | None
     is_active: bool
     action_sms: bool
     sms_to: str | None

@@ -18,9 +18,34 @@ type ContractorOpenVisit = {
   id: string
   name: string
   company: string
-  block: string
+  building_name: string
+  job_description: string
   mobile: string
   in_at: string
+}
+
+type ContractorBuilding = {
+  id: string
+  name: string
+}
+
+type ContractorVisitResponse = {
+  id: string
+  name: string
+  company: string
+  building_name: string
+  door_code?: string | null
+  job_description: string
+  mobile: string
+  in_at: string
+  out_at: string | null
+  condominio_id: string
+}
+
+type ContractorConfirmation = {
+  operation: "in" | "out"
+  buildingName: string
+  doorCode: string | null
 }
 
 const isRequestOptions = (params?: ApiParams): params is RequestOptions => {
@@ -85,13 +110,24 @@ function ContractorAccess() {
   const search = Route.useSearch() as z.infer<typeof searchSchema>
   const { condominioId } = search
   const [selectedOperation, setSelectedOperation] = useState<"in" | "out">("in")
-  const [showConfirmation, setShowConfirmation] = useState(false)
+  const [confirmation, setConfirmation] = useState<ContractorConfirmation | null>(
+    null,
+  )
   const [selectedVisitId, setSelectedVisitId] = useState("")
   const [name, setName] = useState("")
   const [company, setCompany] = useState("")
-  const [carReg, setCarReg] = useState("")
-  const [block, setBlock] = useState("")
+  const [buildingId, setBuildingId] = useState("")
+  const [jobDescription, setJobDescription] = useState("")
   const [mobile, setMobile] = useState("")
+
+  const buildingsQuery = useQuery<{ data: ContractorBuilding[]; count: number }>({
+    queryKey: ["contractor-buildings", condominioId],
+    queryFn: () =>
+      publicApiCall("/api/v1/contractor-access/buildings", {
+        condominio_id: condominioId,
+      }),
+    enabled: Boolean(condominioId),
+  })
 
   const openVisitsQuery = useQuery<{ data: ContractorOpenVisit[]; count: number }>({
     queryKey: ["contractor-open-visits", condominioId],
@@ -109,7 +145,7 @@ function ContractorAccess() {
     [openVisitOptions, selectedVisitId],
   )
 
-  const mutation = useMutation({
+  const mutation = useMutation<ContractorVisitResponse>({
     mutationFn: () => {
       if (!condominioId) {
         throw new Error("Invalid QR code. Condominio not found.")
@@ -122,8 +158,8 @@ function ContractorAccess() {
             condominio_id: condominioId,
             name,
             company,
-            car_reg: carReg,
-            block,
+            building_id: buildingId,
+            job_description: jobDescription,
             mobile,
           },
         })
@@ -137,25 +173,23 @@ function ContractorAccess() {
         },
       })
     },
-    onSuccess: () => {
+    onSuccess: (response) => {
       showSuccessToast("Record confirmed")
-      setShowConfirmation(true)
+      setConfirmation({
+        operation: selectedOperation,
+        buildingName: response.building_name,
+        doorCode: response.door_code?.trim() || null,
+      })
       if (selectedOperation === "in") {
         setName("")
         setCompany("")
-        setCarReg("")
-        setBlock("")
+        setBuildingId("")
+        setJobDescription("")
         setMobile("")
       } else {
         setSelectedVisitId("")
         void openVisitsQuery.refetch()
       }
-      setTimeout(() => {
-        if (typeof window !== "undefined") {
-          window.close()
-          window.location.href = "about:blank"
-        }
-      }, 5000)
     },
     onError: (error: unknown) => {
       const message =
@@ -167,7 +201,9 @@ function ContractorAccess() {
   const canSubmit =
     Boolean(condominioId) &&
     (selectedOperation === "in"
-      ? [name, company, carReg, block, mobile].every((value) => value.trim())
+      ? [name, company, buildingId, jobDescription, mobile].every((value) =>
+          value.trim(),
+        )
       : Boolean(selectedVisitId))
 
   return (
@@ -188,7 +224,10 @@ function ContractorAccess() {
             <div className="flex flex-col rounded-2xl bg-[#f5f1ee] p-1 sm:flex-row sm:rounded-full">
               <button
                 type="button"
-                onClick={() => setSelectedOperation("in")}
+                onClick={() => {
+                  setSelectedOperation("in")
+                  setConfirmation(null)
+                }}
                 className={`flex-1 rounded-full px-4 py-2 text-sm font-semibold transition-all duration-200 ${
                   selectedOperation === "in"
                     ? "bg-[#8c7569] text-white shadow"
@@ -199,7 +238,10 @@ function ContractorAccess() {
               </button>
               <button
                 type="button"
-                onClick={() => setSelectedOperation("out")}
+                onClick={() => {
+                  setSelectedOperation("out")
+                  setConfirmation(null)
+                }}
                 className={`flex-1 rounded-full px-4 py-2 text-sm font-semibold transition-all duration-200 ${
                   selectedOperation === "out"
                     ? "bg-[#8c7569] text-white shadow"
@@ -243,32 +285,49 @@ function ContractorAccess() {
               </div>
               <div>
                 <label
-                  htmlFor="contractor-car-reg"
+                  htmlFor="contractor-building"
                   className="block text-sm font-semibold text-[#55311c]"
                 >
-                  Car reg
+                  Building
                 </label>
-                <input
-                  id="contractor-car-reg"
-                  value={carReg}
-                  onChange={(event) => setCarReg(event.target.value)}
+                <select
+                  id="contractor-building"
+                  value={buildingId}
+                  onChange={(event) => setBuildingId(event.target.value)}
                   className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
-                />
+                >
+                  <option value="">
+                    {buildingsQuery.isLoading
+                      ? "Loading buildings..."
+                      : "Select a building"}
+                  </option>
+                  {(buildingsQuery.data?.data || []).map((building) => (
+                    <option key={building.id} value={building.id}>
+                      {building.name}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label
-                  htmlFor="contractor-block"
+                  htmlFor="contractor-job-description"
                   className="block text-sm font-semibold text-[#55311c]"
                 >
-                  Block
+                  Job description
                 </label>
                 <input
-                  id="contractor-block"
-                  value={block}
-                  onChange={(event) => setBlock(event.target.value)}
+                  id="contractor-job-description"
+                  value={jobDescription}
+                  onChange={(event) => setJobDescription(event.target.value)}
                   className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
                 />
               </div>
+              {!buildingsQuery.isLoading &&
+                (buildingsQuery.data?.data || []).length === 0 && (
+                  <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-700">
+                    No buildings are available for this QR code.
+                  </div>
+                )}
               <div>
                 <label
                   htmlFor="contractor-mobile"
@@ -291,7 +350,7 @@ function ContractorAccess() {
                   htmlFor="contractor-open-visit"
                   className="block text-sm font-semibold text-[#55311c]"
                 >
-                  Mobile
+                  Contractor record
                 </label>
                 <select
                   id="contractor-open-visit"
@@ -302,7 +361,7 @@ function ContractorAccess() {
                   <option value="">Select a contractor</option>
                   {openVisitOptions.map((visit) => (
                     <option key={visit.id} value={visit.id}>
-                      {`${visit.mobile} | ${visit.name} | ${visit.company} | ${visit.block} | ${new Date(visit.in_at).toLocaleString("en-GB", {
+                      {`${visit.mobile} | ${visit.name} | ${visit.company} | ${visit.building_name} | ${new Date(visit.in_at).toLocaleString("en-GB", {
                         day: "2-digit",
                         month: "2-digit",
                         year: "numeric",
@@ -335,7 +394,10 @@ function ContractorAccess() {
                     <strong>Company:</strong> {selectedVisit.company}
                   </p>
                   <p>
-                    <strong>Block:</strong> {selectedVisit.block}
+                    <strong>Building:</strong> {selectedVisit.building_name}
+                  </p>
+                  <p>
+                    <strong>Job description:</strong> {selectedVisit.job_description}
                   </p>
                 </div>
               )}
@@ -359,16 +421,48 @@ function ContractorAccess() {
         </div>
       </div>
 
-      {showConfirmation && (
+      {confirmation && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
           <div className="w-full max-w-md rounded-2xl bg-white p-6 text-center shadow-xl">
-            <h2 className="text-2xl font-bold text-[#55311c]">Thank you!</h2>
+            <h2 className="text-2xl font-bold text-[#55311c]">
+              Record confirmed
+            </h2>
             <p className="mt-3 text-[rgba(0,0,0,0.7)]">
-              Your contractor record has been saved successfully.
+              {confirmation.operation === "in"
+                ? "The contractor has been checked in successfully."
+                : "The contractor has been checked out successfully."}
             </p>
-            <p className="mt-4 text-sm text-[rgba(0,0,0,0.55)]">
-              This window will close automatically in a few seconds.
-            </p>
+            {confirmation.operation === "in" && (
+              <div className="mt-5 rounded-2xl border border-[#e5e0dc] bg-[#f9f7f5] p-4 text-left">
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#8c7569]">
+                  Building
+                </p>
+                <p className="mt-2 text-base font-semibold text-[#55311c]">
+                  {confirmation.buildingName}
+                </p>
+                <p className="mt-4 text-xs font-semibold uppercase tracking-[0.24em] text-[#8c7569]">
+                  Door code
+                </p>
+                {confirmation.doorCode ? (
+                  <div className="mt-2 rounded-2xl bg-white px-4 py-4 text-center shadow-sm ring-1 ring-[#e5e0dc]">
+                    <p className="font-mono text-3xl font-bold tracking-[0.32em] text-[#55311c]">
+                      {confirmation.doorCode}
+                    </p>
+                  </div>
+                ) : (
+                  <p className="mt-2 text-sm text-[rgba(0,0,0,0.65)]">
+                    No door code is configured for this building yet.
+                  </p>
+                )}
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => setConfirmation(null)}
+              className="mt-6 w-full rounded-lg bg-[#8c7569] px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#55311c]"
+            >
+              Done
+            </button>
           </div>
         </div>
       )}

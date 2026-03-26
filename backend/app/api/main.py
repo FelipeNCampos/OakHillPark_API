@@ -6,14 +6,15 @@ from app.api.routes import (
     buildings,
     condominios,
     contractor_access,
+    fire_alarm_external_certificates,
     flat_readings,
     flats,
     funcionarios,
     login,
     moradores,
-    reminds,
     private,
     readings,
+    reminds,
     tasks,
     users,
     utils,
@@ -32,6 +33,7 @@ api_router.include_router(funcionarios.router)
 api_router.include_router(reminds.router)
 api_router.include_router(acess.router)
 api_router.include_router(contractor_access.router)
+api_router.include_router(fire_alarm_external_certificates.router)
 api_router.include_router(bins.router)
 api_router.include_router(readings.router)
 api_router.include_router(flat_readings.router)

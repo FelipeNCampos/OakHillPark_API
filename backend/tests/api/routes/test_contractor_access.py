@@ -1,8 +1,10 @@
+import uuid
+
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
 from app.core.config import settings
-from app.models import Condominio, CondominioCreate
+from app.models import Building, BuildingCreate, Condominio, CondominioCreate
 
 
 def _create_test_condominio(db: Session) -> Condominio:
@@ -15,40 +17,90 @@ def _create_test_condominio(db: Session) -> Condominio:
     return condominio
 
 
+def _create_test_building(
+    db: Session, condominio_id: uuid.UUID, *, name: str = "Merlin"
+) -> Building:
+    building = Building.model_validate(
+        BuildingCreate(nome=name, condominio_id=condominio_id)
+    )
+    db.add(building)
+    db.commit()
+    db.refresh(building)
+    return building
+
+
 def test_contractor_check_in_and_read_open_visits(
     client: TestClient,
     db: Session,
 ) -> None:
     condominio = _create_test_condominio(db)
+    building = _create_test_building(db, condominio.id, name="Merlin")
+    previous_codes = dict(settings.CONTRACTOR_DOOR_CODES)
+    settings.CONTRACTOR_DOOR_CODES = {"Merlin": "2468"}
 
-    response = client.post(
-        f"{settings.API_V1_STR}/contractor-access/check-in",
-        json={
-            "condominio_id": str(condominio.id),
-            "name": "John Smith",
-            "company": "ABC Contractors",
-            "car_reg": "AB12 CDE",
-            "block": "Merlin",
-            "mobile": "07123456789",
-        },
-    )
+    try:
+        response = client.post(
+            f"{settings.API_V1_STR}/contractor-access/check-in",
+            json={
+                "condominio_id": str(condominio.id),
+                "name": "John Smith",
+                "company": "ABC Contractors",
+                "building_id": str(building.id),
+                "job_description": "Electrical inspection",
+                "mobile": "07123456789",
+            },
+        )
 
-    assert response.status_code == 201
-    body = response.json()
-    assert body["name"] == "John Smith"
-    assert body["company"] == "ABC Contractors"
-    assert body["out_at"] is None
+        assert response.status_code == 201
+        body = response.json()
+        assert body["name"] == "John Smith"
+        assert body["company"] == "ABC Contractors"
+        assert body["building_name"] == "Merlin"
+        assert body["door_code"] == "2468"
+        assert body["out_at"] is None
 
-    open_response = client.get(
-        f"{settings.API_V1_STR}/contractor-access/open",
-        params={"condominio_id": str(condominio.id)},
-    )
+        open_response = client.get(
+            f"{settings.API_V1_STR}/contractor-access/open",
+            params={"condominio_id": str(condominio.id)},
+        )
 
-    assert open_response.status_code == 200
-    open_body = open_response.json()
-    assert open_body["count"] == 1
-    assert open_body["data"][0]["id"] == body["id"]
-    assert open_body["data"][0]["mobile"] == "07123456789"
+        assert open_response.status_code == 200
+        open_body = open_response.json()
+        assert open_body["count"] == 1
+        assert open_body["data"][0]["id"] == body["id"]
+        assert open_body["data"][0]["mobile"] == "07123456789"
+    finally:
+        settings.CONTRACTOR_DOOR_CODES = previous_codes
+
+
+def test_contractor_check_in_uses_temporary_door_code_when_unconfigured(
+    client: TestClient,
+    db: Session,
+) -> None:
+    condominio = _create_test_condominio(db)
+    building = _create_test_building(db, condominio.id, name="Falcon")
+    previous_codes = dict(settings.CONTRACTOR_DOOR_CODES)
+    settings.CONTRACTOR_DOOR_CODES = {}
+
+    try:
+        response = client.post(
+            f"{settings.API_V1_STR}/contractor-access/check-in",
+            json={
+                "condominio_id": str(condominio.id),
+                "name": "Maria Green",
+                "company": "Temp Codes Ltd",
+                "building_id": str(building.id),
+                "job_description": "Boiler inspection",
+                "mobile": "07000000111",
+            },
+        )
+
+        assert response.status_code == 201
+        body = response.json()
+        assert body["building_name"] == "Falcon"
+        assert body["door_code"] == "FalconCode"
+    finally:
+        settings.CONTRACTOR_DOOR_CODES = previous_codes
 
 
 def test_contractor_check_out_uses_visit_id_with_repeated_phone(
@@ -56,6 +108,8 @@ def test_contractor_check_out_uses_visit_id_with_repeated_phone(
     db: Session,
 ) -> None:
     condominio = _create_test_condominio(db)
+    first_building = _create_test_building(db, condominio.id, name="Oak Lodge")
+    second_building = _create_test_building(db, condominio.id, name="Merlin")
 
     first = client.post(
         f"{settings.API_V1_STR}/contractor-access/check-in",
@@ -63,8 +117,8 @@ def test_contractor_check_out_uses_visit_id_with_repeated_phone(
             "condominio_id": str(condominio.id),
             "name": "Alex Brown",
             "company": "Same Phone Ltd",
-            "car_reg": "CAR-001",
-            "block": "Oak Lodge",
+            "building_id": str(first_building.id),
+            "job_description": "Lift maintenance",
             "mobile": "07000000000",
         },
     )
@@ -74,8 +128,8 @@ def test_contractor_check_out_uses_visit_id_with_repeated_phone(
             "condominio_id": str(condominio.id),
             "name": "Alex Brown",
             "company": "Same Phone Ltd",
-            "car_reg": "CAR-002",
-            "block": "Merlin",
+            "building_id": str(second_building.id),
+            "job_description": "Painting",
             "mobile": "07000000000",
         },
     )
@@ -113,6 +167,7 @@ def test_contractor_check_out_requires_open_visit(
     db: Session,
 ) -> None:
     condominio = _create_test_condominio(db)
+    building = _create_test_building(db, condominio.id, name="Northwood")
 
     check_in = client.post(
         f"{settings.API_V1_STR}/contractor-access/check-in",
@@ -120,8 +175,8 @@ def test_contractor_check_out_requires_open_visit(
             "condominio_id": str(condominio.id),
             "name": "Taylor Stone",
             "company": "Builders Inc",
-            "car_reg": "ZX90 YTR",
-            "block": "Northwood",
+            "building_id": str(building.id),
+            "job_description": "Window repair",
             "mobile": "07999999999",
         },
     )

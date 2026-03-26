@@ -8,7 +8,7 @@ import { createFileRoute, redirect } from "@tanstack/react-router"
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
 import QRCode from "qrcode"
-import { useEffect, useMemo, useState } from "react"
+import { useDeferredValue, useEffect, useMemo, useState } from "react"
 import {
   Bar,
   BarChart,
@@ -19,6 +19,14 @@ import {
   YAxis,
 } from "recharts"
 import { OpenAPI } from "@/client"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { TasksBoard } from "@/components/Tasks/TasksBoard"
 import useAuth, { isLoggedIn } from "@/hooks/useAuth"
 import useCustomToast from "@/hooks/useCustomToast"
@@ -135,13 +143,18 @@ interface Morador {
   car2?: string | null
   car3?: string | null
   receives_flat_reading_sms: boolean
+  receives_twilio_sms: boolean
   reading_types: number
 }
 
 interface ReminderItem {
   id: EntityId
   name: string
+  schedule_unit: string
+  schedule_mode: string
+  interval_value?: number | null
   weekday_mask: number
+  month_mask?: number | null
   is_active: boolean
   action_sms: boolean
   sms_to?: string | null
@@ -159,6 +172,28 @@ interface ReminderExecutionInfo {
   sms_sent: number
   tasks_created: number
 }
+
+interface ContractorVisitAdmin {
+  id: EntityId
+  name: string
+  company: string
+  building_name: string
+  job_description: string
+  mobile: string
+  extra_media_name?: string | null
+  extra_media_data?: string | null
+  in_at: string
+  out_at?: string | null
+  condominio_id: EntityId
+}
+
+interface ContractorMediaFormState {
+  mediaName: string
+  mediaData: string | null
+}
+
+type ReminderScheduleUnit = "day" | "week" | "month"
+type ReminderScheduleMode = "interval" | "fixed"
 
 type FireAlarmBuildingId =
   | "falcon_1_6"
@@ -183,6 +218,43 @@ interface FireAlarmLogRow {
 }
 
 type FireAlarmLogByDate = Record<string, Record<string, FireAlarmLogRow>>
+
+interface FireAlarmExternalCertificate {
+  id: EntityId
+  condominio_id: EntityId
+  certificate_date: string
+  certificate_time: string
+  company: string
+  professional: string
+  media_1_name?: string | null
+  media_1_data?: string | null
+  media_2_name?: string | null
+  media_2_data?: string | null
+  created_by_user_id: EntityId
+  created_at: string
+}
+
+interface FireAlarmExternalCertificatesResponse {
+  data: FireAlarmExternalCertificate[]
+  count: number
+}
+
+interface FireAlarmExternalCertificateFormState {
+  certificateDate: string
+  certificateTime: string
+  company: string
+  professional: string
+  media1Name: string
+  media1Data: string | null
+  media2Name: string
+  media2Data: string | null
+}
+
+interface CertificateMediaPreviewState {
+  fileName: string
+  dataUrl: string
+  subtitle: string
+}
 
 type ScheduleBuildingId = string
 
@@ -233,6 +305,7 @@ interface MoradorDetail {
   car2?: string | null
   car3?: string | null
   receives_flat_reading_sms: boolean
+  receives_twilio_sms: boolean
   flat_id: EntityId
 }
 
@@ -515,6 +588,65 @@ const weekdayLabelsFromMask = (mask: number) =>
   weekdayOptions
     .filter((option) => (mask & (1 << option.value)) !== 0)
     .map((option) => option.label)
+
+const monthOptions = [
+  { value: 1, label: "January" },
+  { value: 2, label: "February" },
+  { value: 3, label: "March" },
+  { value: 4, label: "April" },
+  { value: 5, label: "May" },
+  { value: 6, label: "June" },
+  { value: 7, label: "July" },
+  { value: 8, label: "August" },
+  { value: 9, label: "September" },
+  { value: 10, label: "October" },
+  { value: 11, label: "November" },
+  { value: 12, label: "December" },
+]
+
+const monthMaskFromList = (months: number[]) =>
+  months.reduce((mask, month) => mask | (1 << (month - 1)), 0)
+
+const monthListFromMask = (mask?: number | null) =>
+  monthOptions
+    .filter((option) => Boolean(mask && (mask & (1 << (option.value - 1))) !== 0))
+    .map((option) => option.value)
+
+const monthLabelsFromMask = (mask?: number | null) =>
+  monthOptions
+    .filter((option) => Boolean(mask && (mask & (1 << (option.value - 1))) !== 0))
+    .map((option) => option.label)
+
+const formatReminderSchedule = (reminder: {
+  schedule_unit: string
+  schedule_mode: string
+  interval_value?: number | null
+  weekday_mask: number
+  month_mask?: number | null
+}) => {
+  if (reminder.schedule_unit === "day") {
+    if (reminder.schedule_mode === "fixed") return "Every day"
+    return `Every ${reminder.interval_value || 1} day(s)`
+  }
+
+  if (reminder.schedule_unit === "week") {
+    const weekdayLabel = weekdayLabelsFromMask(reminder.weekday_mask).join(", ")
+    if (reminder.schedule_mode === "fixed") return weekdayLabel || "Every week"
+    return `Every ${reminder.interval_value || 1} week(s)`
+  }
+
+  if (reminder.schedule_unit === "month") {
+    if (reminder.schedule_mode === "fixed") {
+      const monthLabel = monthLabelsFromMask(reminder.month_mask).join(", ")
+      return monthLabel
+        ? `${monthLabel} on the first day of the month`
+        : "Selected months on the first day"
+    }
+    return `Every ${reminder.interval_value || 1} month(s) on the first day`
+  }
+
+  return "Custom schedule"
+}
 
 const REMINDS_EXECUTE_DUE_LAST_RUN_KEY = "ohp_reminds_execute_due_last_run_v1"
 const REMINDS_EXECUTE_DUE_COOLDOWN_MS = 60 * 1000
@@ -1294,6 +1426,44 @@ const formatDateToGb = (isoDate: string) => {
   return `${day}/${month}/${year}`
 }
 
+const readFileAsDataUrl = async (file: File) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result !== "string") {
+        reject(new Error("Could not read media"))
+        return
+      }
+      resolve(reader.result)
+    }
+    reader.onerror = () => reject(new Error("Could not read media"))
+    reader.readAsDataURL(file)
+  })
+
+const isImageDataUrl = (value?: string | null) =>
+  typeof value === "string" && value.startsWith("data:image/")
+
+const getDataUrlMimeType = (value?: string | null) => {
+  if (typeof value !== "string") return null
+  const match = value.match(/^data:([^;]+);base64,/i)
+  return match?.[1]?.toLowerCase() || null
+}
+
+const isPdfDataUrl = (value?: string | null) =>
+  getDataUrlMimeType(value) === "application/pdf"
+
+const getEmptyFireAlarmExternalCertificateForm =
+  (): FireAlarmExternalCertificateFormState => ({
+    certificateDate: toDateInputValue(),
+    certificateTime: "",
+    company: "",
+    professional: "",
+    media1Name: "",
+    media1Data: null,
+    media2Name: "",
+    media2Data: null,
+  })
+
 const parseIsoDateToUtc = (isoDate: string) => {
   const [yearRaw, monthRaw, dayRaw] = isoDate.split("-")
   const year = Number(yearRaw)
@@ -1550,6 +1720,7 @@ function ClientDashboard() {
     { label: "Tasks", id: "tasks" },
     { label: "Reminders", id: "reminds" },
     { label: "Residents", id: "residents" },
+    { label: "Contractors", id: "contractors" },
     { label: "Cleaner", id: "cleaner" },
     { label: "Caretaker", id: "caretaker" },
     { label: "Bins", id: "bins" },
@@ -1584,6 +1755,8 @@ function ClientDashboard() {
         return <CaretakerSchedules initialTab="light" />
       case "residents":
         return <ResidentsContent />
+      case "contractors":
+        return <ContractorsContent />
       case "tasks":
         return <TasksBoard mode="manager" />
       case "reminds":
@@ -4745,7 +4918,11 @@ function RemindsContent() {
   const [togglingId, setTogglingId] = useState<string | null>(null)
   const [formData, setFormData] = useState({
     name: "",
+    schedule_unit: "week" as ReminderScheduleUnit,
+    schedule_mode: "fixed" as ReminderScheduleMode,
+    interval_value: "1",
     weekdays: [1] as number[],
+    months: [1] as number[],
     is_active: true,
     action_sms: true,
     sms_to: "",
@@ -4765,7 +4942,11 @@ function RemindsContent() {
   const resetForm = () => {
     setFormData({
       name: "",
+      schedule_unit: "week",
+      schedule_mode: "fixed",
+      interval_value: "1",
       weekdays: [1],
+      months: [1],
       is_active: true,
       action_sms: true,
       sms_to: "",
@@ -4908,6 +5089,16 @@ function RemindsContent() {
     })
   }
 
+  const toggleMonth = (month: number) => {
+    setFormData((prev) => {
+      const exists = prev.months.includes(month)
+      const next = exists
+        ? prev.months.filter((item) => item !== month)
+        : [...prev.months, month].sort((a, b) => a - b)
+      return { ...prev, months: next }
+    })
+  }
+
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault()
     if (!formData.name.trim()) {
@@ -4918,14 +5109,49 @@ function RemindsContent() {
       showErrorToast("Select at least one action")
       return
     }
-    if (formData.weekdays.length === 0) {
-      showErrorToast("Select at least one day")
+    if (
+      formData.schedule_unit === "week" &&
+      formData.schedule_mode === "fixed" &&
+      formData.weekdays.length === 0
+    ) {
+      showErrorToast("Select at least one weekday")
+      return
+    }
+    if (
+      formData.schedule_unit === "month" &&
+      formData.schedule_mode === "fixed" &&
+      formData.months.length === 0
+    ) {
+      showErrorToast("Select at least one month")
+      return
+    }
+    if (
+      formData.schedule_mode === "interval" &&
+      (!formData.interval_value.trim() ||
+        Number(formData.interval_value) < 1 ||
+        !Number.isInteger(Number(formData.interval_value)))
+    ) {
+      showErrorToast("Enter a valid interval number")
       return
     }
 
     const payload: Record<string, unknown> = {
       name: formData.name.trim(),
-      weekday_mask: weekdayMaskFromList(formData.weekdays),
+      schedule_unit: formData.schedule_unit,
+      schedule_mode: formData.schedule_mode,
+      interval_value:
+        formData.schedule_mode === "interval"
+          ? Number(formData.interval_value)
+          : null,
+      weekday_mask:
+        formData.schedule_unit === "week"
+          ? weekdayMaskFromList(formData.weekdays)
+          : 127,
+      month_mask:
+        formData.schedule_unit === "month" &&
+        formData.schedule_mode === "fixed"
+          ? monthMaskFromList(formData.months)
+          : null,
       is_active: formData.is_active,
       action_sms: formData.action_sms,
       sms_to: formData.sms_to.trim() || null,
@@ -4946,7 +5172,11 @@ function RemindsContent() {
     setEditingId(String(reminder.id))
     setFormData({
       name: reminder.name || "",
+      schedule_unit: (reminder.schedule_unit || "week") as ReminderScheduleUnit,
+      schedule_mode: (reminder.schedule_mode || "fixed") as ReminderScheduleMode,
+      interval_value: String(reminder.interval_value || 1),
       weekdays: weekdayListFromMask(reminder.weekday_mask),
+      months: monthListFromMask(reminder.month_mask),
       is_active: reminder.is_active,
       action_sms: reminder.action_sms,
       sms_to: reminder.sms_to || "",
@@ -4967,8 +5197,8 @@ function RemindsContent() {
               Reminders
             </h2>
             <p className="mt-1 text-sm text-[rgba(0,0,0,0.7)]">
-              Create weekly reminders to send SMS via Twilio and/or create tasks
-              automatically.
+              Create reminders by day, week, or month to send SMS via Twilio
+              and/or create tasks automatically.
             </p>
           </div>
           <button
@@ -5002,10 +5232,8 @@ function RemindsContent() {
                       {reminder.name}
                     </h4>
                     <p className="text-sm text-[rgba(0,0,0,0.7)]">
-                      {weekdayLabelsFromMask(reminder.weekday_mask).join(
-                        ", ",
-                      ) || "No day"}{" "}
-                      - {reminder.is_active ? "Active" : "Inactive"}
+                      {formatReminderSchedule(reminder)} -{" "}
+                      {reminder.is_active ? "Active" : "Inactive"}
                     </p>
                     <p className="mt-1 text-xs text-[rgba(0,0,0,0.6)]">
                       Actions: {reminder.action_sms ? "SMS" : ""}{" "}
@@ -5101,30 +5329,157 @@ function RemindsContent() {
                 />
               </div>
 
-              <div>
-                <p className="mb-2 text-sm font-semibold text-[#55311c]">
-                  Days of week
-                </p>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                  {weekdayOptions.map((weekday) => {
-                    const selected = formData.weekdays.includes(weekday.value)
-                    return (
-                      <button
-                        key={weekday.value}
-                        type="button"
-                        onClick={() => toggleWeekday(weekday.value)}
-                        className={`rounded border px-3 py-2 text-sm font-semibold transition-all ${
-                          selected
-                            ? "border-[#8c7569] bg-[#8c7569] text-white"
-                            : "border-[#d9d0ca] text-[#55311c] hover:bg-[#f5f1ee]"
-                        }`}
-                      >
-                        {weekday.label}
-                      </button>
-                    )
-                  })}
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <label
+                    htmlFor="remind-schedule-unit"
+                    className="mb-1 block text-sm font-semibold text-[#55311c]"
+                  >
+                    Frequency unit
+                  </label>
+                  <select
+                    id="remind-schedule-unit"
+                    value={formData.schedule_unit}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        schedule_unit: e.target.value as ReminderScheduleUnit,
+                      }))
+                    }
+                    className="w-full rounded border border-[#d9d0ca] px-3 py-2 text-[#55311c] focus:border-[#8c7569] focus:outline-none"
+                  >
+                    <option value="day">Day</option>
+                    <option value="week">Week</option>
+                    <option value="month">Month</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="remind-schedule-mode"
+                    className="mb-1 block text-sm font-semibold text-[#55311c]"
+                  >
+                    Frequency type
+                  </label>
+                  <select
+                    id="remind-schedule-mode"
+                    value={formData.schedule_mode}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        schedule_mode: e.target.value as ReminderScheduleMode,
+                      }))
+                    }
+                    className="w-full rounded border border-[#d9d0ca] px-3 py-2 text-[#55311c] focus:border-[#8c7569] focus:outline-none"
+                  >
+                    <option value="fixed">Fixed</option>
+                    <option value="interval">Interval</option>
+                  </select>
                 </div>
               </div>
+
+              {formData.schedule_mode === "interval" && (
+                <div>
+                  <label
+                    htmlFor="remind-interval-value"
+                    className="mb-1 block text-sm font-semibold text-[#55311c]"
+                  >
+                    Interval number
+                  </label>
+                  <input
+                    id="remind-interval-value"
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={formData.interval_value}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        interval_value: e.target.value,
+                      }))
+                    }
+                    className="w-full rounded border border-[#d9d0ca] px-3 py-2 text-[#55311c] focus:border-[#8c7569] focus:outline-none"
+                    placeholder="Enter the interval"
+                  />
+                  <p className="mt-1 text-xs text-[rgba(0,0,0,0.65)]">
+                    {formData.schedule_unit === "day" &&
+                      "Runs every N days."}
+                    {formData.schedule_unit === "week" &&
+                      "Runs every N weeks on the same weekday the reminder was created."}
+                    {formData.schedule_unit === "month" &&
+                      "Runs on the first day of every N months."}
+                  </p>
+                </div>
+              )}
+
+              {formData.schedule_unit === "week" &&
+                formData.schedule_mode === "fixed" && (
+                <div>
+                  <p className="mb-2 text-sm font-semibold text-[#55311c]">
+                    Weekdays
+                  </p>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    {weekdayOptions.map((weekday) => {
+                      const selected = formData.weekdays.includes(weekday.value)
+                      return (
+                        <button
+                          key={weekday.value}
+                          type="button"
+                          onClick={() => toggleWeekday(weekday.value)}
+                          className={`rounded border px-3 py-2 text-sm font-semibold transition-all ${
+                            selected
+                              ? "border-[#8c7569] bg-[#8c7569] text-white"
+                              : "border-[#d9d0ca] text-[#55311c] hover:bg-[#f5f1ee]"
+                          }`}
+                        >
+                          {weekday.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <p className="mt-1 text-xs text-[rgba(0,0,0,0.65)]">
+                    Runs every week on the selected weekdays.
+                  </p>
+                </div>
+                )}
+
+              {formData.schedule_unit === "month" &&
+                formData.schedule_mode === "fixed" && (
+                  <div>
+                    <p className="mb-2 text-sm font-semibold text-[#55311c]">
+                      Months
+                    </p>
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                      {monthOptions.map((month) => {
+                        const selected = formData.months.includes(month.value)
+                        return (
+                          <button
+                            key={month.value}
+                            type="button"
+                            onClick={() => toggleMonth(month.value)}
+                            className={`rounded border px-3 py-2 text-sm font-semibold transition-all ${
+                              selected
+                                ? "border-[#8c7569] bg-[#8c7569] text-white"
+                                : "border-[#d9d0ca] text-[#55311c] hover:bg-[#f5f1ee]"
+                            }`}
+                          >
+                            {month.label}
+                          </button>
+                        )
+                      })}
+                    </div>
+                    <p className="mt-1 text-xs text-[rgba(0,0,0,0.65)]">
+                      Runs on the first day of the selected months.
+                    </p>
+                  </div>
+                )}
+
+              {formData.schedule_unit === "day" &&
+                formData.schedule_mode === "fixed" && (
+                  <div className="rounded border border-[#e8dfd8] bg-[#f9f7f5] p-3 text-sm text-[#55311c]">
+                    Fixed day reminders run every day.
+                  </div>
+                )}
 
               <div className="flex flex-wrap gap-4">
                 <label className="flex items-center gap-2 text-sm text-[#55311c]">
@@ -5365,6 +5720,14 @@ function TwilioContent() {
   const buildings = buildingsData?.data || []
   const Residents = ResidentsData || []
   const historyRows = historyData?.data || []
+  const smsEligibleResidents = useMemo(
+    () => Residents.filter((morador) => morador.receives_twilio_sms),
+    [Residents],
+  )
+  const residentsForActiveChannel = useMemo(
+    () => (sendChannel === "sms" ? smsEligibleResidents : Residents),
+    [Residents, sendChannel, smsEligibleResidents],
+  )
 
   const buildingNameById = useMemo(() => {
     const map = new Map<string, string>()
@@ -5376,7 +5739,7 @@ function TwilioContent() {
 
   const filteredResidents = useMemo(() => {
     const search = residentSearch.trim().toLowerCase()
-    return Residents.filter((morador) => {
+    return residentsForActiveChannel.filter((morador) => {
       if (
         residentBuildingFilter !== "all" &&
         morador.building_nome !== residentBuildingFilter
@@ -5401,7 +5764,12 @@ function TwilioContent() {
       ]
       return fields.some((value) => value.toLowerCase().includes(search))
     })
-  }, [Residents, residentSearch, residentBuildingFilter, residentRoleFilter])
+  }, [
+    residentBuildingFilter,
+    residentRoleFilter,
+    residentSearch,
+    residentsForActiveChannel,
+  ])
 
   const recipients = useMemo(() => {
     const residentIdSet = new Set(selectedResidentIds)
@@ -5413,7 +5781,7 @@ function TwilioContent() {
 
     const selectedMap = new Map<string, Morador>()
 
-    Residents.forEach((morador) => {
+    residentsForActiveChannel.forEach((morador) => {
       const id = String(morador.id)
       const includedByResident = residentIdSet.has(id)
       const includedByBuilding = selectedBuildingNames.has(
@@ -5438,7 +5806,12 @@ function TwilioContent() {
       if (flatLabelCompare !== 0) return flatLabelCompare
       return a.nome.localeCompare(b.nome)
     })
-  }, [Residents, selectedResidentIds, selectedBuildingIds, buildingNameById])
+  }, [
+    buildingNameById,
+    residentsForActiveChannel,
+    selectedBuildingIds,
+    selectedResidentIds,
+  ])
 
   const toggleBuilding = (buildingId: string) => {
     setSelectedBuildingIds((prev) =>
@@ -5880,9 +6253,16 @@ function TwilioContent() {
 
         <div className="rounded-lg bg-white p-6 shadow-md">
           <div className="mb-4 flex items-center justify-between gap-2">
-            <h3 className="font-['Nunito',sans-serif] text-xl font-bold text-[#55311c]">
-              Residents
-            </h3>
+            <div>
+              <h3 className="font-['Nunito',sans-serif] text-xl font-bold text-[#55311c]">
+                Residents
+              </h3>
+              {sendChannel === "sms" && (
+                <p className="text-xs text-[rgba(0,0,0,0.6)]">
+                  Only residents with Twilio SMS enabled are shown for SMS sending.
+                </p>
+              )}
+            </div>
             <div className="flex gap-2">
               <button
                 type="button"
@@ -6806,6 +7186,456 @@ function CleanerQrCodesContent() {
   )
 }
 
+function ContractorsContent() {
+  const queryClient = useQueryClient()
+  const { showSuccessToast, showErrorToast } = useCustomToast()
+  const [search, setSearch] = useState("")
+  const [dateFrom, setDateFrom] = useState("")
+  const [dateTo, setDateTo] = useState("")
+  const [isMediaDialogOpen, setIsMediaDialogOpen] = useState(false)
+  const [selectedVisit, setSelectedVisit] = useState<ContractorVisitAdmin | null>(
+    null,
+  )
+  const [mediaForm, setMediaForm] = useState<ContractorMediaFormState>({
+    mediaName: "",
+    mediaData: null,
+  })
+  const deferredSearch = useDeferredValue(search.trim())
+
+  const { data, isLoading } = useQuery<ApiListResponse<ContractorVisitAdmin>>({
+    queryKey: ["contractor-visits", deferredSearch, dateFrom, dateTo],
+    queryFn: () =>
+      apiCall("/api/v1/contractor-access/", {
+        skip: 0,
+        limit: 200,
+        search: deferredSearch || undefined,
+        date_from: dateFrom || undefined,
+        date_to: dateTo || undefined,
+      }),
+    placeholderData: keepPreviousData,
+  })
+
+  const visits = data?.data || []
+  const totalVisits = data?.count || visits.length
+
+  const contractorMediaMutation = useMutation({
+    mutationFn: ({
+      id,
+      payload,
+    }: {
+      id: EntityId
+      payload: Record<string, string | null>
+    }) =>
+      apiCall(`/api/v1/contractor-access/${id}/media`, {
+        method: "PATCH",
+        body: payload,
+      }),
+    onSuccess: () => {
+      showSuccessToast("Contractor media updated successfully")
+      setIsMediaDialogOpen(false)
+      setSelectedVisit(null)
+      setMediaForm({ mediaName: "", mediaData: null })
+      queryClient.invalidateQueries({ queryKey: ["contractor-visits"] })
+    },
+    onError: (error: unknown) => {
+      showErrorToast(
+        error instanceof Error
+          ? error.message
+          : "Could not update contractor media",
+      )
+    },
+  })
+
+  const handleMediaDialogChange = (open: boolean) => {
+    setIsMediaDialogOpen(open)
+    if (!open) {
+      setSelectedVisit(null)
+      setMediaForm({ mediaName: "", mediaData: null })
+    }
+  }
+
+  const handleOpenMediaDialog = (visit: ContractorVisitAdmin) => {
+    setSelectedVisit(visit)
+    setMediaForm({
+      mediaName: visit.extra_media_name || "",
+      mediaData: visit.extra_media_data || null,
+    })
+    setIsMediaDialogOpen(true)
+  }
+
+  const handleMediaFileChange = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    try {
+      const dataUrl = await readFileAsDataUrl(file)
+      setMediaForm({
+        mediaName: file.name,
+        mediaData: dataUrl,
+      })
+    } catch (error) {
+      showErrorToast(
+        error instanceof Error ? error.message : "Could not read media",
+      )
+    } finally {
+      event.target.value = ""
+    }
+  }
+
+  const handleSaveMedia = () => {
+    if (!selectedVisit) return
+
+    contractorMediaMutation.mutate({
+      id: selectedVisit.id,
+      payload: {
+        extra_media_name: mediaForm.mediaData
+          ? mediaForm.mediaName.trim() || "contractor-media"
+          : null,
+        extra_media_data: mediaForm.mediaData || null,
+      },
+    })
+  }
+
+  const formatDate = (value?: string | null) => {
+    if (!value) return "-"
+    const parsed = new Date(value)
+    if (Number.isNaN(parsed.getTime())) return "-"
+    return parsed.toLocaleDateString("en-GB")
+  }
+
+  const formatTime = (value?: string | null) => {
+    if (!value) return "-"
+    const parsed = new Date(value)
+    if (Number.isNaN(parsed.getTime())) return "-"
+    return parsed.toLocaleTimeString("en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
+    })
+  }
+
+  return (
+    <div className="mx-auto max-w-7xl space-y-6">
+      <div className="rounded-lg bg-white p-6 shadow-md">
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
+              Contractors
+            </h2>
+            <p className="mt-1 text-sm text-[rgba(0,0,0,0.7)]">
+              Review contractor check-in records and attach one extra media file
+              for internal follow-up.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div>
+              <label
+                htmlFor="contractor-search"
+                className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+              >
+                Search
+              </label>
+              <input
+                id="contractor-search"
+                type="text"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Name, company, building or job"
+                className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="contractor-date-from"
+                className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+              >
+                Date from
+              </label>
+              <input
+                id="contractor-date-from"
+                type="date"
+                value={dateFrom}
+                onChange={(event) => setDateFrom(event.target.value)}
+                className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="contractor-date-to"
+                className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+              >
+                Date to
+              </label>
+              <input
+                id="contractor-date-to"
+                type="date"
+                min={dateFrom || undefined}
+                value={dateTo}
+                onChange={(event) => setDateTo(event.target.value)}
+                className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+              />
+            </div>
+          </div>
+        </div>
+        <p className="text-xs text-[rgba(0,0,0,0.6)]">
+          Showing {totalVisits} contractor record(s).
+        </p>
+      </div>
+
+      <div className="rounded-lg bg-white p-6 shadow-md">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[1180px] border-collapse">
+            <thead>
+              <tr className="bg-[#8c7569]">
+                <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
+                  Date
+                </th>
+                <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
+                  Time IN
+                </th>
+                <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
+                  Time OUT
+                </th>
+                <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
+                  Name
+                </th>
+                <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
+                  Company
+                </th>
+                <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
+                  Building
+                </th>
+                <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
+                  Job description
+                </th>
+                <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
+                  Mobile
+                </th>
+                <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
+                  Photo
+                </th>
+                <th className="border border-[#736055] px-3 py-2 text-center text-sm font-semibold text-white">
+                  Action
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {isLoading && (
+                <tr>
+                  <td
+                    colSpan={10}
+                    className="border border-[#e5e0dc] bg-white px-3 py-4 text-center text-sm text-[rgba(0,0,0,0.7)]"
+                  >
+                    Loading contractor records...
+                  </td>
+                </tr>
+              )}
+              {!isLoading && visits.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={10}
+                    className="border border-[#e5e0dc] bg-white px-3 py-4 text-center text-sm text-[rgba(0,0,0,0.7)]"
+                  >
+                    No contractor records found.
+                  </td>
+                </tr>
+              )}
+              {!isLoading &&
+                visits.map((visit) => (
+                  <tr key={visit.id} className="bg-white hover:bg-[#f8f5f3]">
+                    <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                      {formatDate(visit.in_at)}
+                    </td>
+                    <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                      {formatTime(visit.in_at)}
+                    </td>
+                    <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                      {formatTime(visit.out_at)}
+                    </td>
+                    <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                      {visit.name}
+                    </td>
+                    <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                      {visit.company}
+                    </td>
+                    <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                      {visit.building_name}
+                    </td>
+                    <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                      {visit.job_description}
+                    </td>
+                    <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                      {visit.mobile}
+                    </td>
+                    <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                      {visit.extra_media_data ? (
+                        <div className="flex flex-col gap-2">
+                          {isImageDataUrl(visit.extra_media_data) && (
+                            <img
+                              src={visit.extra_media_data}
+                              alt={visit.extra_media_name || "Contractor media"}
+                              className="h-16 w-16 rounded border border-[#d9d0ca] object-cover"
+                            />
+                          )}
+                          <a
+                            href={visit.extra_media_data}
+                            download={visit.extra_media_name || "contractor-media"}
+                            className="text-xs font-semibold text-[#8c7569] underline"
+                          >
+                            {visit.extra_media_name || "Download media"}
+                          </a>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-[rgba(0,0,0,0.55)]">
+                          No media
+                        </span>
+                      )}
+                    </td>
+                    <td className="border border-[#e5e0dc] px-3 py-2 text-center text-sm">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenMediaDialog(visit)}
+                        className="rounded border border-[#8c7569] px-3 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+                      >
+                        {visit.extra_media_data ? "Edit media" : "Add media"}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <Dialog open={isMediaDialogOpen} onOpenChange={handleMediaDialogChange}>
+        <DialogContent className="border-[#e5e0dc] bg-white text-[#55311c] sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-[#55311c]">
+              Contractor extra media
+            </DialogTitle>
+            <DialogDescription className="text-[rgba(0,0,0,0.7)]">
+              Attach one internal media file to this contractor record.
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedVisit && (
+            <div className="space-y-4">
+              <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4 text-sm text-[#55311c]">
+                <p>
+                  <span className="font-semibold">Contractor:</span>{" "}
+                  {selectedVisit.name}
+                </p>
+                <p>
+                  <span className="font-semibold">Company:</span>{" "}
+                  {selectedVisit.company}
+                </p>
+                <p>
+                  <span className="font-semibold">Building:</span>{" "}
+                  {selectedVisit.building_name}
+                </p>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="contractor-extra-media-name"
+                  className="mb-1 block text-sm font-semibold text-[#55311c]"
+                >
+                  Media name
+                </label>
+                <input
+                  id="contractor-extra-media-name"
+                  type="text"
+                  value={mediaForm.mediaName}
+                  onChange={(event) =>
+                    setMediaForm((previous) => ({
+                      ...previous,
+                      mediaName: event.target.value,
+                    }))
+                  }
+                  placeholder="Enter a media name"
+                  className="w-full rounded border border-[#d9d0ca] bg-white px-3 py-2 text-[#55311c] focus:border-[#8c7569] focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="contractor-extra-media-file"
+                  className="mb-1 block text-sm font-semibold text-[#55311c]"
+                >
+                  Media file
+                </label>
+                <input
+                  id="contractor-extra-media-file"
+                  type="file"
+                  onChange={handleMediaFileChange}
+                  className="block w-full text-sm text-[#55311c] file:mr-4 file:rounded file:border-0 file:bg-[#8c7569] file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-[#55311c]"
+                />
+              </div>
+
+              {mediaForm.mediaData && (
+                <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <p className="text-sm font-semibold text-[#55311c]">
+                      Current media preview
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setMediaForm({
+                          mediaName: "",
+                          mediaData: null,
+                        })
+                      }
+                      className="rounded border border-[#d9d0ca] px-3 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+                    >
+                      Remove media
+                    </button>
+                  </div>
+
+                  {isImageDataUrl(mediaForm.mediaData) ? (
+                    <img
+                      src={mediaForm.mediaData}
+                      alt={mediaForm.mediaName || "Contractor media"}
+                      className="max-h-72 rounded border border-[#d9d0ca] object-contain"
+                    />
+                  ) : (
+                    <a
+                      href={mediaForm.mediaData}
+                      download={mediaForm.mediaName || "contractor-media"}
+                      className="text-sm font-semibold text-[#8c7569] underline"
+                    >
+                      Download current media
+                    </a>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          <DialogFooter>
+            <button
+              type="button"
+              onClick={() => handleMediaDialogChange(false)}
+              className="rounded border border-[#d9d0ca] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleSaveMedia}
+              disabled={contractorMediaMutation.isPending}
+              className="rounded bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {contractorMediaMutation.isPending ? "Saving..." : "Save media"}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
+
 function ContractorQrCodesContent() {
   const { user } = useAuth()
 
@@ -7293,6 +8123,7 @@ function CaretakerSchedules({
 }
 
 function FireAlarmSchedulePage() {
+  const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
   const [selectedDate, setSelectedDate] = useState(() => toDateInputValue())
   const [calendarMonth, setCalendarMonth] = useState(() =>
@@ -7302,13 +8133,24 @@ function FireAlarmSchedulePage() {
   const [rows, setRows] = useState<
     Record<FireAlarmBuildingId, FireAlarmLogRow>
   >(() => getDefaultFireAlarmRows())
-  const [activeView, setActiveView] = useState<"schedule" | "history">(
-    "schedule",
-  )
+  const [activeView, setActiveView] = useState<
+    "schedule" | "history" | "certificates"
+  >("schedule")
   const [reportDateFrom, setReportDateFrom] = useState("")
   const [reportDateTo, setReportDateTo] = useState("")
   const [reportEmail, setReportEmail] = useState("")
   const [isSendingReport, setIsSendingReport] = useState(false)
+  const [certificateSearch, setCertificateSearch] = useState("")
+  const [certificateDateFrom, setCertificateDateFrom] = useState("")
+  const [certificateDateTo, setCertificateDateTo] = useState("")
+  const [isCertificateDialogOpen, setIsCertificateDialogOpen] = useState(false)
+  const [certificatePreview, setCertificatePreview] =
+    useState<CertificateMediaPreviewState | null>(null)
+  const [certificateForm, setCertificateForm] =
+    useState<FireAlarmExternalCertificateFormState>(
+      getEmptyFireAlarmExternalCertificateForm,
+    )
+  const deferredCertificateSearch = useDeferredValue(certificateSearch.trim())
 
   useEffect(() => {
     try {
@@ -7502,13 +8344,724 @@ function FireAlarmSchedulePage() {
     }
   }
 
+  const {
+    data: externalCertificatesData,
+    isLoading: isLoadingExternalCertificates,
+  } = useQuery<FireAlarmExternalCertificatesResponse>({
+    queryKey: [
+      "fire-alarm-external-certificates",
+      deferredCertificateSearch,
+      certificateDateFrom,
+      certificateDateTo,
+    ],
+    queryFn: () =>
+      apiCall("/api/v1/fire-alarm-external-certificates/", {
+        skip: 0,
+        limit: 200,
+        search: deferredCertificateSearch || undefined,
+        date_from: certificateDateFrom || undefined,
+        date_to: certificateDateTo || undefined,
+      }),
+    enabled: activeView === "certificates",
+    placeholderData: keepPreviousData,
+  })
+
+  const createExternalCertificateMutation = useMutation({
+    mutationFn: (payload: {
+      certificate_date: string
+      certificate_time: string
+      company: string
+      professional: string
+      media_1_name?: string | null
+      media_1_data?: string | null
+      media_2_name?: string | null
+      media_2_data?: string | null
+    }) =>
+      apiCall("/api/v1/fire-alarm-external-certificates/", {
+        method: "POST",
+        body: payload,
+      }),
+    onSuccess: () => {
+      showSuccessToast("External certificate saved")
+      setIsCertificateDialogOpen(false)
+      setCertificateForm(getEmptyFireAlarmExternalCertificateForm())
+      queryClient.invalidateQueries({
+        queryKey: ["fire-alarm-external-certificates"],
+      })
+    },
+    onError: (error: unknown) => {
+      showErrorToast(
+        error instanceof Error
+          ? error.message
+          : "Could not save the external certificate",
+      )
+    },
+  })
+
+  const externalCertificates = externalCertificatesData?.data || []
+  const externalCertificatesCount =
+    externalCertificatesData?.count || externalCertificates.length
+
+  const handleCertificateDialogChange = (open: boolean) => {
+    setIsCertificateDialogOpen(open)
+    if (!open) {
+      setCertificateForm(getEmptyFireAlarmExternalCertificateForm())
+    }
+  }
+
+  const handleCertificatePreviewOpen = ({
+    dataUrl,
+    fileName,
+    subtitle,
+  }: CertificateMediaPreviewState) => {
+    setCertificatePreview({
+      dataUrl,
+      fileName: fileName.trim() || "certificate-document",
+      subtitle,
+    })
+  }
+
+  const handleCertificateFieldChange = <
+    K extends keyof FireAlarmExternalCertificateFormState,
+  >(
+    key: K,
+    value: FireAlarmExternalCertificateFormState[K],
+  ) => {
+    setCertificateForm((previous) => ({
+      ...previous,
+      [key]: value,
+    }))
+  }
+
+  const handleCertificateMediaSelect = async (
+    slot: 1 | 2,
+    file: File | null,
+  ) => {
+    if (!file) return
+    try {
+      const dataUrl = await readFileAsDataUrl(file)
+      setCertificateForm((previous) =>
+        slot === 1
+          ? {
+              ...previous,
+              media1Name: file.name,
+              media1Data: dataUrl,
+            }
+          : {
+              ...previous,
+              media2Name: file.name,
+              media2Data: dataUrl,
+            },
+      )
+    } catch (error) {
+      showErrorToast(
+        error instanceof Error ? error.message : "Could not read media",
+      )
+    }
+  }
+
+  const handleCertificateMediaRemove = (slot: 1 | 2) => {
+    setCertificateForm((previous) =>
+      slot === 1
+        ? { ...previous, media1Name: "", media1Data: null }
+        : { ...previous, media2Name: "", media2Data: null },
+    )
+  }
+
+  const handleCreateExternalCertificate = () => {
+    if (!certificateForm.certificateDate) {
+      showErrorToast("Date is required")
+      return
+    }
+    if (!certificateForm.certificateTime) {
+      showErrorToast("Time is required")
+      return
+    }
+    if (!certificateForm.company.trim()) {
+      showErrorToast("Company is required")
+      return
+    }
+    if (!certificateForm.professional.trim()) {
+      showErrorToast("Professional is required")
+      return
+    }
+
+    createExternalCertificateMutation.mutate({
+      certificate_date: certificateForm.certificateDate,
+      certificate_time: certificateForm.certificateTime,
+      company: certificateForm.company.trim(),
+      professional: certificateForm.professional.trim(),
+      media_1_name: certificateForm.media1Name || null,
+      media_1_data: certificateForm.media1Data,
+      media_2_name: certificateForm.media2Name || null,
+      media_2_data: certificateForm.media2Data,
+    })
+  }
+
+  const renderCertificateMediaCell = (
+    certificate: FireAlarmExternalCertificate,
+    slot: 1 | 2,
+  ) => {
+    const mediaData =
+      slot === 1 ? certificate.media_1_data : certificate.media_2_data
+    const mediaName =
+      slot === 1 ? certificate.media_1_name : certificate.media_2_name
+
+    if (!mediaData) return "-"
+
+    return (
+      <div className="space-y-2">
+        {isImageDataUrl(mediaData) && (
+          <button
+            type="button"
+            onClick={() =>
+              handleCertificatePreviewOpen({
+                dataUrl: mediaData,
+                fileName: mediaName || `certificate-media-${slot}`,
+                subtitle: `${certificate.company} • ${certificate.professional}`,
+              })
+            }
+            className="block"
+          >
+            <img
+              src={mediaData}
+              alt={mediaName || `Media ${slot} preview`}
+              className="max-h-20 rounded border border-[#ddd] transition-all duration-200 hover:opacity-90"
+            />
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() =>
+            handleCertificatePreviewOpen({
+              dataUrl: mediaData,
+              fileName: mediaName || `certificate-media-${slot}`,
+              subtitle: `${certificate.company} • ${certificate.professional}`,
+            })
+          }
+          className="inline-flex rounded border border-[#8c7569] px-2 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+        >
+          {mediaName || "Preview document"}
+        </button>
+      </div>
+    )
+  }
+
+  if (activeView === "certificates") {
+    return (
+      <div className="space-y-4">
+        <div className="flex flex-col gap-3 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4 md:flex-row md:items-start md:justify-between">
+          <div>
+            <h3 className="text-lg font-bold text-[#55311c]">
+              External fire alarm certificates
+            </h3>
+            <p className="text-sm text-[rgba(0,0,0,0.65)]">
+              Search certificates by professional, company, or date.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setActiveView("schedule")}
+              className="rounded-lg border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+            >
+              Back to schedule
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsCertificateDialogOpen(true)}
+              className="rounded-lg bg-[#8c7569] px-3 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c]"
+            >
+              Add record
+            </button>
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+            <div className="md:col-span-2">
+              <label
+                htmlFor="fire-alarm-certificate-search"
+                className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+              >
+                Search
+              </label>
+              <input
+                id="fire-alarm-certificate-search"
+                type="text"
+                value={certificateSearch}
+                onChange={(event) => setCertificateSearch(event.target.value)}
+                placeholder="Search by professional or company"
+                className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="fire-alarm-certificate-date-from"
+                className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+              >
+                Date from
+              </label>
+              <input
+                id="fire-alarm-certificate-date-from"
+                type="date"
+                value={certificateDateFrom}
+                onChange={(event) => setCertificateDateFrom(event.target.value)}
+                className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="fire-alarm-certificate-date-to"
+                className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+              >
+                Date to
+              </label>
+              <input
+                id="fire-alarm-certificate-date-to"
+                type="date"
+                min={certificateDateFrom || undefined}
+                value={certificateDateTo}
+                onChange={(event) => setCertificateDateTo(event.target.value)}
+                className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+              />
+            </div>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-[rgba(0,0,0,0.65)]">
+              {externalCertificatesCount} record
+              {externalCertificatesCount === 1 ? "" : "s"} found.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setCertificateSearch("")
+                setCertificateDateFrom("")
+                setCertificateDateTo("")
+              }}
+              className="rounded border border-[#8c7569] px-3 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+            >
+              Clear filters
+            </button>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[980px] border-collapse">
+            <thead>
+              <tr className="bg-[#8c7569]">
+                <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
+                  Date
+                </th>
+                <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
+                  Time
+                </th>
+                <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
+                  Company
+                </th>
+                <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
+                  Professional
+                </th>
+                <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
+                  Doc 1
+                </th>
+                <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
+                  Doc 2
+                </th>
+                <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
+                  Added
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {isLoadingExternalCertificates && (
+                <tr>
+                  <td
+                    colSpan={7}
+                    className="border border-[#e5e0dc] bg-white px-3 py-4 text-center text-sm text-[rgba(0,0,0,0.7)]"
+                  >
+                    Loading certificates...
+                  </td>
+                </tr>
+              )}
+              {!isLoadingExternalCertificates &&
+                externalCertificates.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={7}
+                      className="border border-[#e5e0dc] bg-white px-3 py-4 text-center text-sm text-[rgba(0,0,0,0.7)]"
+                    >
+                      No certificates found for the selected filters.
+                    </td>
+                  </tr>
+                )}
+              {!isLoadingExternalCertificates &&
+                externalCertificates.map((certificate) => (
+                  <tr
+                    key={certificate.id}
+                    className="bg-white hover:bg-[#f8f5f3]"
+                  >
+                    <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                      {formatDateToGb(certificate.certificate_date)}
+                    </td>
+                    <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                      {certificate.certificate_time}
+                    </td>
+                    <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                      {certificate.company}
+                    </td>
+                    <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                      {certificate.professional}
+                    </td>
+                    <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                      {renderCertificateMediaCell(certificate, 1)}
+                    </td>
+                    <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                      {renderCertificateMediaCell(certificate, 2)}
+                    </td>
+                    <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                      {new Date(certificate.created_at).toLocaleString("en-GB")}
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+
+        <Dialog
+          open={isCertificateDialogOpen}
+          onOpenChange={handleCertificateDialogChange}
+        >
+          <DialogContent className="border-[#e5e0dc] bg-white text-[#55311c] sm:max-w-3xl">
+            <DialogHeader>
+              <DialogTitle className="text-[#55311c]">
+                Add external certificate
+              </DialogTitle>
+              <DialogDescription className="text-[rgba(0,0,0,0.7)]">
+                Record a new external fire alarm certificate entry.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div>
+                <label
+                  htmlFor="fire-alarm-certificate-form-date"
+                  className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+                >
+                  Date
+                </label>
+                <input
+                  id="fire-alarm-certificate-form-date"
+                  type="date"
+                  value={certificateForm.certificateDate}
+                  onChange={(event) =>
+                    handleCertificateFieldChange(
+                      "certificateDate",
+                      event.target.value,
+                    )
+                  }
+                  className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="fire-alarm-certificate-form-time"
+                  className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+                >
+                  Time
+                </label>
+                <input
+                  id="fire-alarm-certificate-form-time"
+                  type="time"
+                  value={certificateForm.certificateTime}
+                  onChange={(event) =>
+                    handleCertificateFieldChange(
+                      "certificateTime",
+                      event.target.value,
+                    )
+                  }
+                  className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="fire-alarm-certificate-form-company"
+                  className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+                >
+                  Company
+                </label>
+                <input
+                  id="fire-alarm-certificate-form-company"
+                  type="text"
+                  value={certificateForm.company}
+                  onChange={(event) =>
+                    handleCertificateFieldChange("company", event.target.value)
+                  }
+                  placeholder="Company name"
+                  className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="fire-alarm-certificate-form-professional"
+                  className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+                >
+                  Professional
+                </label>
+                <input
+                  id="fire-alarm-certificate-form-professional"
+                  type="text"
+                  value={certificateForm.professional}
+                  onChange={(event) =>
+                    handleCertificateFieldChange(
+                      "professional",
+                      event.target.value,
+                    )
+                  }
+                  placeholder="Professional name"
+                  className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h4 className="text-sm font-semibold text-[#55311c]">
+                      Media 1
+                    </h4>
+                    <p className="text-xs text-[rgba(0,0,0,0.65)]">
+                      Add an image or PDF.
+                    </p>
+                  </div>
+                  <input
+                    id="fire-alarm-certificate-media-1"
+                    type="file"
+                    accept="image/*,application/pdf"
+                    onChange={(event) =>
+                      handleCertificateMediaSelect(
+                        1,
+                        event.target.files?.[0] || null,
+                      )
+                    }
+                    className="hidden"
+                  />
+                  <label
+                    htmlFor="fire-alarm-certificate-media-1"
+                    className="cursor-pointer rounded-lg border border-[#8c7569] px-3 py-2 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+                  >
+                    Select media
+                  </label>
+                </div>
+                <p className="mt-3 text-sm text-[#55311c]">
+                  {certificateForm.media1Name || "No media selected"}
+                </p>
+                {certificateForm.media1Data && (
+                  <div className="mt-3 space-y-3">
+                    {isImageDataUrl(certificateForm.media1Data) && (
+                      <img
+                        src={certificateForm.media1Data}
+                        alt={certificateForm.media1Name || "Media 1 preview"}
+                        className="max-h-40 rounded border border-[#ddd]"
+                      />
+                    )}
+                    <div className="flex flex-wrap gap-2">
+                      <a
+                        href={certificateForm.media1Data}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="rounded-lg border border-[#8c7569] px-3 py-2 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+                      >
+                        Open media
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => handleCertificateMediaRemove(1)}
+                        className="rounded-lg border border-[#d7c8bf] px-3 py-2 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f7f0eb]"
+                      >
+                        Remove media
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h4 className="text-sm font-semibold text-[#55311c]">
+                      Media 2
+                    </h4>
+                    <p className="text-xs text-[rgba(0,0,0,0.65)]">
+                      Add an image or PDF.
+                    </p>
+                  </div>
+                  <input
+                    id="fire-alarm-certificate-media-2"
+                    type="file"
+                    accept="image/*,application/pdf"
+                    onChange={(event) =>
+                      handleCertificateMediaSelect(
+                        2,
+                        event.target.files?.[0] || null,
+                      )
+                    }
+                    className="hidden"
+                  />
+                  <label
+                    htmlFor="fire-alarm-certificate-media-2"
+                    className="cursor-pointer rounded-lg border border-[#8c7569] px-3 py-2 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+                  >
+                    Select media
+                  </label>
+                </div>
+                <p className="mt-3 text-sm text-[#55311c]">
+                  {certificateForm.media2Name || "No media selected"}
+                </p>
+                {certificateForm.media2Data && (
+                  <div className="mt-3 space-y-3">
+                    {isImageDataUrl(certificateForm.media2Data) && (
+                      <img
+                        src={certificateForm.media2Data}
+                        alt={certificateForm.media2Name || "Media 2 preview"}
+                        className="max-h-40 rounded border border-[#ddd]"
+                      />
+                    )}
+                    <div className="flex flex-wrap gap-2">
+                      <a
+                        href={certificateForm.media2Data}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="rounded-lg border border-[#8c7569] px-3 py-2 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+                      >
+                        Open media
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => handleCertificateMediaRemove(2)}
+                        className="rounded-lg border border-[#d7c8bf] px-3 py-2 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f7f0eb]"
+                      >
+                        Remove media
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <DialogFooter>
+              <button
+                type="button"
+                onClick={() => handleCertificateDialogChange(false)}
+                className="rounded-lg border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleCreateExternalCertificate}
+                disabled={createExternalCertificateMutation.isPending}
+                className="rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {createExternalCertificateMutation.isPending
+                  ? "Saving..."
+                  : "Save record"}
+              </button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog
+          open={Boolean(certificatePreview)}
+          onOpenChange={(open) => {
+            if (!open) setCertificatePreview(null)
+          }}
+        >
+          <DialogContent className="overflow-hidden border-[#d6d9de] bg-[#eef1f4] p-0 text-[#1f2328] sm:max-w-6xl [&>button]:text-white [&>button]:opacity-90 [&>button]:ring-offset-[#2f3338]">
+            {certificatePreview && (
+              <>
+                <div className="flex items-center justify-between gap-4 bg-[#2f3338] px-5 py-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-white">
+                      {certificatePreview.fileName}
+                    </p>
+                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[rgba(255,255,255,0.78)]">
+                      <span>{certificatePreview.subtitle}</span>
+                      <span className="rounded-full border border-[rgba(255,255,255,0.22)] px-2 py-0.5 font-semibold uppercase tracking-wide text-[10px]">
+                        {isImageDataUrl(certificatePreview.dataUrl)
+                          ? "Image"
+                          : isPdfDataUrl(certificatePreview.dataUrl)
+                            ? "PDF"
+                            : getDataUrlMimeType(certificatePreview.dataUrl) ||
+                              "Document"}
+                      </span>
+                    </div>
+                  </div>
+                  <a
+                    href={certificatePreview.dataUrl}
+                    download={certificatePreview.fileName}
+                    className="inline-flex shrink-0 items-center gap-2 rounded-full border border-[rgba(255,255,255,0.2)] bg-[rgba(255,255,255,0.08)] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[rgba(255,255,255,0.16)]"
+                  >
+                    <svg
+                      aria-hidden="true"
+                      viewBox="0 0 24 24"
+                      className="h-4 w-4 fill-none stroke-current"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M12 3v12" />
+                      <path d="m7 10 5 5 5-5" />
+                      <path d="M5 21h14" />
+                    </svg>
+                    Download
+                  </a>
+                </div>
+
+                <div className="max-h-[80vh] overflow-auto bg-[#d7dde4] p-4 sm:p-6">
+                  {isImageDataUrl(certificatePreview.dataUrl) ? (
+                    <div className="mx-auto flex max-w-5xl justify-center rounded-[24px] bg-white p-4 shadow-[0_24px_60px_rgba(0,0,0,0.18)]">
+                      <img
+                        src={certificatePreview.dataUrl}
+                        alt={certificatePreview.fileName}
+                        className="max-h-[72vh] rounded-[18px] object-contain"
+                      />
+                    </div>
+                  ) : isPdfDataUrl(certificatePreview.dataUrl) ? (
+                    <div className="mx-auto h-[72vh] max-w-5xl rounded-[24px] bg-white p-3 shadow-[0_24px_60px_rgba(0,0,0,0.18)]">
+                      <iframe
+                        src={certificatePreview.dataUrl}
+                        title={certificatePreview.fileName}
+                        className="h-full w-full rounded-[18px] border border-[#d7dce1] bg-white"
+                      />
+                    </div>
+                  ) : (
+                    <div className="mx-auto max-w-3xl rounded-[24px] bg-white p-10 text-center shadow-[0_24px_60px_rgba(0,0,0,0.18)]">
+                      <p className="text-lg font-semibold text-[#1f2328]">
+                        Preview is not available for this document type.
+                      </p>
+                      <p className="mt-2 text-sm text-[rgba(0,0,0,0.68)]">
+                        Use the download button above to open the file locally.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </DialogContent>
+        </Dialog>
+      </div>
+    )
+  }
+
   if (activeView === "history") {
     return (
       <div className="space-y-4">
         <div className="flex items-center justify-between rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
           <div>
             <h3 className="text-lg font-bold text-[#55311c]">
-              Alarm schedule history
+              Fire alarm schedule history
             </h3>
             <p className="text-sm text-[rgba(0,0,0,0.65)]">
               Choose a saved date to open the record.
@@ -7519,7 +9072,7 @@ function FireAlarmSchedulePage() {
             onClick={() => setActiveView("schedule")}
             className="rounded-lg border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
           >
-            Back
+            Back to schedule
           </button>
         </div>
 
@@ -7663,7 +9216,7 @@ function FireAlarmSchedulePage() {
                         }}
                         className="rounded border border-[#8c7569] px-3 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
                       >
-                        Abrir
+                        Open
                       </button>
                     </td>
                   </tr>
@@ -7717,22 +9270,33 @@ function FireAlarmSchedulePage() {
     <div className="space-y-4">
       <div className="flex flex-col gap-3 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h3 className="text-lg font-bold text-[#55311c]">Alarm schedule</h3>
+          <h3 className="text-lg font-bold text-[#55311c]">
+            Fire alarm schedule
+          </h3>
         </div>
-        <button
-          type="button"
-          onClick={() => setActiveView("history")}
-          className="self-start rounded-lg border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] sm:self-auto"
-        >
-          View history
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setActiveView("history")}
+            className="self-start rounded-lg border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] sm:self-auto"
+          >
+            Schedule history
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveView("certificates")}
+            className="self-start rounded-lg bg-[#8c7569] px-3 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] sm:self-auto"
+          >
+            Certificates
+          </button>
+        </div>
       </div>
 
       <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
         <div className="mb-3 flex items-center justify-between gap-3">
           <div>
             <h4 className="text-sm font-semibold text-[#55311c]">
-              Alarm calendar navigation
+              Fire alarm calendar
             </h4>
             <p className="text-xs text-[rgba(0,0,0,0.65)]">
               Green dates already have saved records.
@@ -7920,18 +9484,9 @@ function BuildingSchedulePage({
   storageKey: string
 }) {
   const { showSuccessToast, showErrorToast } = useCustomToast()
-  const monthlyDay = scheduleId === "lift" ? 1 : scheduleId === "light" ? 3 : null
-  const isMonthlySchedule = monthlyDay !== null
-  const snapScheduleDate = (date: string) =>
-    isMonthlySchedule
-      ? snapToMonthDayDate(date, monthlyDay)
-      : snapToFireAlarmCycleDate(date)
-  const shiftScheduleDate = (date: string, step: number) =>
-    isMonthlySchedule
-      ? shiftMonthDate(date, step, monthlyDay)
-      : shiftFireAlarmCycleDate(date, step)
-  const [selectedDate, setSelectedDate] = useState(() =>
-    snapScheduleDate(toDateInputValue()),
+  const [selectedDate, setSelectedDate] = useState(() => toDateInputValue())
+  const [calendarMonth, setCalendarMonth] = useState(() =>
+    toDateInputValue().slice(0, 7),
   )
   const [allLogs, setAllLogs] = useState<FireAlarmLogByDate>({})
   const [rows, setRows] = useState<Record<string, FireAlarmLogRow>>(() =>
@@ -7994,8 +9549,73 @@ function BuildingSchedulePage({
     () => Object.keys(allLogs).sort((a, b) => b.localeCompare(a)),
     [allLogs],
   )
+  const datesWithLogs = useMemo(() => {
+    const dates = new Set<string>()
+    Object.entries(allLogs).forEach(([date, savedRows]) => {
+      if (Object.values(savedRows || {}).some((row) => hasLogRowContent(row))) {
+        dates.add(date)
+      }
+    })
+    if (Object.values(rows).some((row) => hasLogRowContent(row))) {
+      dates.add(selectedDate)
+    }
+    return dates
+  }, [allLogs, rows, selectedDate])
+  const calendarMonthLabel = useMemo(() => {
+    const [yearRaw, monthRaw] = calendarMonth.split("-")
+    const year = Number(yearRaw)
+    const month = Number(monthRaw)
+    if (!year || !month) return calendarMonth
+    return new Date(Date.UTC(year, month - 1, 1)).toLocaleDateString("en-GB", {
+      month: "long",
+      year: "numeric",
+      timeZone: "UTC",
+    })
+  }, [calendarMonth])
+  const calendarDays = useMemo(() => {
+    const [yearRaw, monthRaw] = calendarMonth.split("-")
+    const year = Number(yearRaw)
+    const month = Number(monthRaw)
+    if (!year || !month) return [] as { isoDate: string | null; day: string }[]
+    const firstDay = new Date(Date.UTC(year, month - 1, 1))
+    const firstWeekday = (firstDay.getUTCDay() + 6) % 7
+    const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate()
+    const cells: { isoDate: string | null; day: string }[] = []
+
+    for (let i = 0; i < firstWeekday; i += 1) {
+      cells.push({ isoDate: null, day: "" })
+    }
+    for (let day = 1; day <= daysInMonth; day += 1) {
+      cells.push({
+        isoDate: `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
+        day: String(day),
+      })
+    }
+
+    return cells
+  }, [calendarMonth])
 
   const idPrefix = `${scheduleId}-schedule`
+
+  useEffect(() => {
+    const selectedMonth = selectedDate.slice(0, 7)
+    setCalendarMonth((previous) =>
+      previous === selectedMonth ? previous : selectedMonth,
+    )
+  }, [selectedDate])
+
+  const handleShiftCalendarMonth = (step: number) => {
+    setCalendarMonth((previous) => {
+      const [yearRaw, monthRaw] = previous.split("-")
+      const year = Number(yearRaw)
+      const month = Number(monthRaw)
+      if (!year || !month) return previous
+      const shifted = new Date(Date.UTC(year, month - 1 + step, 1))
+      const nextYear = shifted.getUTCFullYear()
+      const nextMonth = String(shifted.getUTCMonth() + 1).padStart(2, "0")
+      return `${nextYear}-${nextMonth}`
+    })
+  }
 
   const handleRowChange = (
     buildingId: ScheduleBuildingId,
@@ -8276,12 +9896,12 @@ function BuildingSchedulePage({
                       <button
                         type="button"
                         onClick={() => {
-                          setSelectedDate(snapScheduleDate(date))
+                          setSelectedDate(date)
                           setActiveView("schedule")
                         }}
                         className="rounded border border-[#8c7569] px-3 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
                       >
-                        Abrir
+                        Open
                       </button>
                     </td>
                   </tr>
@@ -8309,37 +9929,109 @@ function BuildingSchedulePage({
         </button>
       </div>
 
-      <div className="flex flex-wrap items-end justify-center gap-2 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-3">
-        <button
-          type="button"
-          onClick={() => setSelectedDate((previous) => shiftScheduleDate(previous, -1))}
-          className="rounded-lg border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
-        >
-          Back
-        </button>
-        <div>
-          <label
-            htmlFor={`${idPrefix}-date`}
-            className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
-          >
-            Date
-          </label>
-          <input
-            id={`${idPrefix}-date`}
-            type="date"
-            value={selectedDate}
-            onChange={(event) => setSelectedDate(snapScheduleDate(event.target.value))}
-            className="rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
-          />
+      {usesCalendarDatePicker ? (
+        <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <h4 className="text-sm font-semibold text-[#55311c]">
+                {title} calendar
+              </h4>
+              <p className="text-xs text-[rgba(0,0,0,0.65)]">
+                Green dates already have saved records. {title} checks are saved
+                on day {monthlyDay} of each month.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => handleShiftCalendarMonth(-1)}
+                className="rounded border border-[#8c7569] px-2 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+              >
+                Prev month
+              </button>
+              <span className="text-xs font-semibold text-[#55311c]">
+                {calendarMonthLabel}
+              </span>
+              <button
+                type="button"
+                onClick={() => handleShiftCalendarMonth(1)}
+                className="rounded border border-[#8c7569] px-2 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+              >
+                Next month
+              </button>
+            </div>
+          </div>
+          <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.6)]">
+            {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((weekDay) => (
+              <div key={weekDay}>{weekDay}</div>
+            ))}
+          </div>
+          <div className="mt-1 grid grid-cols-7 gap-1">
+            {calendarDays.map((cell, index) => {
+              if (!cell.isoDate) {
+                return <div key={`empty-${index}`} className="h-8 rounded" />
+              }
+              const isoDate = cell.isoDate
+              const isSelected = isoDate === selectedDate
+              const hasRecord = datesWithLogs.has(isoDate)
+              const canSelect =
+                monthlyDay === null ||
+                isoDate.endsWith(`-${String(monthlyDay).padStart(2, "0")}`)
+              return (
+                <button
+                  key={isoDate}
+                  type="button"
+                  disabled={!canSelect}
+                  onClick={() => setSelectedDate(snapScheduleDate(isoDate))}
+                  className={`h-8 rounded border text-xs font-semibold transition-all duration-200 ${
+                    isSelected
+                      ? "border-[#55311c] bg-[#55311c] text-white"
+                      : hasRecord
+                        ? "border-[#5f9f7d] bg-[#eef7f1] text-[#2f6a4b] hover:bg-[#dff0e6]"
+                        : canSelect
+                          ? "border-[#d9d0ca] bg-white text-[#55311c] hover:bg-[#f0ebe7]"
+                          : "cursor-default border-transparent bg-transparent text-[rgba(85,49,28,0.3)]"
+                  }`}
+                >
+                  {cell.day}
+                </button>
+              )
+            })}
+          </div>
         </div>
-        <button
-          type="button"
-          onClick={() => setSelectedDate((previous) => shiftScheduleDate(previous, 1))}
-          className="rounded-lg border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
-        >
-          Next
-        </button>
-      </div>
+      ) : (
+        <div className="flex flex-wrap items-end justify-center gap-2 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-3">
+          <button
+            type="button"
+            onClick={() => setSelectedDate((previous) => shiftScheduleDate(previous, -1))}
+            className="rounded-lg border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+          >
+            Back
+          </button>
+          <div>
+            <label
+              htmlFor={`${idPrefix}-date`}
+              className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+            >
+              Date
+            </label>
+            <input
+              id={`${idPrefix}-date`}
+              type="date"
+              value={selectedDate}
+              onChange={(event) => setSelectedDate(snapScheduleDate(event.target.value))}
+              className="rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => setSelectedDate((previous) => shiftScheduleDate(previous, 1))}
+            className="rounded-lg border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+          >
+            Next
+          </button>
+        </div>
+      )}
 
       <div className="overflow-x-auto">
         <table className="w-full min-w-[900px] border-collapse">
@@ -8468,6 +10160,8 @@ function CleanerSummary() {
   const [isCreatingCleanerTimeout, setIsCreatingCleanerTimeout] = useState<
     string | null
   >(null)
+  const [selectedCleanerDateFrom, setSelectedCleanerDateFrom] = useState("")
+  const [selectedCleanerDateTo, setSelectedCleanerDateTo] = useState("")
 
   const buildingMap = useMemo(() => {
     const map = new Map<EntityId, string>()
@@ -8599,6 +10293,38 @@ function CleanerSummary() {
     })
   }, [sessions, buildingMap, getDurationMinutes])
 
+  const { earliestCleanerSessionDate, latestCleanerSessionDate } = useMemo(() => {
+    const sessionDates = enrichedSessions
+      .map((session) =>
+        session.startDate ? toIsoDateString(session.startDate) : null,
+      )
+      .filter((value): value is string => Boolean(value))
+      .sort()
+
+    return {
+      earliestCleanerSessionDate: sessionDates[0] || "",
+      latestCleanerSessionDate: sessionDates[sessionDates.length - 1] || "",
+    }
+  }, [enrichedSessions])
+
+  const { cleanerDateFrom, cleanerDateTo } = useMemo(() => {
+    if (
+      selectedCleanerDateFrom &&
+      selectedCleanerDateTo &&
+      selectedCleanerDateFrom > selectedCleanerDateTo
+    ) {
+      return {
+        cleanerDateFrom: selectedCleanerDateTo,
+        cleanerDateTo: selectedCleanerDateFrom,
+      }
+    }
+
+    return {
+      cleanerDateFrom: selectedCleanerDateFrom,
+      cleanerDateTo: selectedCleanerDateTo,
+    }
+  }, [selectedCleanerDateFrom, selectedCleanerDateTo])
+
   const tableSessions = useMemo(
     () => enrichedSessions.slice(0, 20),
     [enrichedSessions],
@@ -8609,6 +10335,16 @@ function CleanerSummary() {
 
     enrichedSessions.forEach((session) => {
       if (!session.durationMinutes || !session.buildingLabel) return
+      if (!session.startDate) return
+      if (
+        !isDateWithinRange(
+          toIsoDateString(session.startDate),
+          cleanerDateFrom,
+          cleanerDateTo,
+        )
+      ) {
+        return
+      }
       const current = hoursByBuilding.get(session.buildingLabel) || 0
       hoursByBuilding.set(
         session.buildingLabel,
@@ -8622,7 +10358,7 @@ function CleanerSummary() {
         hours: Number((minutes / 60).toFixed(2)),
       }))
       .sort((a, b) => b.hours - a.hours)
-  }, [enrichedSessions])
+  }, [enrichedSessions, cleanerDateFrom, cleanerDateTo])
 
   const workloadCards = useMemo(() => {
     const now = new Date()
@@ -8834,9 +10570,66 @@ function CleanerSummary() {
       </div>
 
       <div className="mb-6 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
-        <h4 className="mb-3 text-sm font-semibold text-[#55311c]">
-          Hours by building
-        </h4>
+        <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <h4 className="text-sm font-semibold text-[#55311c]">
+            Hours by building
+          </h4>
+          <div className="flex flex-wrap items-end gap-2">
+            <div>
+              <label
+                htmlFor="cleaner-building-date-from"
+                className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+              >
+                Date from
+              </label>
+              <input
+                id="cleaner-building-date-from"
+                type="date"
+                min={earliestCleanerSessionDate || undefined}
+                max={selectedCleanerDateTo || latestCleanerSessionDate || undefined}
+                value={selectedCleanerDateFrom}
+                onChange={(event) => setSelectedCleanerDateFrom(event.target.value)}
+                className="rounded-lg border border-[#d9d0ca] bg-white px-3 py-1 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="cleaner-building-date-to"
+                className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+              >
+                Date to
+              </label>
+              <input
+                id="cleaner-building-date-to"
+                type="date"
+                min={
+                  selectedCleanerDateFrom ||
+                  earliestCleanerSessionDate ||
+                  undefined
+                }
+                max={latestCleanerSessionDate || undefined}
+                value={selectedCleanerDateTo}
+                onChange={(event) => setSelectedCleanerDateTo(event.target.value)}
+                className="rounded-lg border border-[#d9d0ca] bg-white px-3 py-1 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+              />
+            </div>
+            {(selectedCleanerDateFrom || selectedCleanerDateTo) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedCleanerDateFrom("")
+                  setSelectedCleanerDateTo("")
+                }}
+                className="rounded-lg border border-[#d9d0ca] px-3 py-1 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        </div>
+        <p className="mb-3 text-xs text-[rgba(0,0,0,0.6)]">
+          Period: {buildDateRangeLabel(cleanerDateFrom, cleanerDateTo)}
+        </p>
         <div className="h-72 w-full">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={buildingHoursData}>
@@ -8869,7 +10662,9 @@ function CleanerSummary() {
         </div>
         {!isLoadingAcess && buildingHoursData.length === 0 && (
           <p className="mt-3 text-sm text-[rgba(0,0,0,0.6)]">
-            No closed sessions to generate chart.
+            {selectedCleanerDateFrom || selectedCleanerDateTo
+              ? "No closed sessions in the selected period."
+              : "No closed sessions to generate chart."}
           </p>
         )}
       </div>
@@ -9423,7 +11218,8 @@ function CaretakerSummary({
     const day = String(now.getDate()).padStart(2, "0")
     return `${year}-${month}-${day}`
   })
-  const [selectedBinsDate, setSelectedBinsDate] = useState("")
+  const [selectedBinsDateFrom, setSelectedBinsDateFrom] = useState("")
+  const [selectedBinsDateTo, setSelectedBinsDateTo] = useState("")
   const [selectedWeekStart, setSelectedWeekStart] = useState(() =>
     getWeekStartIso(new Date()),
   )
@@ -9638,13 +11434,31 @@ function CaretakerSummary({
     }
   }, [binSessionsGrouped, toDateKey])
 
+  const { binsDateFrom, binsDateTo } = useMemo(() => {
+    if (
+      selectedBinsDateFrom &&
+      selectedBinsDateTo &&
+      selectedBinsDateFrom > selectedBinsDateTo
+    ) {
+      return {
+        binsDateFrom: selectedBinsDateTo,
+        binsDateTo: selectedBinsDateFrom,
+      }
+    }
+
+    return {
+      binsDateFrom: selectedBinsDateFrom,
+      binsDateTo: selectedBinsDateTo,
+    }
+  }, [selectedBinsDateFrom, selectedBinsDateTo])
+
   const binsTimeByBuilding = useMemo(() => {
     const totals = new Map<string, number>()
     binSessionsGrouped.forEach((session) => {
       const sessionDate = toDateKey(
         session.inRecord?.data || session.outRecord?.data,
       )
-      if (selectedBinsDate && sessionDate !== selectedBinsDate) return
+      if (!isDateWithinRange(sessionDate, binsDateFrom, binsDateTo)) return
 
       const duration = getDurationMinutes(
         session.inRecord?.data,
@@ -9670,9 +11484,10 @@ function CaretakerSummary({
       .sort((a, b) => b.hours - a.hours)
   }, [
     binSessionsGrouped,
+    binsDateFrom,
+    binsDateTo,
     buildingMap,
     getDurationMinutes,
-    selectedBinsDate,
     toDateKey,
   ])
 
@@ -10056,28 +11871,50 @@ function CaretakerSummary({
         <div className="mb-6 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
           <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <h4 className="text-sm font-semibold text-[#55311c]">
-              Hour per Building (Bins)
+              Hours per Building (Bins)
             </h4>
-            <div className="flex flex-wrap items-center gap-2">
-              <label
-                htmlFor="bins-building-day"
-                className="text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
-              >
-                Day
-              </label>
-              <input
-                id="bins-building-day"
-                type="date"
-                min={earliestBinSessionDate || undefined}
-                max={latestBinSessionDate || undefined}
-                value={selectedBinsDate}
-                onChange={(event) => setSelectedBinsDate(event.target.value)}
-                className="rounded-lg border border-[#d9d0ca] bg-white px-3 py-1 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
-              />
-              {selectedBinsDate && (
+            <div className="flex flex-wrap items-end gap-2">
+              <div>
+                <label
+                  htmlFor="bins-building-date-from"
+                  className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+                >
+                  Date from
+                </label>
+                <input
+                  id="bins-building-date-from"
+                  type="date"
+                  min={earliestBinSessionDate || undefined}
+                  max={selectedBinsDateTo || latestBinSessionDate || undefined}
+                  value={selectedBinsDateFrom}
+                  onChange={(event) => setSelectedBinsDateFrom(event.target.value)}
+                  className="rounded-lg border border-[#d9d0ca] bg-white px-3 py-1 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="bins-building-date-to"
+                  className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+                >
+                  Date to
+                </label>
+                <input
+                  id="bins-building-date-to"
+                  type="date"
+                  min={selectedBinsDateFrom || earliestBinSessionDate || undefined}
+                  max={latestBinSessionDate || undefined}
+                  value={selectedBinsDateTo}
+                  onChange={(event) => setSelectedBinsDateTo(event.target.value)}
+                  className="rounded-lg border border-[#d9d0ca] bg-white px-3 py-1 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                />
+              </div>
+              {(selectedBinsDateFrom || selectedBinsDateTo) && (
                 <button
                   type="button"
-                  onClick={() => setSelectedBinsDate("")}
+                  onClick={() => {
+                    setSelectedBinsDateFrom("")
+                    setSelectedBinsDateTo("")
+                  }}
                   className="rounded-lg border border-[#d9d0ca] px-3 py-1 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
                 >
                   Clear
@@ -10085,6 +11922,9 @@ function CaretakerSummary({
               )}
             </div>
           </div>
+          <p className="mb-3 text-xs text-[rgba(0,0,0,0.6)]">
+            Period: {buildDateRangeLabel(binsDateFrom, binsDateTo)}
+          </p>
           <div className="h-72 w-full">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
@@ -10124,8 +11964,8 @@ function CaretakerSummary({
           </div>
           {!isLoadingBinSessions && binsTimeByBuilding.length === 0 && (
             <p className="mt-3 text-sm text-[rgba(0,0,0,0.6)]">
-              {selectedBinsDate
-                ? "No sessions on the selected day."
+              {selectedBinsDateFrom || selectedBinsDateTo
+                ? "No sessions in the selected period."
                 : "No sessions to generate chart."}
             </p>
           )}
@@ -10866,6 +12706,33 @@ function ResidentsContent() {
     },
   })
 
+  const updateTwilioSmsMutation = useMutation({
+    mutationFn: async ({
+      id,
+      enabled,
+    }: {
+      id: EntityId
+      enabled: boolean
+    }) => {
+      const response = await apiCall(`/api/v1/moradores/${id}`, {
+        method: "PATCH",
+        body: { receives_twilio_sms: enabled },
+      })
+      return response
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["Residents"] })
+      showSuccessToast("Twilio SMS preference updated successfully!")
+    },
+    onError: (error) => {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Error updating Twilio SMS preference"
+      showErrorToast(message)
+    },
+  })
+
   const handleCheckboxChange = (
     id: EntityId,
     currentTypes: number,
@@ -10893,6 +12760,10 @@ function ResidentsContent() {
     updateReadingSmsMutation.mutate({ id, enabled })
   }
 
+  const handleTwilioSmsToggle = (id: EntityId, enabled: boolean) => {
+    updateTwilioSmsMutation.mutate({ id, enabled })
+  }
+
   const renderReadingSmsToggle = (morador?: Morador) => {
     if (!morador) return <span className="text-xs text-[rgba(85,49,28,0.55)]">-</span>
     return (
@@ -10907,6 +12778,24 @@ function ResidentsContent() {
           className="h-4 w-4 cursor-pointer"
         />
         Receive readings
+      </label>
+    )
+  }
+
+  const renderTwilioSmsToggle = (morador?: Morador) => {
+    if (!morador) return <span className="text-xs text-[rgba(85,49,28,0.55)]">-</span>
+    return (
+      <label className="mt-2 inline-flex items-center gap-2 text-xs font-semibold text-[#55311c]">
+        <input
+          type="checkbox"
+          checked={morador.receives_twilio_sms}
+          onChange={(event) =>
+            handleTwilioSmsToggle(morador.id, event.target.checked)
+          }
+          disabled={updateTwilioSmsMutation.isPending}
+          className="h-4 w-4 cursor-pointer"
+        />
+        Receive Twilio SMS
       </label>
     )
   }
@@ -11127,6 +13016,7 @@ function ResidentsContent() {
                             <div className="flex flex-col">
                               <span>{row.owner_1?.mobile || "-"}</span>
                               {renderReadingSmsToggle(row.owner_1)}
+                              {renderTwilioSmsToggle(row.owner_1)}
                             </div>
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
@@ -11136,6 +13026,7 @@ function ResidentsContent() {
                             <div className="flex flex-col">
                               <span>{row.owner_2?.mobile || "-"}</span>
                               {renderReadingSmsToggle(row.owner_2)}
+                              {renderTwilioSmsToggle(row.owner_2)}
                             </div>
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
@@ -11145,6 +13036,7 @@ function ResidentsContent() {
                             <div className="flex flex-col">
                               <span>{row.tenant?.mobile || "-"}</span>
                               {renderReadingSmsToggle(row.tenant)}
+                              {renderTwilioSmsToggle(row.tenant)}
                             </div>
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
@@ -11154,6 +13046,7 @@ function ResidentsContent() {
                             <div className="flex flex-col">
                               <span>{row.agent?.mobile || "-"}</span>
                               {renderReadingSmsToggle(row.agent)}
+                              {renderTwilioSmsToggle(row.agent)}
                             </div>
                           </td>
                           <td className="border border-gray-400 px-4 py-3 text-center">
@@ -11209,6 +13102,9 @@ function ResidentsContent() {
                           Receive readings
                         </th>
                         <th className="border border-gray-400 px-4 py-3 text-center font-['Nunito',sans-serif] font-semibold text-white">
+                          Receive Twilio SMS
+                        </th>
+                        <th className="border border-gray-400 px-4 py-3 text-center font-['Nunito',sans-serif] font-semibold text-white">
                           Normal
                         </th>
                         <th className="border border-gray-400 px-4 py-3 text-center font-['Nunito',sans-serif] font-semibold text-white">
@@ -11248,6 +13144,20 @@ function ResidentsContent() {
                                 )
                               }
                               disabled={updateReadingSmsMutation.isPending}
+                              className="h-4 w-4 cursor-pointer"
+                            />
+                          </td>
+                          <td className="border border-gray-400 px-4 py-3 text-center">
+                            <input
+                              type="checkbox"
+                              checked={morador.receives_twilio_sms}
+                              onChange={(event) =>
+                                handleTwilioSmsToggle(
+                                  morador.id,
+                                  event.target.checked,
+                                )
+                              }
+                              disabled={updateTwilioSmsMutation.isPending}
                               className="h-4 w-4 cursor-pointer"
                             />
                           </td>
@@ -11375,6 +13285,7 @@ function AddResidentForm({
     mobile: "",
     cargo: 0,
     receives_flat_reading_sms: true,
+    receives_twilio_sms: true,
     car1: "",
     car2: "",
     flat_id: "",
@@ -11463,6 +13374,7 @@ function AddResidentForm({
             mobile: morador.mobile?.toString() || "",
             cargo: morador.cargo,
             receives_flat_reading_sms: morador.receives_flat_reading_sms,
+            receives_twilio_sms: morador.receives_twilio_sms,
             car1: morador.car1 || "",
             car2: morador.car2 || "",
             flat_id: String(morador.flat_id),
@@ -11532,6 +13444,7 @@ function AddResidentForm({
         email: formData.email || null,
         mobile: formData.mobile || "",
         receives_flat_reading_sms: formData.receives_flat_reading_sms,
+        receives_twilio_sms: formData.receives_twilio_sms,
         ...(!activeEditingId ? { cargo: formData.cargo } : {}),
         ...(shouldShowCarFields
           ? {
@@ -11695,6 +13608,23 @@ function AddResidentForm({
                 htmlFor="resident-receives-flat-reading-sms"
               >
                 Receive flat reading SMS
+              </label>
+            </div>
+
+            <div className="flex items-center gap-3 rounded-lg border-2 border-[#ddd] bg-[#faf8f6] px-4 py-3 md:col-span-2">
+              <input
+                type="checkbox"
+                id="resident-receives-twilio-sms"
+                name="receives_twilio_sms"
+                checked={formData.receives_twilio_sms}
+                onChange={handleInputChange}
+                className="h-4 w-4 cursor-pointer"
+              />
+              <label
+                className="font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                htmlFor="resident-receives-twilio-sms"
+              >
+                Receive Twilio SMS
               </label>
             </div>
 

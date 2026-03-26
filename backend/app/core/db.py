@@ -73,6 +73,48 @@ def _ensure_morador_sms_schema(session: Session) -> None:
         )
         session.commit()
 
+    columns = {column["name"] for column in inspector.get_columns("morador")}
+    if "receives_twilio_sms" not in columns:
+        session.execute(
+            text(
+                "ALTER TABLE morador "
+                "ADD COLUMN receives_twilio_sms BOOLEAN NOT NULL DEFAULT TRUE"
+            )
+        )
+        session.commit()
+
+
+def _ensure_reminder_schedule_schema(session: Session) -> None:
+    bind = session.get_bind()
+    inspector = inspect(bind)
+    if not inspector.has_table("reminder"):
+        return
+
+    columns = {column["name"] for column in inspector.get_columns("reminder")}
+
+    if "schedule_unit" not in columns:
+        session.execute(
+            text(
+                "ALTER TABLE reminder "
+                "ADD COLUMN schedule_unit VARCHAR(20) NOT NULL DEFAULT 'week'"
+            )
+        )
+        session.commit()
+    if "schedule_mode" not in columns:
+        session.execute(
+            text(
+                "ALTER TABLE reminder "
+                "ADD COLUMN schedule_mode VARCHAR(20) NOT NULL DEFAULT 'fixed'"
+            )
+        )
+        session.commit()
+    if "interval_value" not in columns:
+        session.execute(text("ALTER TABLE reminder ADD COLUMN interval_value INTEGER"))
+        session.commit()
+    if "month_mask" not in columns:
+        session.execute(text("ALTER TABLE reminder ADD COLUMN month_mask INTEGER"))
+        session.commit()
+
 
 def ensure_notification_history_schema(session: Session) -> None:
     bind = session.get_bind()
@@ -139,6 +181,42 @@ def ensure_contractor_visit_schema(session: Session) -> None:
     bind = session.get_bind()
     inspector = inspect(bind)
     if inspector.has_table("contractorvisit"):
+        columns = {column["name"] for column in inspector.get_columns("contractorvisit")}
+        if "car_reg" not in columns:
+            session.execute(
+                text(
+                    "ALTER TABLE contractorvisit "
+                    "ADD COLUMN car_reg VARCHAR(50) NOT NULL DEFAULT ''"
+                )
+            )
+            session.commit()
+        columns = {column["name"] for column in inspector.get_columns("contractorvisit")}
+        if "job_description" not in columns:
+            session.execute(
+                text(
+                    "ALTER TABLE contractorvisit "
+                    "ADD COLUMN job_description VARCHAR(255) NOT NULL DEFAULT ''"
+                )
+            )
+            session.commit()
+        columns = {column["name"] for column in inspector.get_columns("contractorvisit")}
+        if "extra_media_name" not in columns:
+            session.execute(
+                text(
+                    "ALTER TABLE contractorvisit "
+                    "ADD COLUMN extra_media_name VARCHAR(255)"
+                )
+            )
+            session.commit()
+        columns = {column["name"] for column in inspector.get_columns("contractorvisit")}
+        if "extra_media_data" not in columns:
+            session.execute(
+                text(
+                    "ALTER TABLE contractorvisit "
+                    "ADD COLUMN extra_media_data TEXT"
+                )
+            )
+            session.commit()
         return
 
     session.execute(
@@ -148,9 +226,12 @@ def ensure_contractor_visit_schema(session: Session) -> None:
                 id UUID PRIMARY KEY,
                 name VARCHAR(255) NOT NULL,
                 company VARCHAR(255) NOT NULL,
-                car_reg VARCHAR(50) NOT NULL,
+                car_reg VARCHAR(50) NOT NULL DEFAULT '',
                 block VARCHAR(100) NOT NULL,
+                job_description VARCHAR(255) NOT NULL,
                 mobile VARCHAR(30) NOT NULL,
+                extra_media_name VARCHAR(255),
+                extra_media_data TEXT,
                 in_at TIMESTAMPTZ NOT NULL,
                 out_at TIMESTAMPTZ,
                 condominio_id UUID NOT NULL REFERENCES condominio (id) ON DELETE CASCADE
@@ -195,6 +276,7 @@ def init_db(session: Session) -> None:
 
     _ensure_flat_label_schema(session)
     _ensure_morador_sms_schema(session)
+    _ensure_reminder_schedule_schema(session)
     ensure_notification_history_schema(session)
     ensure_contractor_visit_schema(session)
 

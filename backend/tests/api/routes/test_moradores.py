@@ -1,8 +1,7 @@
 import uuid
-from pydantic import EmailStr
 
 from fastapi.testclient import TestClient
-from sqlmodel import Session, select
+from sqlmodel import Session
 
 from app.core.config import settings
 from app.models import (
@@ -15,7 +14,7 @@ from app.models import (
     Morador,
     MoradorCreate,
 )
-from tests.utils.utils import random_email, random_lower_string
+from tests.utils.utils import random_email
 
 
 def _create_test_condominio_flat(db: Session) -> tuple[Condominio, Building, Flat]:
@@ -24,7 +23,7 @@ def _create_test_condominio_flat(db: Session) -> tuple[Condominio, Building, Fla
     condominio = Condominio.model_validate(condominio_in)
     db.add(condominio)
     db.flush()
-    
+
     building_in = BuildingCreate(
         nome="Test Building",
         condominio_id=condominio.id
@@ -32,7 +31,7 @@ def _create_test_condominio_flat(db: Session) -> tuple[Condominio, Building, Fla
     building = Building.model_validate(building_in)
     db.add(building)
     db.flush()
-    
+
     flat_in = FlatCreate(
         numero=101,
         status=False,
@@ -69,7 +68,7 @@ def test_read_moradores(
     """Test reading all moradores."""
     _, _, flat = _create_test_condominio_flat(db)
     morador = _create_test_morador(db, flat.id)
-    
+
     r = client.get(
         f"{settings.API_V1_STR}/moradores/",
         headers=superuser_token_headers,
@@ -94,7 +93,7 @@ def test_read_morador_by_id(
     """Test reading a specific morador by ID."""
     _, _, flat = _create_test_condominio_flat(db)
     morador = _create_test_morador(db, flat.id)
-    
+
     r = client.get(
         f"{settings.API_V1_STR}/moradores/{morador.id}",
         headers=superuser_token_headers,
@@ -107,6 +106,7 @@ def test_read_morador_by_id(
     assert data["email"] == morador.email
     assert data["flat_id"] == str(morador.flat_id)
     assert data["receives_flat_reading_sms"] is False
+    assert data["receives_twilio_sms"] is False
 
 
 def test_read_nonexistent_morador(
@@ -127,7 +127,7 @@ def test_create_morador(
 ) -> None:
     """Test creating a new morador."""
     _, _, flat = _create_test_condominio_flat(db)
-    
+
     email = random_email()
     data = {
         "cargo": 1,
@@ -148,6 +148,7 @@ def test_create_morador(
     assert created_morador["cargo"] == data["cargo"]
     assert created_morador["email"] == data["email"]
     assert created_morador["receives_flat_reading_sms"] is False
+    assert created_morador["receives_twilio_sms"] is False
 
 
 def test_create_morador_without_permission(
@@ -155,7 +156,7 @@ def test_create_morador_without_permission(
 ) -> None:
     """Test that normal users cannot create moradores."""
     _, _, flat = _create_test_condominio_flat(db)
-    
+
     data = {
         "cargo": 1,
         "nome": "Unauthorized Morador",
@@ -177,7 +178,7 @@ def test_update_morador(
     """Test updating a morador."""
     _, _, flat = _create_test_condominio_flat(db)
     morador = _create_test_morador(db, flat.id)
-    
+
     new_email = random_email()
     update_data = {
         "cargo": 3,
@@ -262,7 +263,7 @@ def test_update_morador_partial(
     """Test partial update of a morador."""
     _, _, flat = _create_test_condominio_flat(db)
     morador = _create_test_morador(db, flat.id)
-    
+
     update_data = {"cargo": 0}
     r = client.patch(
         f"{settings.API_V1_STR}/moradores/{morador.id}",
@@ -281,7 +282,7 @@ def test_update_nonexistent_morador(
     """Test updating a morador that doesn't exist."""
     _, _, flat = _create_test_condominio_flat(db)
     nonexistent_id = uuid.uuid4()
-    
+
     update_data = {
         "cargo": 1,
         "nome": "Ghost Morador",
@@ -304,7 +305,7 @@ def test_delete_morador(
     _, _, flat = _create_test_condominio_flat(db)
     morador = _create_test_morador(db, flat.id)
     morador_id = morador.id
-    
+
     r = client.delete(
         f"{settings.API_V1_STR}/moradores/{morador_id}",
         headers=superuser_token_headers,

@@ -19,6 +19,8 @@ import {
   YAxis,
 } from "recharts"
 import { OpenAPI } from "@/client"
+import { ContractorHistoryContent } from "@/components/Admin/ContractorHistoryContent"
+import { TasksBoard } from "@/components/Tasks/TasksBoard"
 import {
   Dialog,
   DialogContent,
@@ -27,7 +29,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { TasksBoard } from "@/components/Tasks/TasksBoard"
 import useAuth, { isLoggedIn } from "@/hooks/useAuth"
 import useCustomToast from "@/hooks/useCustomToast"
 
@@ -333,7 +334,7 @@ const formatFlatNumber = (
   flatNumber?: number | null,
   flatLabel?: string | null,
 ) => {
-  if (flatLabel && flatLabel.trim()) return flatLabel.trim()
+  if (flatLabel?.trim()) return flatLabel.trim()
   if (flatNumber === null || flatNumber === undefined) return ""
   return String(flatNumber)
 }
@@ -453,7 +454,11 @@ const toIsoDateString = (date: Date) => {
 const getWeekStartIso = (value: string | Date) => {
   const date = value instanceof Date ? new Date(value) : new Date(value)
   if (Number.isNaN(date.getTime())) return ""
-  const normalized = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+  const normalized = new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+  )
   const weekday = normalized.getDay()
   const offset = weekday === 0 ? -6 : 1 - weekday
   normalized.setDate(normalized.getDate() + offset)
@@ -609,12 +614,16 @@ const monthMaskFromList = (months: number[]) =>
 
 const monthListFromMask = (mask?: number | null) =>
   monthOptions
-    .filter((option) => Boolean(mask && (mask & (1 << (option.value - 1))) !== 0))
+    .filter((option) =>
+      Boolean(mask && (mask & (1 << (option.value - 1))) !== 0),
+    )
     .map((option) => option.value)
 
 const monthLabelsFromMask = (mask?: number | null) =>
   monthOptions
-    .filter((option) => Boolean(mask && (mask & (1 << (option.value - 1))) !== 0))
+    .filter((option) =>
+      Boolean(mask && (mask & (1 << (option.value - 1))) !== 0),
+    )
     .map((option) => option.label)
 
 const formatReminderSchedule = (reminder: {
@@ -650,6 +659,9 @@ const formatReminderSchedule = (reminder: {
 
 const REMINDS_EXECUTE_DUE_LAST_RUN_KEY = "ohp_reminds_execute_due_last_run_v1"
 const REMINDS_EXECUTE_DUE_COOLDOWN_MS = 60 * 1000
+const CONTRACTOR_HISTORY_EXECUTE_DUE_LAST_RUN_KEY =
+  "ohp_contractor_history_execute_due_last_run_v1"
+const CONTRACTOR_HISTORY_EXECUTE_DUE_COOLDOWN_MS = 60 * 1000
 
 const FIRE_ALARM_ANCHOR_DATE = "2026-02-26"
 const FIRE_ALARM_ANCHOR_REPETITION = 14
@@ -1234,7 +1246,20 @@ const FIRE_ALARM_BUILDINGS: FireAlarmBuildingConfig[] = [
       "071",
       "076",
     ],
-    locations: ["GF | 1-6", "1F | 1-6", "2F | 1-6", "GF | 7-9", "1F | 7-9", "2F | 7-9","GF | 10-12","1F | 10-12","2F | 10-12","GF | 13-16","1F | 13-16","2F | 13-16"],
+    locations: [
+      "GF | 1-6",
+      "1F | 1-6",
+      "2F | 1-6",
+      "GF | 7-9",
+      "1F | 7-9",
+      "2F | 7-9",
+      "GF | 10-12",
+      "1F | 10-12",
+      "2F | 10-12",
+      "GF | 13-16",
+      "1F | 13-16",
+      "2F | 13-16",
+    ],
     anchorCallPoint: "055",
   },
   {
@@ -1473,14 +1498,6 @@ const parseIsoDateToUtc = (isoDate: string) => {
   return Date.UTC(year, month - 1, day)
 }
 
-const formatUtcMsToIsoDate = (utcMs: number) => {
-  const date = new Date(utcMs)
-  const year = date.getUTCFullYear()
-  const month = String(date.getUTCMonth() + 1).padStart(2, "0")
-  const day = String(date.getUTCDate()).padStart(2, "0")
-  return `${year}-${month}-${day}`
-}
-
 const positiveModulo = (value: number, mod: number) =>
   ((value % mod) + mod) % mod
 
@@ -1500,43 +1517,6 @@ const getFireAlarmRepetition = (isoDate: string) => {
   return FIRE_ALARM_ANCHOR_REPETITION + diffWeeks
 }
 
-const snapToFireAlarmCycleDate = (isoDate: string) => {
-  const current = parseIsoDateToUtc(isoDate)
-  const anchor = parseIsoDateToUtc(FIRE_ALARM_ANCHOR_DATE)
-  if (Number.isNaN(current) || Number.isNaN(anchor)) return FIRE_ALARM_ANCHOR_DATE
-  const diffDays = Math.floor((current - anchor) / (24 * 60 * 60 * 1000))
-  const diffWeeks = Math.floor(diffDays / 7)
-  return formatUtcMsToIsoDate(anchor + diffWeeks * 7 * 24 * 60 * 60 * 1000)
-}
-
-const shiftFireAlarmCycleDate = (isoDate: string, weeks: number) => {
-  const current = parseIsoDateToUtc(isoDate)
-  if (Number.isNaN(current)) return FIRE_ALARM_ANCHOR_DATE
-  return formatUtcMsToIsoDate(current + weeks * 7 * 24 * 60 * 60 * 1000)
-}
-
-const snapToMonthDayDate = (isoDate: string, dayOfMonth: number) => {
-  const [yearRaw, monthRaw] = isoDate.split("-")
-  const year = Number(yearRaw)
-  const month = Number(monthRaw)
-  if (!year || !month) return isoDate
-  const day = String(dayOfMonth).padStart(2, "0")
-  return `${year}-${String(month).padStart(2, "0")}-${day}`
-}
-
-const shiftMonthDate = (isoDate: string, months: number, dayOfMonth: number) => {
-  const normalized = snapToMonthDayDate(isoDate, dayOfMonth)
-  const [yearRaw, monthRaw] = normalized.split("-")
-  const year = Number(yearRaw)
-  const month = Number(monthRaw)
-  if (!year || !month) return normalized
-  const base = new Date(Date.UTC(year, month - 1 + months, 1))
-  const nextYear = base.getUTCFullYear()
-  const nextMonth = String(base.getUTCMonth() + 1).padStart(2, "0")
-  const day = String(dayOfMonth).padStart(2, "0")
-  return `${nextYear}-${nextMonth}-${day}`
-}
-
 const getCallPointIndex = (callPoints: string[], anchorCallPoint: string) => {
   const anchorNormalized = normalizeCallPoint(anchorCallPoint)
   const index = callPoints.findIndex(
@@ -1552,10 +1532,15 @@ const getFireAlarmScheduleRowsForDate = (isoDate: string) => {
     const anchorCallPoint =
       FIRE_ALARM_ANCHOR_CALL_POINTS[building.id] || building.anchorCallPoint
     const anchorIndex = getCallPointIndex(building.callPoints, anchorCallPoint)
-    const currentIndex = positiveModulo(anchorIndex + offset, building.callPoints.length)
+    const currentIndex = positiveModulo(
+      anchorIndex + offset,
+      building.callPoints.length,
+    )
     const callPoint = building.callPoints[currentIndex]
     const location =
-      building.locations[positiveModulo(currentIndex, building.locations.length)]
+      building.locations[
+        positiveModulo(currentIndex, building.locations.length)
+      ]
     return {
       buildingId: building.id,
       buildingLabel: building.label,
@@ -1643,6 +1628,7 @@ export const Route = createFileRoute("/dashboard")({
 
 function ClientDashboard() {
   const { user, logout } = useAuth()
+  const queryClient = useQueryClient()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [activeTab, setActiveTab] = useState("overview")
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(
@@ -1652,6 +1638,59 @@ function ClientDashboard() {
       schedule: true,
     },
   )
+
+  useEffect(() => {
+    if (!user || ((user.cargo ?? 0) < 2 && !user.is_superuser)) {
+      return
+    }
+
+    let isCancelled = false
+
+    const executeDueHistoryNotifications = async () => {
+      try {
+        const now = Date.now()
+        const rawLastRun = localStorage.getItem(
+          CONTRACTOR_HISTORY_EXECUTE_DUE_LAST_RUN_KEY,
+        )
+        const lastRun = rawLastRun ? Number(rawLastRun) : 0
+        if (
+          Number.isFinite(lastRun) &&
+          now - lastRun < CONTRACTOR_HISTORY_EXECUTE_DUE_COOLDOWN_MS
+        ) {
+          return
+        }
+        localStorage.setItem(
+          CONTRACTOR_HISTORY_EXECUTE_DUE_LAST_RUN_KEY,
+          String(now),
+        )
+      } catch {
+        // Ignore storage issues and still try the background check below.
+      }
+
+      try {
+        const result = (await apiCall(
+          "/api/v1/contractor-access/history/execute-due",
+          {
+            method: "POST",
+          },
+        )) as { triggered?: number }
+
+        if (!isCancelled && (result.triggered || 0) > 0) {
+          queryClient.invalidateQueries({
+            queryKey: ["contractor-history-records"],
+          })
+        }
+      } catch {
+        // Background notification execution should stay silent on the dashboard.
+      }
+    }
+
+    void executeDueHistoryNotifications()
+
+    return () => {
+      isCancelled = true
+    }
+  }, [queryClient, user])
 
   // Check if the user is manager/admin (role >= 2) for this dashboard
   if (!user || ((user.cargo ?? 0) < 2 && !user.is_superuser)) {
@@ -1721,6 +1760,7 @@ function ClientDashboard() {
     { label: "Reminders", id: "reminds" },
     { label: "Residents", id: "residents" },
     { label: "Contractors", id: "contractors" },
+    { label: "History", id: "history" },
     { label: "Cleaner", id: "cleaner" },
     { label: "Caretaker", id: "caretaker" },
     { label: "Bins", id: "bins" },
@@ -1757,6 +1797,8 @@ function ClientDashboard() {
         return <ResidentsContent />
       case "contractors":
         return <ContractorsContent />
+      case "history":
+        return <ContractorHistoryContent />
       case "tasks":
         return <TasksBoard mode="manager" />
       case "reminds":
@@ -2035,9 +2077,7 @@ function OverviewContent({
               />
             </svg>
           </div>
-          <p className="text-3xl font-bold text-[#55311c]">
-            Add Flat Readings
-          </p>
+          <p className="text-3xl font-bold text-[#55311c]">Add Flat Readings</p>
           <p className="mt-1 text-sm text-[rgba(0,0,0,0.6)]">
             Open the flats readings screen and add new flat readings.
           </p>
@@ -4984,7 +5024,10 @@ function RemindsContent() {
       const now = Date.now()
       const rawLastRun = localStorage.getItem(REMINDS_EXECUTE_DUE_LAST_RUN_KEY)
       const lastRun = rawLastRun ? Number(rawLastRun) : 0
-      if (Number.isFinite(lastRun) && now - lastRun < REMINDS_EXECUTE_DUE_COOLDOWN_MS) {
+      if (
+        Number.isFinite(lastRun) &&
+        now - lastRun < REMINDS_EXECUTE_DUE_COOLDOWN_MS
+      ) {
         return
       }
       localStorage.setItem(REMINDS_EXECUTE_DUE_LAST_RUN_KEY, String(now))
@@ -4992,7 +5035,7 @@ function RemindsContent() {
     } catch {
       executeDueMutation.mutate()
     }
-  }, [])
+  }, [executeDueMutation.mutate])
 
   const createMutation = useMutation({
     mutationFn: (payload: Record<string, unknown>) =>
@@ -5148,8 +5191,7 @@ function RemindsContent() {
           ? weekdayMaskFromList(formData.weekdays)
           : 127,
       month_mask:
-        formData.schedule_unit === "month" &&
-        formData.schedule_mode === "fixed"
+        formData.schedule_unit === "month" && formData.schedule_mode === "fixed"
           ? monthMaskFromList(formData.months)
           : null,
       is_active: formData.is_active,
@@ -5173,7 +5215,8 @@ function RemindsContent() {
     setFormData({
       name: reminder.name || "",
       schedule_unit: (reminder.schedule_unit || "week") as ReminderScheduleUnit,
-      schedule_mode: (reminder.schedule_mode || "fixed") as ReminderScheduleMode,
+      schedule_mode: (reminder.schedule_mode ||
+        "fixed") as ReminderScheduleMode,
       interval_value: String(reminder.interval_value || 1),
       weekdays: weekdayListFromMask(reminder.weekday_mask),
       months: monthListFromMask(reminder.month_mask),
@@ -5402,8 +5445,7 @@ function RemindsContent() {
                     placeholder="Enter the interval"
                   />
                   <p className="mt-1 text-xs text-[rgba(0,0,0,0.65)]">
-                    {formData.schedule_unit === "day" &&
-                      "Runs every N days."}
+                    {formData.schedule_unit === "day" && "Runs every N days."}
                     {formData.schedule_unit === "week" &&
                       "Runs every N weeks on the same weekday the reminder was created."}
                     {formData.schedule_unit === "month" &&
@@ -5414,33 +5456,35 @@ function RemindsContent() {
 
               {formData.schedule_unit === "week" &&
                 formData.schedule_mode === "fixed" && (
-                <div>
-                  <p className="mb-2 text-sm font-semibold text-[#55311c]">
-                    Weekdays
-                  </p>
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                    {weekdayOptions.map((weekday) => {
-                      const selected = formData.weekdays.includes(weekday.value)
-                      return (
-                        <button
-                          key={weekday.value}
-                          type="button"
-                          onClick={() => toggleWeekday(weekday.value)}
-                          className={`rounded border px-3 py-2 text-sm font-semibold transition-all ${
-                            selected
-                              ? "border-[#8c7569] bg-[#8c7569] text-white"
-                              : "border-[#d9d0ca] text-[#55311c] hover:bg-[#f5f1ee]"
-                          }`}
-                        >
-                          {weekday.label}
-                        </button>
-                      )
-                    })}
+                  <div>
+                    <p className="mb-2 text-sm font-semibold text-[#55311c]">
+                      Weekdays
+                    </p>
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                      {weekdayOptions.map((weekday) => {
+                        const selected = formData.weekdays.includes(
+                          weekday.value,
+                        )
+                        return (
+                          <button
+                            key={weekday.value}
+                            type="button"
+                            onClick={() => toggleWeekday(weekday.value)}
+                            className={`rounded border px-3 py-2 text-sm font-semibold transition-all ${
+                              selected
+                                ? "border-[#8c7569] bg-[#8c7569] text-white"
+                                : "border-[#d9d0ca] text-[#55311c] hover:bg-[#f5f1ee]"
+                            }`}
+                          >
+                            {weekday.label}
+                          </button>
+                        )
+                      })}
+                    </div>
+                    <p className="mt-1 text-xs text-[rgba(0,0,0,0.65)]">
+                      Runs every week on the selected weekdays.
+                    </p>
                   </div>
-                  <p className="mt-1 text-xs text-[rgba(0,0,0,0.65)]">
-                    Runs every week on the selected weekdays.
-                  </p>
-                </div>
                 )}
 
               {formData.schedule_unit === "month" &&
@@ -6211,315 +6255,317 @@ function TwilioContent() {
         </div>
       ) : (
         <>
-
-      <div className="grid gap-6 lg:grid-cols-2">
-        <div className="rounded-lg bg-white p-6 shadow-md">
-          <div className="mb-4 flex items-center justify-between">
-            <h3 className="font-['Nunito',sans-serif] text-xl font-bold text-[#55311c]">
-              Buildings
-            </h3>
-            <button
-              type="button"
-              onClick={() => setSelectedBuildingIds([])}
-              className="rounded bg-gray-200 px-3 py-1 text-xs font-semibold text-[#55311c] hover:bg-gray-300"
-            >
-              Clear
-            </button>
-          </div>
-
-          <div className="space-y-2">
-            {buildings.map((building) => {
-              const id = String(building.id)
-              const checked = selectedBuildingIds.includes(id)
-              return (
-                <label
-                  key={id}
-                  className="flex cursor-pointer items-center gap-3 rounded border border-[#e8ddd6] px-3 py-2 hover:bg-[#f9f7f5]"
+          <div className="grid gap-6 lg:grid-cols-2">
+            <div className="rounded-lg bg-white p-6 shadow-md">
+              <div className="mb-4 flex items-center justify-between">
+                <h3 className="font-['Nunito',sans-serif] text-xl font-bold text-[#55311c]">
+                  Buildings
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setSelectedBuildingIds([])}
+                  className="rounded bg-gray-200 px-3 py-1 text-xs font-semibold text-[#55311c] hover:bg-gray-300"
                 >
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => toggleBuilding(id)}
-                    className="h-4 w-4 cursor-pointer"
-                  />
-                  <span className="font-['Nunito',sans-serif] text-[#55311c]">
-                    {building.nome}
-                  </span>
-                </label>
-              )
-            })}
-          </div>
-        </div>
+                  Clear
+                </button>
+              </div>
 
-        <div className="rounded-lg bg-white p-6 shadow-md">
-          <div className="mb-4 flex items-center justify-between gap-2">
-            <div>
-              <h3 className="font-['Nunito',sans-serif] text-xl font-bold text-[#55311c]">
-                Residents
-              </h3>
-              {sendChannel === "sms" && (
-                <p className="text-xs text-[rgba(0,0,0,0.6)]">
-                  Only residents with Twilio SMS enabled are shown for SMS sending.
+              <div className="space-y-2">
+                {buildings.map((building) => {
+                  const id = String(building.id)
+                  const checked = selectedBuildingIds.includes(id)
+                  return (
+                    <label
+                      key={id}
+                      className="flex cursor-pointer items-center gap-3 rounded border border-[#e8ddd6] px-3 py-2 hover:bg-[#f9f7f5]"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleBuilding(id)}
+                        className="h-4 w-4 cursor-pointer"
+                      />
+                      <span className="font-['Nunito',sans-serif] text-[#55311c]">
+                        {building.nome}
+                      </span>
+                    </label>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div className="rounded-lg bg-white p-6 shadow-md">
+              <div className="mb-4 flex items-center justify-between gap-2">
+                <div>
+                  <h3 className="font-['Nunito',sans-serif] text-xl font-bold text-[#55311c]">
+                    Residents
+                  </h3>
+                  {sendChannel === "sms" && (
+                    <p className="text-xs text-[rgba(0,0,0,0.6)]">
+                      Only residents with Twilio SMS enabled are shown for SMS
+                      sending.
+                    </p>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={selectAllFilteredResidents}
+                    className="rounded bg-[#8c7569] px-3 py-1 text-xs font-semibold text-white hover:bg-[#55311c]"
+                  >
+                    Select filtered
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedResidentIds([])}
+                    className="rounded bg-gray-200 px-3 py-1 text-xs font-semibold text-[#55311c] hover:bg-gray-300"
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+
+              <input
+                value={residentSearch}
+                onChange={(e) => setResidentSearch(e.target.value)}
+                placeholder="Search by name, building, flat, phone or email"
+                className="mb-3 w-full rounded border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+              />
+
+              <div className="mb-3 grid gap-2 md:grid-cols-2">
+                <select
+                  value={residentBuildingFilter}
+                  onChange={(e) => setResidentBuildingFilter(e.target.value)}
+                  className="w-full rounded border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                >
+                  <option value="all">All buildings</option>
+                  {buildings
+                    .map((building) => building.nome)
+                    .sort((a, b) => a.localeCompare(b))
+                    .map((buildingName) => (
+                      <option key={buildingName} value={buildingName}>
+                        {buildingName}
+                      </option>
+                    ))}
+                </select>
+
+                <select
+                  value={residentRoleFilter}
+                  onChange={(e) => setResidentRoleFilter(e.target.value)}
+                  className="w-full rounded border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                >
+                  <option value="all">All roles</option>
+                  <option value="0">Owner 1</option>
+                  <option value="1">Owner 2</option>
+                  <option value="2">Tenant</option>
+                  <option value="3">Agent</option>
+                </select>
+              </div>
+
+              <div className="max-h-64 space-y-2 overflow-y-auto pr-2">
+                {filteredResidents.map((morador) => {
+                  const id = String(morador.id)
+                  const checked = selectedResidentIds.includes(id)
+                  return (
+                    <label
+                      key={id}
+                      className="flex cursor-pointer items-center gap-3 rounded border border-[#e8ddd6] px-3 py-2 hover:bg-[#f9f7f5]"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleResident(id)}
+                        className="h-4 w-4 cursor-pointer"
+                      />
+                      <div className="min-w-0">
+                        <p className="truncate font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]">
+                          {morador.nome}
+                        </p>
+                        <p className="truncate text-xs text-[rgba(0,0,0,0.65)]">
+                          {getResidentRoleLabel(morador.cargo)} |{" "}
+                          {morador.building_nome}{" "}
+                          {formatFlatNumber(
+                            morador.flat_numero,
+                            morador.flat_label,
+                          )}{" "}
+                          |{" "}
+                          {sendChannel === "sms"
+                            ? morador.mobile || "no phone"
+                            : morador.email || "no email"}
+                        </p>
+                      </div>
+                    </label>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-lg bg-white p-6 shadow-md">
+            <div className="mb-4 grid gap-3 md:grid-cols-3">
+              <div className="rounded border border-[#e8ddd6] bg-[#f9f7f5] p-3">
+                <p className="text-xs uppercase tracking-wide text-[#8c7569]">
+                  Selected buildings
                 </p>
-              )}
+                <p className="text-2xl font-bold text-[#55311c]">
+                  {selectedBuildingIds.length}
+                </p>
+              </div>
+              <div className="rounded border border-[#e8ddd6] bg-[#f9f7f5] p-3">
+                <p className="text-xs uppercase tracking-wide text-[#8c7569]">
+                  Selected residents
+                </p>
+                <p className="text-2xl font-bold text-[#55311c]">
+                  {selectedResidentIds.length}
+                </p>
+              </div>
+              <div className="rounded border border-[#e8ddd6] bg-[#f9f7f5] p-3">
+                <p className="text-xs uppercase tracking-wide text-[#8c7569]">
+                  Final recipients
+                </p>
+                <p className="text-2xl font-bold text-[#55311c]">
+                  {recipients.length}
+                </p>
+              </div>
             </div>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={selectAllFilteredResidents}
-                className="rounded bg-[#8c7569] px-3 py-1 text-xs font-semibold text-white hover:bg-[#55311c]"
-              >
-                Select filtered
-              </button>
-              <button
-                type="button"
-                onClick={() => setSelectedResidentIds([])}
-                className="rounded bg-gray-200 px-3 py-1 text-xs font-semibold text-[#55311c] hover:bg-gray-300"
-              >
-                Clear
-              </button>
-            </div>
-          </div>
 
-          <input
-            value={residentSearch}
-            onChange={(e) => setResidentSearch(e.target.value)}
-            placeholder="Search by name, building, flat, phone or email"
-            className="mb-3 w-full rounded border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
-          />
-
-          <div className="mb-3 grid gap-2 md:grid-cols-2">
-            <select
-              value={residentBuildingFilter}
-              onChange={(e) => setResidentBuildingFilter(e.target.value)}
-              className="w-full rounded border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
-            >
-              <option value="all">All buildings</option>
-              {buildings
-                .map((building) => building.nome)
-                .sort((a, b) => a.localeCompare(b))
-                .map((buildingName) => (
-                  <option key={buildingName} value={buildingName}>
-                    {buildingName}
-                  </option>
-                ))}
-            </select>
-
-            <select
-              value={residentRoleFilter}
-              onChange={(e) => setResidentRoleFilter(e.target.value)}
-              className="w-full rounded border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
-            >
-              <option value="all">All roles</option>
-              <option value="0">Owner 1</option>
-              <option value="1">Owner 2</option>
-              <option value="2">Tenant</option>
-              <option value="3">Agent</option>
-            </select>
-          </div>
-
-          <div className="max-h-64 space-y-2 overflow-y-auto pr-2">
-            {filteredResidents.map((morador) => {
-              const id = String(morador.id)
-              const checked = selectedResidentIds.includes(id)
-              return (
+            {sendChannel === "email" && (
+              <>
                 <label
-                  key={id}
-                  className="flex cursor-pointer items-center gap-3 rounded border border-[#e8ddd6] px-3 py-2 hover:bg-[#f9f7f5]"
+                  className="mb-1 block text-sm font-semibold text-[#55311c]"
+                  htmlFor="twilio-email-subject"
                 >
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => toggleResident(id)}
-                    className="h-4 w-4 cursor-pointer"
-                  />
-                  <div className="min-w-0">
-                    <p className="truncate font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]">
-                      {morador.nome}
-                    </p>
-                    <p className="truncate text-xs text-[rgba(0,0,0,0.65)]">
-                      {getResidentRoleLabel(morador.cargo)} |{" "}
-                      {morador.building_nome}{" "}
-                      {formatFlatNumber(
-                        morador.flat_numero,
-                        morador.flat_label,
-                      )}{" "}
-                      |{" "}
-                      {sendChannel === "sms"
-                        ? morador.mobile || "no phone"
-                        : morador.email || "no email"}
-                    </p>
-                  </div>
+                  Subject
                 </label>
-              )
-            })}
-          </div>
-        </div>
-      </div>
+                <input
+                  id="twilio-email-subject"
+                  value={emailSubject}
+                  onChange={(e) => setEmailSubject(e.target.value)}
+                  placeholder="Email subject"
+                  className="mb-4 w-full rounded border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                />
+              </>
+            )}
 
-      <div className="rounded-lg bg-white p-6 shadow-md">
-        <div className="mb-4 grid gap-3 md:grid-cols-3">
-          <div className="rounded border border-[#e8ddd6] bg-[#f9f7f5] p-3">
-            <p className="text-xs uppercase tracking-wide text-[#8c7569]">
-              Selected buildings
-            </p>
-            <p className="text-2xl font-bold text-[#55311c]">
-              {selectedBuildingIds.length}
-            </p>
-          </div>
-          <div className="rounded border border-[#e8ddd6] bg-[#f9f7f5] p-3">
-            <p className="text-xs uppercase tracking-wide text-[#8c7569]">
-              Selected residents
-            </p>
-            <p className="text-2xl font-bold text-[#55311c]">
-              {selectedResidentIds.length}
-            </p>
-          </div>
-          <div className="rounded border border-[#e8ddd6] bg-[#f9f7f5] p-3">
-            <p className="text-xs uppercase tracking-wide text-[#8c7569]">
-              Final recipients
-            </p>
-            <p className="text-2xl font-bold text-[#55311c]">
-              {recipients.length}
-            </p>
-          </div>
-        </div>
-
-        {sendChannel === "email" && (
-          <>
             <label
               className="mb-1 block text-sm font-semibold text-[#55311c]"
-              htmlFor="twilio-email-subject"
+              htmlFor="twilio-message-body"
             >
-              Subject
+              {sendChannel === "sms" ? "Message" : "Email body"}
             </label>
-            <input
-              id="twilio-email-subject"
-              value={emailSubject}
-              onChange={(e) => setEmailSubject(e.target.value)}
-              placeholder="Email subject"
-              className="mb-4 w-full rounded border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+            <textarea
+              id="twilio-message-body"
+              value={messageBody}
+              onChange={(e) => setMessageBody(e.target.value)}
+              rows={5}
+              maxLength={sendChannel === "sms" ? 1600 : undefined}
+              placeholder={
+                sendChannel === "sms"
+                  ? "Type your message..."
+                  : "Type your email message..."
+              }
+              className="w-full rounded border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
             />
-          </>
-        )}
-
-        <label
-          className="mb-1 block text-sm font-semibold text-[#55311c]"
-          htmlFor="twilio-message-body"
-        >
-          {sendChannel === "sms" ? "Message" : "Email body"}
-        </label>
-        <textarea
-          id="twilio-message-body"
-          value={messageBody}
-          onChange={(e) => setMessageBody(e.target.value)}
-          rows={5}
-          maxLength={sendChannel === "sms" ? 1600 : undefined}
-          placeholder={
-            sendChannel === "sms"
-              ? "Type your message..."
-              : "Type your email message..."
-          }
-          className="w-full rounded border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
-        />
-        <p className="mt-1 text-xs text-[rgba(0,0,0,0.6)]">
-          {sendChannel === "sms"
-            ? `${messageBody.length}/1600 characters`
-            : `${messageBody.length} characters`}
-        </p>
-
-        {sendChannel === "email" && (
-          <div className="mt-4">
-            <input
-              id="twilio-email-attachments"
-              type="file"
-              multiple
-              onChange={(e) => handleAttachmentSelection(e.target.files)}
-              className="hidden"
-            />
-            <label
-              htmlFor="twilio-email-attachments"
-              className="inline-flex cursor-pointer rounded bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white hover:bg-[#55311c]"
-            >
-              Add files
-            </label>
-            <p className="mt-2 text-xs text-[rgba(0,0,0,0.6)]">
-              Attachments are enabled for email sending.
+            <p className="mt-1 text-xs text-[rgba(0,0,0,0.6)]">
+              {sendChannel === "sms"
+                ? `${messageBody.length}/1600 characters`
+                : `${messageBody.length} characters`}
             </p>
-            {emailAttachments.length > 0 && (
-              <div className="mt-3 space-y-2 rounded border border-[#e8ddd6] bg-[#f9f7f5] p-3">
-                {emailAttachments.map((attachment, index) => (
-                  <div
-                    key={`${attachment.file_name}-${index}`}
-                    className="flex items-center justify-between gap-3 rounded bg-white px-3 py-2"
-                  >
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-[#55311c]">
-                        {attachment.file_name}
-                      </p>
-                      <p className="text-xs text-[rgba(0,0,0,0.6)]">
-                        {attachment.mime_type}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => removeAttachment(attachment.file_name, index)}
-                      className="rounded bg-gray-200 px-3 py-1 text-xs font-semibold text-[#55311c] hover:bg-gray-300"
-                    >
-                      Remove
-                    </button>
+
+            {sendChannel === "email" && (
+              <div className="mt-4">
+                <input
+                  id="twilio-email-attachments"
+                  type="file"
+                  multiple
+                  onChange={(e) => handleAttachmentSelection(e.target.files)}
+                  className="hidden"
+                />
+                <label
+                  htmlFor="twilio-email-attachments"
+                  className="inline-flex cursor-pointer rounded bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white hover:bg-[#55311c]"
+                >
+                  Add files
+                </label>
+                <p className="mt-2 text-xs text-[rgba(0,0,0,0.6)]">
+                  Attachments are enabled for email sending.
+                </p>
+                {emailAttachments.length > 0 && (
+                  <div className="mt-3 space-y-2 rounded border border-[#e8ddd6] bg-[#f9f7f5] p-3">
+                    {emailAttachments.map((attachment, index) => (
+                      <div
+                        key={`${attachment.file_name}-${index}`}
+                        className="flex items-center justify-between gap-3 rounded bg-white px-3 py-2"
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-[#55311c]">
+                            {attachment.file_name}
+                          </p>
+                          <p className="text-xs text-[rgba(0,0,0,0.6)]">
+                            {attachment.mime_type}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            removeAttachment(attachment.file_name, index)
+                          }
+                          className="rounded bg-gray-200 px-3 py-1 text-xs font-semibold text-[#55311c] hover:bg-gray-300"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
                   </div>
-                ))}
+                )}
+              </div>
+            )}
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={sendBulkMessage}
+                disabled={isSending}
+                className="rounded bg-[#8c7569] px-5 py-2 font-semibold text-white transition-all duration-300 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isSending
+                  ? "Sending..."
+                  : sendChannel === "sms"
+                    ? "Send bulk SMS"
+                    : "Send bulk email"}
+              </button>
+              <button
+                type="button"
+                onClick={clearSelections}
+                disabled={isSending}
+                className="rounded bg-gray-200 px-5 py-2 font-semibold text-[#55311c] hover:bg-gray-300 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Clear selection
+              </button>
+            </div>
+
+            {sendReport && (
+              <div className="mt-6 rounded border border-[#e8ddd6] bg-[#f9f7f5] p-4">
+                <h4 className="font-['Nunito',sans-serif] text-lg font-bold text-[#55311c]">
+                  Send result
+                </h4>
+                <p className="mt-1 text-sm text-[rgba(0,0,0,0.7)]">
+                  {sendReport.success} success(es), {sendReport.failed}{" "}
+                  failure(s), {sendReport.skipped} skipped.
+                </p>
+
+                {sendReport.errors.length > 0 && (
+                  <div className="mt-3 max-h-40 overflow-y-auto rounded bg-white p-3">
+                    <ul className="space-y-1 text-xs text-[#55311c]">
+                      {sendReport.errors.map((error, index) => (
+                        <li key={`${error}-${index}`}>- {error}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
             )}
           </div>
-        )}
-
-        <div className="mt-4 flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={sendBulkMessage}
-            disabled={isSending}
-            className="rounded bg-[#8c7569] px-5 py-2 font-semibold text-white transition-all duration-300 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {isSending
-              ? "Sending..."
-              : sendChannel === "sms"
-                ? "Send bulk SMS"
-                : "Send bulk email"}
-          </button>
-          <button
-            type="button"
-            onClick={clearSelections}
-            disabled={isSending}
-            className="rounded bg-gray-200 px-5 py-2 font-semibold text-[#55311c] hover:bg-gray-300 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Clear selection
-          </button>
-        </div>
-
-        {sendReport && (
-          <div className="mt-6 rounded border border-[#e8ddd6] bg-[#f9f7f5] p-4">
-            <h4 className="font-['Nunito',sans-serif] text-lg font-bold text-[#55311c]">
-              Send result
-            </h4>
-            <p className="mt-1 text-sm text-[rgba(0,0,0,0.7)]">
-              {sendReport.success} success(es), {sendReport.failed} failure(s),{" "}
-              {sendReport.skipped} skipped.
-            </p>
-
-            {sendReport.errors.length > 0 && (
-              <div className="mt-3 max-h-40 overflow-y-auto rounded bg-white p-3">
-                <ul className="space-y-1 text-xs text-[#55311c]">
-                  {sendReport.errors.map((error, index) => (
-                    <li key={`${error}-${index}`}>- {error}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
         </>
       )}
     </div>
@@ -7106,7 +7152,8 @@ function CleanerQrCodesContent() {
           QR Code - Cleaner
         </h2>
         <p className="mt-2 text-[rgba(0,0,0,0.7)]">
-          Download one QR code per building to register access in the Cleaner panel.
+          Download one QR code per building to register access in the Cleaner
+          panel.
         </p>
       </div>
 
@@ -7193,9 +7240,8 @@ function ContractorsContent() {
   const [dateFrom, setDateFrom] = useState("")
   const [dateTo, setDateTo] = useState("")
   const [isMediaDialogOpen, setIsMediaDialogOpen] = useState(false)
-  const [selectedVisit, setSelectedVisit] = useState<ContractorVisitAdmin | null>(
-    null,
-  )
+  const [selectedVisit, setSelectedVisit] =
+    useState<ContractorVisitAdmin | null>(null)
   const [mediaForm, setMediaForm] = useState<ContractorMediaFormState>({
     mediaName: "",
     mediaData: null,
@@ -7480,7 +7526,9 @@ function ContractorsContent() {
                           )}
                           <a
                             href={visit.extra_media_data}
-                            download={visit.extra_media_name || "contractor-media"}
+                            download={
+                              visit.extra_media_name || "contractor-media"
+                            }
                             className="text-xs font-semibold text-[#8c7569] underline"
                           >
                             {visit.extra_media_name || "Download media"}
@@ -7644,9 +7692,10 @@ function ContractorQrCodesContent() {
     return window.location.origin
   }, [])
 
-  const [qrItem, setQrItem] = useState<{ dataUrl: string; link: string } | null>(
-    null,
-  )
+  const [qrItem, setQrItem] = useState<{
+    dataUrl: string
+    link: string
+  } | null>(null)
   const [isGenerating, setIsGenerating] = useState(false)
 
   useEffect(() => {
@@ -8161,7 +8210,9 @@ function FireAlarmSchedulePage() {
           JSON.stringify(FIRE_ALARM_INITIAL_LOGS),
         )
         setAllLogs(FIRE_ALARM_INITIAL_LOGS)
-        setRows(FIRE_ALARM_INITIAL_LOGS[selectedDate] || getDefaultFireAlarmRows())
+        setRows(
+          FIRE_ALARM_INITIAL_LOGS[selectedDate] || getDefaultFireAlarmRows(),
+        )
         return
       }
       const parsed = JSON.parse(raw) as FireAlarmLogByDate
@@ -8337,7 +8388,9 @@ function FireAlarmSchedulePage() {
       showSuccessToast("Report sent by email")
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "Failed to send report by email"
+        error instanceof Error
+          ? error.message
+          : "Failed to send report by email"
       showErrorToast(message)
     } finally {
       setIsSendingReport(false)
@@ -9540,11 +9593,18 @@ function BuildingSchedulePage({
       )
     } catch {
       setAllLogs({})
-      setRows(scheduleId === "light" ? normalizeLightScheduleRows(emptyRows) : emptyRows)
+      setRows(
+        scheduleId === "light"
+          ? normalizeLightScheduleRows(emptyRows)
+          : emptyRows,
+      )
     }
   }, [emptyRows, initialLogs, scheduleId, selectedDate, storageKey])
 
-  const buildingRows = useMemo(() => getBuildingsForSchedule(scheduleId), [scheduleId])
+  const buildingRows = useMemo(
+    () => getBuildingsForSchedule(scheduleId),
+    [scheduleId],
+  )
   const historyDates = useMemo(
     () => Object.keys(allLogs).sort((a, b) => b.localeCompare(a)),
     [allLogs],
@@ -9733,7 +9793,9 @@ function BuildingSchedulePage({
       showSuccessToast("Report sent by email")
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "Failed to send report by email"
+        error instanceof Error
+          ? error.message
+          : "Failed to send report by email"
       showErrorToast(message)
     } finally {
       setIsSendingReport(false)
@@ -9745,7 +9807,9 @@ function BuildingSchedulePage({
       <div className="space-y-4">
         <div className="flex items-center justify-between rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
           <div>
-            <h3 className="text-lg font-bold text-[#55311c]">{title} history</h3>
+            <h3 className="text-lg font-bold text-[#55311c]">
+              {title} history
+            </h3>
             <p className="text-sm text-[rgba(0,0,0,0.65)]">
               Choose a saved date to open the record.
             </p>
@@ -9929,109 +9993,68 @@ function BuildingSchedulePage({
         </button>
       </div>
 
-      {usesCalendarDatePicker ? (
-        <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <div>
-              <h4 className="text-sm font-semibold text-[#55311c]">
-                {title} calendar
-              </h4>
-              <p className="text-xs text-[rgba(0,0,0,0.65)]">
-                Green dates already have saved records. {title} checks are saved
-                on day {monthlyDay} of each month.
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => handleShiftCalendarMonth(-1)}
-                className="rounded border border-[#8c7569] px-2 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
-              >
-                Prev month
-              </button>
-              <span className="text-xs font-semibold text-[#55311c]">
-                {calendarMonthLabel}
-              </span>
-              <button
-                type="button"
-                onClick={() => handleShiftCalendarMonth(1)}
-                className="rounded border border-[#8c7569] px-2 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
-              >
-                Next month
-              </button>
-            </div>
-          </div>
-          <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.6)]">
-            {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((weekDay) => (
-              <div key={weekDay}>{weekDay}</div>
-            ))}
-          </div>
-          <div className="mt-1 grid grid-cols-7 gap-1">
-            {calendarDays.map((cell, index) => {
-              if (!cell.isoDate) {
-                return <div key={`empty-${index}`} className="h-8 rounded" />
-              }
-              const isoDate = cell.isoDate
-              const isSelected = isoDate === selectedDate
-              const hasRecord = datesWithLogs.has(isoDate)
-              const canSelect =
-                monthlyDay === null ||
-                isoDate.endsWith(`-${String(monthlyDay).padStart(2, "0")}`)
-              return (
-                <button
-                  key={isoDate}
-                  type="button"
-                  disabled={!canSelect}
-                  onClick={() => setSelectedDate(snapScheduleDate(isoDate))}
-                  className={`h-8 rounded border text-xs font-semibold transition-all duration-200 ${
-                    isSelected
-                      ? "border-[#55311c] bg-[#55311c] text-white"
-                      : hasRecord
-                        ? "border-[#5f9f7d] bg-[#eef7f1] text-[#2f6a4b] hover:bg-[#dff0e6]"
-                        : canSelect
-                          ? "border-[#d9d0ca] bg-white text-[#55311c] hover:bg-[#f0ebe7]"
-                          : "cursor-default border-transparent bg-transparent text-[rgba(85,49,28,0.3)]"
-                  }`}
-                >
-                  {cell.day}
-                </button>
-              )
-            })}
-          </div>
-        </div>
-      ) : (
-        <div className="flex flex-wrap items-end justify-center gap-2 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-3">
-          <button
-            type="button"
-            onClick={() => setSelectedDate((previous) => shiftScheduleDate(previous, -1))}
-            className="rounded-lg border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
-          >
-            Back
-          </button>
+      <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
+        <div className="mb-3 flex items-center justify-between gap-3">
           <div>
-            <label
-              htmlFor={`${idPrefix}-date`}
-              className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
-            >
-              Date
-            </label>
-            <input
-              id={`${idPrefix}-date`}
-              type="date"
-              value={selectedDate}
-              onChange={(event) => setSelectedDate(snapScheduleDate(event.target.value))}
-              className="rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
-            />
+            <h4 className="text-sm font-semibold text-[#55311c]">
+              {title} calendar
+            </h4>
+            <p className="text-xs text-[rgba(0,0,0,0.65)]">
+              Green dates already have saved records.
+            </p>
           </div>
-          <button
-            type="button"
-            onClick={() => setSelectedDate((previous) => shiftScheduleDate(previous, 1))}
-            className="rounded-lg border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
-          >
-            Next
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => handleShiftCalendarMonth(-1)}
+              className="rounded border border-[#8c7569] px-2 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+            >
+              Prev month
+            </button>
+            <span className="text-xs font-semibold text-[#55311c]">
+              {calendarMonthLabel}
+            </span>
+            <button
+              type="button"
+              onClick={() => handleShiftCalendarMonth(1)}
+              className="rounded border border-[#8c7569] px-2 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+            >
+              Next month
+            </button>
+          </div>
         </div>
-      )}
+        <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.6)]">
+          {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((weekDay) => (
+            <div key={weekDay}>{weekDay}</div>
+          ))}
+        </div>
+        <div className="mt-1 grid grid-cols-7 gap-1">
+          {calendarDays.map((cell, index) => {
+            if (!cell.isoDate) {
+              return <div key={`empty-${index}`} className="h-8 rounded" />
+            }
+            const isoDate = cell.isoDate
+            const isSelected = isoDate === selectedDate
+            const hasRecord = datesWithLogs.has(isoDate)
+            return (
+              <button
+                key={isoDate}
+                type="button"
+                onClick={() => setSelectedDate(isoDate)}
+                className={`h-8 rounded border text-xs font-semibold transition-all duration-200 ${
+                  isSelected
+                    ? "border-[#55311c] bg-[#55311c] text-white"
+                    : hasRecord
+                      ? "border-[#5f9f7d] bg-[#eef7f1] text-[#2f6a4b] hover:bg-[#dff0e6]"
+                      : "border-[#d9d0ca] bg-white text-[#55311c] hover:bg-[#f0ebe7]"
+                }`}
+              >
+                {cell.day}
+              </button>
+            )
+          })}
+        </div>
+      </div>
 
       <div className="overflow-x-auto">
         <table className="w-full min-w-[900px] border-collapse">
@@ -10062,7 +10085,10 @@ function BuildingSchedulePage({
                 comment: "",
               }
               return (
-                <tr key={row.buildingId} className="bg-white hover:bg-[#f8f5f3]">
+                <tr
+                  key={row.buildingId}
+                  className="bg-white hover:bg-[#f8f5f3]"
+                >
                   <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
                     {formatDateToGb(selectedDate)}
                   </td>
@@ -10074,7 +10100,11 @@ function BuildingSchedulePage({
                       type="time"
                       value={rowData.time}
                       onChange={(event) =>
-                        handleRowChange(row.buildingId, "time", event.target.value)
+                        handleRowChange(
+                          row.buildingId,
+                          "time",
+                          event.target.value,
+                        )
                       }
                       className="w-full rounded border border-[#d9d0ca] px-2 py-1 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
                     />
@@ -10099,7 +10129,11 @@ function BuildingSchedulePage({
                       value={rowData.comment}
                       disabled={!rowData.actionRequired}
                       onChange={(event) =>
-                        handleRowChange(row.buildingId, "comment", event.target.value)
+                        handleRowChange(
+                          row.buildingId,
+                          "comment",
+                          event.target.value,
+                        )
                       }
                       placeholder={
                         rowData.actionRequired
@@ -10293,19 +10327,20 @@ function CleanerSummary() {
     })
   }, [sessions, buildingMap, getDurationMinutes])
 
-  const { earliestCleanerSessionDate, latestCleanerSessionDate } = useMemo(() => {
-    const sessionDates = enrichedSessions
-      .map((session) =>
-        session.startDate ? toIsoDateString(session.startDate) : null,
-      )
-      .filter((value): value is string => Boolean(value))
-      .sort()
+  const { earliestCleanerSessionDate, latestCleanerSessionDate } =
+    useMemo(() => {
+      const sessionDates = enrichedSessions
+        .map((session) =>
+          session.startDate ? toIsoDateString(session.startDate) : null,
+        )
+        .filter((value): value is string => Boolean(value))
+        .sort()
 
-    return {
-      earliestCleanerSessionDate: sessionDates[0] || "",
-      latestCleanerSessionDate: sessionDates[sessionDates.length - 1] || "",
-    }
-  }, [enrichedSessions])
+      return {
+        earliestCleanerSessionDate: sessionDates[0] || "",
+        latestCleanerSessionDate: sessionDates[sessionDates.length - 1] || "",
+      }
+    }, [enrichedSessions])
 
   const { cleanerDateFrom, cleanerDateTo } = useMemo(() => {
     if (
@@ -10420,7 +10455,10 @@ function CleanerSummary() {
 
       const updates: Promise<unknown>[] = []
 
-      if (editingCleanerRecord.inRecordId && editingCleanerRecord.inOriginalIso) {
+      if (
+        editingCleanerRecord.inRecordId &&
+        editingCleanerRecord.inOriginalIso
+      ) {
         if (!editedCleanerInTimeValue) {
           showErrorToast("Time IN is required")
           return
@@ -10503,7 +10541,9 @@ function CleanerSummary() {
       showSuccessToast("Cleaner record updated successfully")
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "Failed to update cleaner record"
+        error instanceof Error
+          ? error.message
+          : "Failed to update cleaner record"
       showErrorToast(message)
     } finally {
       setIsSavingCleanerRecordEdit(false)
@@ -10533,7 +10573,9 @@ function CleanerSummary() {
       showSuccessToast("Cleaner time out created successfully")
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "Failed to create cleaner time out"
+        error instanceof Error
+          ? error.message
+          : "Failed to create cleaner time out"
       showErrorToast(message)
     } finally {
       setIsCreatingCleanerTimeout(null)
@@ -10586,9 +10628,13 @@ function CleanerSummary() {
                 id="cleaner-building-date-from"
                 type="date"
                 min={earliestCleanerSessionDate || undefined}
-                max={selectedCleanerDateTo || latestCleanerSessionDate || undefined}
+                max={
+                  selectedCleanerDateTo || latestCleanerSessionDate || undefined
+                }
                 value={selectedCleanerDateFrom}
-                onChange={(event) => setSelectedCleanerDateFrom(event.target.value)}
+                onChange={(event) =>
+                  setSelectedCleanerDateFrom(event.target.value)
+                }
                 className="rounded-lg border border-[#d9d0ca] bg-white px-3 py-1 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
               />
             </div>
@@ -10609,7 +10655,9 @@ function CleanerSummary() {
                 }
                 max={latestCleanerSessionDate || undefined}
                 value={selectedCleanerDateTo}
-                onChange={(event) => setSelectedCleanerDateTo(event.target.value)}
+                onChange={(event) =>
+                  setSelectedCleanerDateTo(event.target.value)
+                }
                 className="rounded-lg border border-[#d9d0ca] bg-white px-3 py-1 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
               />
             </div>
@@ -10760,7 +10808,9 @@ function CleanerSummary() {
                             session.outRecord?.data || null,
                           )
                         }
-                        disabled={!session.inRecord?.id && !session.outRecord?.id}
+                        disabled={
+                          !session.inRecord?.id && !session.outRecord?.id
+                        }
                         className="rounded bg-[#8c7569] px-2 py-1 text-xs font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         Edit
@@ -10795,25 +10845,26 @@ function CleanerSummary() {
             </p>
 
             <div className="mt-4 grid gap-4">
-              {editingCleanerRecord.inRecordId && editingCleanerRecord.inOriginalIso && (
-                <div>
-                  <label
-                    className="block text-sm font-semibold text-[#55311c]"
-                    htmlFor="cleaner-edit-time-in"
-                  >
-                    Time IN
-                  </label>
-                  <input
-                    id="cleaner-edit-time-in"
-                    type="time"
-                    value={editedCleanerInTimeValue}
-                    onChange={(event) =>
-                      setEditedCleanerInTimeValue(event.target.value)
-                    }
-                    className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
-                  />
-                </div>
-              )}
+              {editingCleanerRecord.inRecordId &&
+                editingCleanerRecord.inOriginalIso && (
+                  <div>
+                    <label
+                      className="block text-sm font-semibold text-[#55311c]"
+                      htmlFor="cleaner-edit-time-in"
+                    >
+                      Time IN
+                    </label>
+                    <input
+                      id="cleaner-edit-time-in"
+                      type="time"
+                      value={editedCleanerInTimeValue}
+                      onChange={(event) =>
+                        setEditedCleanerInTimeValue(event.target.value)
+                      }
+                      className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                    />
+                  </div>
+                )}
               {editingCleanerRecord.outRecordId &&
                 editingCleanerRecord.outOriginalIso && (
                   <div>
@@ -11339,14 +11390,17 @@ function CaretakerSummary({
   )
   const earliestWeekStart = useMemo(() => {
     const earliestDate = workTimeSessionsGrouped
-      .map((session) => toDateKey(session.inRecord?.data || session.outRecord?.data))
+      .map((session) =>
+        toDateKey(session.inRecord?.data || session.outRecord?.data),
+      )
       .filter(Boolean)
       .sort()[0]
     return earliestDate ? getWeekStartIso(earliestDate) : currentWeekStart
-  }, [currentWeekStart, workTimeSessionsGrouped])
+  }, [currentWeekStart, workTimeSessionsGrouped, toDateKey])
 
   const weekRangeLabel = useMemo(
-    () => `${formatDateToBr(selectedWeekStart)} - ${formatDateToBr(selectedWeekEnd)}`,
+    () =>
+      `${formatDateToBr(selectedWeekStart)} - ${formatDateToBr(selectedWeekEnd)}`,
     [selectedWeekEnd, selectedWeekStart],
   )
 
@@ -11388,7 +11442,12 @@ function CaretakerSummary({
       )
     })
     return Number((totalMinutes / 60).toFixed(2))
-  }, [getDurationMinutes, selectedWeekStart, workTimeSessionsGrouped, toDateKey])
+  }, [
+    getDurationMinutes,
+    selectedWeekStart,
+    workTimeSessionsGrouped,
+    toDateKey,
+  ])
 
   const remainingWeeklyTargetHours = useMemo(
     () => Math.max(20 - workTimeWeekHours, 0),
@@ -11424,7 +11483,9 @@ function CaretakerSummary({
 
   const { earliestBinSessionDate, latestBinSessionDate } = useMemo(() => {
     const dates = binSessionsGrouped
-      .map((session) => toDateKey(session.inRecord?.data || session.outRecord?.data))
+      .map((session) =>
+        toDateKey(session.inRecord?.data || session.outRecord?.data),
+      )
       .filter(Boolean)
       .sort()
 
@@ -11546,8 +11607,16 @@ function CaretakerSummary({
             ),
           )
         : sourceRows
-    return [...filteredRows].sort((a, b) => b.sortTime - a.sortTime).slice(0, 20)
-  }, [activeTab, binHistoryRows, selectedWeekStart, toDateKey, workTimeHistoryRows])
+    return [...filteredRows]
+      .sort((a, b) => b.sortTime - a.sortTime)
+      .slice(0, 20)
+  }, [
+    activeTab,
+    binHistoryRows,
+    selectedWeekStart,
+    toDateKey,
+    workTimeHistoryRows,
+  ])
 
   useEffect(() => {
     if (activeTab !== "summary") return
@@ -11606,7 +11675,10 @@ function CaretakerSummary({
         formatDate(session.inRecord?.data || session.outRecord?.data || null),
         formatTime(session.inRecord?.data || null),
         formatTime(session.outRecord?.data || null),
-        formatUsed(session.inRecord?.data || null, session.outRecord?.data || null),
+        formatUsed(
+          session.inRecord?.data || null,
+          session.outRecord?.data || null,
+        ),
         session.outRecord?.data ? "Closed" : "Open",
       ]
     })
@@ -11727,8 +11799,7 @@ function CaretakerSummary({
       setEditingCaretakerRecord(null)
       showSuccessToast(successMessage)
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : errorFallback
+      const message = error instanceof Error ? error.message : errorFallback
       showErrorToast(message)
     } finally {
       setIsSavingCaretakerRecordEdit(false)
@@ -11777,7 +11848,9 @@ function CaretakerSummary({
                   <button
                     type="button"
                     onClick={() =>
-                      setSelectedWeekStart((current) => addWeeksToIso(current, -1))
+                      setSelectedWeekStart((current) =>
+                        addWeeksToIso(current, -1),
+                      )
                     }
                     disabled={selectedWeekStart <= earliestWeekStart}
                     className="rounded-lg border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-50"
@@ -11790,7 +11863,9 @@ function CaretakerSummary({
                   <button
                     type="button"
                     onClick={() =>
-                      setSelectedWeekStart((current) => addWeeksToIso(current, 1))
+                      setSelectedWeekStart((current) =>
+                        addWeeksToIso(current, 1),
+                      )
                     }
                     disabled={selectedWeekStart >= currentWeekStart}
                     className="rounded-lg border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-50"
@@ -11804,7 +11879,9 @@ function CaretakerSummary({
 
           <div className="mb-6 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
             <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <h4 className="text-sm font-semibold text-[#55311c]">WORK TIME</h4>
+              <h4 className="text-sm font-semibold text-[#55311c]">
+                WORK TIME
+              </h4>
               <div className="flex items-center gap-2">
                 <label
                   htmlFor="caretaker-worktime-day"
@@ -11887,7 +11964,9 @@ function CaretakerSummary({
                   min={earliestBinSessionDate || undefined}
                   max={selectedBinsDateTo || latestBinSessionDate || undefined}
                   value={selectedBinsDateFrom}
-                  onChange={(event) => setSelectedBinsDateFrom(event.target.value)}
+                  onChange={(event) =>
+                    setSelectedBinsDateFrom(event.target.value)
+                  }
                   className="rounded-lg border border-[#d9d0ca] bg-white px-3 py-1 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
                 />
               </div>
@@ -11901,10 +11980,14 @@ function CaretakerSummary({
                 <input
                   id="bins-building-date-to"
                   type="date"
-                  min={selectedBinsDateFrom || earliestBinSessionDate || undefined}
+                  min={
+                    selectedBinsDateFrom || earliestBinSessionDate || undefined
+                  }
                   max={latestBinSessionDate || undefined}
                   value={selectedBinsDateTo}
-                  onChange={(event) => setSelectedBinsDateTo(event.target.value)}
+                  onChange={(event) =>
+                    setSelectedBinsDateTo(event.target.value)
+                  }
                   className="rounded-lg border border-[#d9d0ca] bg-white px-3 py-1 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
                 />
               </div>
@@ -12053,21 +12136,21 @@ function CaretakerSummary({
                     <div className="flex items-center justify-between gap-2">
                       <span>{formatTime(row.outValue)}</span>
                       {row.outValue && row.outRecordId && (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              handleOpenCaretakerRecordEdit(
-                                row.outRecordId,
-                                row.outValue,
-                                "Time OUT",
-                                row.kind,
-                              )
-                            }
-                            className="rounded border border-[#8c7569] px-2 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
-                          >
-                            Edit
-                          </button>
-                        )}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleOpenCaretakerRecordEdit(
+                              row.outRecordId,
+                              row.outValue,
+                              "Time OUT",
+                              row.kind,
+                            )
+                          }
+                          className="rounded border border-[#8c7569] px-2 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+                        >
+                          Edit
+                        </button>
+                      )}
                     </div>
                   </td>
                   <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
@@ -12087,7 +12170,8 @@ function CaretakerSummary({
               Generate work time report
             </h3>
             <p className="mt-1 text-sm text-[rgba(0,0,0,0.7)]">
-              Enter email and optional date range to send the caretaker work time PDF report.
+              Enter email and optional date range to send the caretaker work
+              time PDF report.
             </p>
 
             <div className="mt-4 grid gap-4">
@@ -12680,13 +12764,7 @@ function ResidentsContent() {
   })
 
   const updateReadingSmsMutation = useMutation({
-    mutationFn: async ({
-      id,
-      enabled,
-    }: {
-      id: EntityId
-      enabled: boolean
-    }) => {
+    mutationFn: async ({ id, enabled }: { id: EntityId; enabled: boolean }) => {
       const response = await apiCall(`/api/v1/moradores/${id}`, {
         method: "PATCH",
         body: { receives_flat_reading_sms: enabled },
@@ -12707,13 +12785,7 @@ function ResidentsContent() {
   })
 
   const updateTwilioSmsMutation = useMutation({
-    mutationFn: async ({
-      id,
-      enabled,
-    }: {
-      id: EntityId
-      enabled: boolean
-    }) => {
+    mutationFn: async ({ id, enabled }: { id: EntityId; enabled: boolean }) => {
       const response = await apiCall(`/api/v1/moradores/${id}`, {
         method: "PATCH",
         body: { receives_twilio_sms: enabled },
@@ -12765,7 +12837,8 @@ function ResidentsContent() {
   }
 
   const renderReadingSmsToggle = (morador?: Morador) => {
-    if (!morador) return <span className="text-xs text-[rgba(85,49,28,0.55)]">-</span>
+    if (!morador)
+      return <span className="text-xs text-[rgba(85,49,28,0.55)]">-</span>
     return (
       <label className="mt-2 inline-flex items-center gap-2 text-xs font-semibold text-[#55311c]">
         <input
@@ -12783,7 +12856,8 @@ function ResidentsContent() {
   }
 
   const renderTwilioSmsToggle = (morador?: Morador) => {
-    if (!morador) return <span className="text-xs text-[rgba(85,49,28,0.55)]">-</span>
+    if (!morador)
+      return <span className="text-xs text-[rgba(85,49,28,0.55)]">-</span>
     return (
       <label className="mt-2 inline-flex items-center gap-2 text-xs font-semibold text-[#55311c]">
         <input
@@ -13004,10 +13078,7 @@ function ResidentsContent() {
                             {row.building_nome}
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
-                            {formatFlatNumber(
-                              row.flat_numero,
-                              row.flat_label,
-                            )}
+                            {formatFlatNumber(row.flat_numero, row.flat_label)}
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
                             {renderResidentIdentity(row.owner_1)}
@@ -13217,7 +13288,7 @@ function ResidentsContent() {
             {/* Pagination */}
             <div className="mt-6 flex items-center justify-between">
               <div className="text-sm font-['Nunito',sans-serif] text-[#55311c]">
-                Showing {Math.min(currentPage * pageSize + 1, totalCount)} to {" "}
+                Showing {Math.min(currentPage * pageSize + 1, totalCount)} to{" "}
                 {Math.min((currentPage + 1) * pageSize, totalCount)} of{" "}
                 {totalCount} Residents
               </div>
@@ -13285,12 +13356,14 @@ function AddResidentForm({
     mobile: "",
     cargo: 0,
     receives_flat_reading_sms: true,
-    receives_twilio_sms: true,
+    receives_twilio_sms: false,
     car1: "",
     car2: "",
     flat_id: "",
   })
-  const [activeEditingId, setActiveEditingId] = useState<EntityId | null>(editingId)
+  const [activeEditingId, setActiveEditingId] = useState<EntityId | null>(
+    editingId,
+  )
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [flats, setFlats] = useState<Array<{ id: string; label: string }>>([])
   const flatResidentsPreview = editContext?.flatResidents
@@ -13343,7 +13416,7 @@ function AddResidentForm({
     : Number(formData.cargo) === 0
   const activeEditTitle = activePreviewResident
     ? `Edit ${getResidentRoleEditToken(activePreviewResident.cargo)}`
-    : editContext?.editTitle ?? "Edit resident"
+    : (editContext?.editTitle ?? "Edit resident")
 
   useEffect(() => {
     setActiveEditingId(editingId)

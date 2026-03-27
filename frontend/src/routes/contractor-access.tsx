@@ -110,9 +110,8 @@ function ContractorAccess() {
   const search = Route.useSearch() as z.infer<typeof searchSchema>
   const { condominioId } = search
   const [selectedOperation, setSelectedOperation] = useState<"in" | "out">("in")
-  const [confirmation, setConfirmation] = useState<ContractorConfirmation | null>(
-    null,
-  )
+  const [confirmation, setConfirmation] =
+    useState<ContractorConfirmation | null>(null)
   const [selectedVisitId, setSelectedVisitId] = useState("")
   const [name, setName] = useState("")
   const [company, setCompany] = useState("")
@@ -120,7 +119,10 @@ function ContractorAccess() {
   const [jobDescription, setJobDescription] = useState("")
   const [mobile, setMobile] = useState("")
 
-  const buildingsQuery = useQuery<{ data: ContractorBuilding[]; count: number }>({
+  const buildingsQuery = useQuery<{
+    data: ContractorBuilding[]
+    count: number
+  }>({
     queryKey: ["contractor-buildings", condominioId],
     queryFn: () =>
       publicApiCall("/api/v1/contractor-access/buildings", {
@@ -129,7 +131,10 @@ function ContractorAccess() {
     enabled: Boolean(condominioId),
   })
 
-  const openVisitsQuery = useQuery<{ data: ContractorOpenVisit[]; count: number }>({
+  const openVisitsQuery = useQuery<{
+    data: ContractorOpenVisit[]
+    count: number
+  }>({
     queryKey: ["contractor-open-visits", condominioId],
     queryFn: () =>
       publicApiCall("/api/v1/contractor-access/open", {
@@ -174,13 +179,14 @@ function ContractorAccess() {
       })
     },
     onSuccess: (response) => {
+      const operation = response.out_at ? "out" : "in"
       showSuccessToast("Record confirmed")
       setConfirmation({
-        operation: selectedOperation,
+        operation,
         buildingName: response.building_name,
         doorCode: response.door_code?.trim() || null,
       })
-      if (selectedOperation === "in") {
+      if (operation === "in") {
         setName("")
         setCompany("")
         setBuildingId("")
@@ -189,6 +195,12 @@ function ContractorAccess() {
       } else {
         setSelectedVisitId("")
         void openVisitsQuery.refetch()
+        setTimeout(() => {
+          if (typeof window !== "undefined") {
+            window.close()
+            window.location.href = "about:blank"
+          }
+        }, 5000)
       }
     },
     onError: (error: unknown) => {
@@ -205,6 +217,15 @@ function ContractorAccess() {
           value.trim(),
         )
       : Boolean(selectedVisitId))
+
+  const formatCheckInDate = (value: string) =>
+    new Date(value).toLocaleString("en-GB", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    })
 
   return (
     <div className="min-h-screen bg-[#f5f1ee] px-3 py-6 sm:px-4 sm:py-8">
@@ -226,6 +247,7 @@ function ContractorAccess() {
                 type="button"
                 onClick={() => {
                   setSelectedOperation("in")
+                  setSelectedVisitId("")
                   setConfirmation(null)
                 }}
                 className={`flex-1 rounded-full px-4 py-2 text-sm font-semibold transition-all duration-200 ${
@@ -240,6 +262,7 @@ function ContractorAccess() {
                 type="button"
                 onClick={() => {
                   setSelectedOperation("out")
+                  setSelectedVisitId("")
                   setConfirmation(null)
                 }}
                 className={`flex-1 rounded-full px-4 py-2 text-sm font-semibold transition-all duration-200 ${
@@ -350,7 +373,7 @@ function ContractorAccess() {
                   htmlFor="contractor-open-visit"
                   className="block text-sm font-semibold text-[#55311c]"
                 >
-                  Contractor record
+                  Mobile
                 </label>
                 <select
                   id="contractor-open-visit"
@@ -358,16 +381,10 @@ function ContractorAccess() {
                   onChange={(event) => setSelectedVisitId(event.target.value)}
                   className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
                 >
-                  <option value="">Select a contractor</option>
+                  <option value="">Select a mobile number</option>
                   {openVisitOptions.map((visit) => (
                     <option key={visit.id} value={visit.id}>
-                      {`${visit.mobile} | ${visit.name} | ${visit.company} | ${visit.building_name} | ${new Date(visit.in_at).toLocaleString("en-GB", {
-                        day: "2-digit",
-                        month: "2-digit",
-                        year: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}`}
+                      {visit.mobile}
                     </option>
                   ))}
                 </select>
@@ -388,6 +405,9 @@ function ContractorAccess() {
               {selectedVisit && (
                 <div className="rounded-lg border border-[#e5e0dc] bg-[#f9f7f5] p-4 text-sm text-[#55311c]">
                   <p>
+                    <strong>Mobile:</strong> {selectedVisit.mobile}
+                  </p>
+                  <p>
                     <strong>Name:</strong> {selectedVisit.name}
                   </p>
                   <p>
@@ -397,7 +417,12 @@ function ContractorAccess() {
                     <strong>Building:</strong> {selectedVisit.building_name}
                   </p>
                   <p>
-                    <strong>Job description:</strong> {selectedVisit.job_description}
+                    <strong>Job description:</strong>{" "}
+                    {selectedVisit.job_description}
+                  </p>
+                  <p>
+                    <strong>Check-in:</strong>{" "}
+                    {formatCheckInDate(selectedVisit.in_at)}
                   </p>
                 </div>
               )}
@@ -432,6 +457,11 @@ function ContractorAccess() {
                 ? "The contractor has been checked in successfully."
                 : "The contractor has been checked out successfully."}
             </p>
+            {confirmation.operation === "out" && (
+              <p className="mt-2 text-sm text-[rgba(0,0,0,0.7)]">
+                This page will close in 5 seconds.
+              </p>
+            )}
             {confirmation.operation === "in" && (
               <div className="mt-5 rounded-2xl border border-[#e5e0dc] bg-[#f9f7f5] p-4 text-left">
                 <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#8c7569]">
@@ -456,13 +486,15 @@ function ContractorAccess() {
                 )}
               </div>
             )}
-            <button
-              type="button"
-              onClick={() => setConfirmation(null)}
-              className="mt-6 w-full rounded-lg bg-[#8c7569] px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#55311c]"
-            >
-              Done
-            </button>
+            {confirmation.operation === "in" && (
+              <button
+                type="button"
+                onClick={() => setConfirmation(null)}
+                className="mt-6 w-full rounded-lg bg-[#8c7569] px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#55311c]"
+              >
+                Done
+              </button>
+            )}
           </div>
         </div>
       )}

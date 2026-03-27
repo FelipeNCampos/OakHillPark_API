@@ -309,11 +309,7 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
   const moveTaskToStatus = (task: Task, nextStatus: TaskStatus) => {
     if (task.status === nextStatus || updateStatusMutation.isPending) return
     if (!isManager && task.status === "done") return
-    if (
-      nextStatus === "done" &&
-      !isManager &&
-      task.requires_completion_image
-    ) {
+    if (nextStatus === "done" && !isManager && task.requires_completion_image) {
       openTaskPopup(task.id, { promptCompletionPhoto: true })
       return
     }
@@ -702,10 +698,7 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
                         type="file"
                         accept="image/*"
                         onChange={(e) =>
-                          handleSelectImage(
-                            e.target.files?.[0] || null,
-                            "chat",
-                          )
+                          handleSelectImage(e.target.files?.[0] || null, "chat")
                         }
                         className="hidden"
                       />
@@ -806,4 +799,3 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
     </div>
   )
 }
-

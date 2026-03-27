@@ -90,6 +90,12 @@ class Condominio(SQLModel, table=True):
     contractor_visits: list["ContractorVisit"] = Relationship(
         back_populates="condominio", cascade_delete=True
     )
+    contractor_history_categories: list["ContractorHistoryCategory"] = Relationship(
+        back_populates="condominio", cascade_delete=True
+    )
+    contractor_histories: list["ContractorHistory"] = Relationship(
+        back_populates="condominio", cascade_delete=True
+    )
 
 
 class Building(SQLModel, table=True):
@@ -156,7 +162,7 @@ class Morador(SQLModel, table=True):
     email: EmailStr | None = Field(default=None, max_length=255)
     mobile: str = Field(default="", max_length=20)
     receives_flat_reading_sms: bool = Field(default=False)
-    receives_twilio_sms: bool = Field(default=True)
+    receives_twilio_sms: bool = Field(default=False)
     flat_id: uuid.UUID = Field(
         foreign_key="flat.id", nullable=False, ondelete="CASCADE"
     )
@@ -273,6 +279,71 @@ class ContractorVisit(SQLModel, table=True):
         foreign_key="condominio.id", nullable=False, ondelete="CASCADE"
     )
     condominio: Condominio | None = Relationship(back_populates="contractor_visits")
+    histories: list["ContractorHistory"] = Relationship(
+        back_populates="contractor_visit", cascade_delete=True
+    )
+
+
+class ContractorHistoryCategory(SQLModel, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    name: str = Field(default="", max_length=100, index=True)
+    created_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    updated_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    condominio_id: uuid.UUID = Field(
+        foreign_key="condominio.id", nullable=False, ondelete="CASCADE"
+    )
+    condominio: Condominio | None = Relationship(
+        back_populates="contractor_history_categories"
+    )
+    histories: list["ContractorHistory"] = Relationship(
+        back_populates="category", cascade_delete=True
+    )
+
+
+class ContractorHistory(SQLModel, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    created_new_visit: bool = Field(default=False)
+    next_enabled: bool = Field(default=False)
+    next_interval_unit: str | None = Field(default=None, max_length=10)
+    next_interval_value: int | None = Field(default=None, ge=1)
+    next_job_at: datetime | None = Field(
+        default=None,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    next_notify_at: datetime | None = Field(
+        default=None,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    next_notification_sent_at: datetime | None = Field(
+        default=None,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    created_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    updated_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    condominio_id: uuid.UUID = Field(
+        foreign_key="condominio.id", nullable=False, ondelete="CASCADE"
+    )
+    contractor_visit_id: uuid.UUID = Field(
+        foreign_key="contractorvisit.id", nullable=False, ondelete="CASCADE"
+    )
+    category_id: uuid.UUID = Field(
+        foreign_key="contractorhistorycategory.id", nullable=False, ondelete="CASCADE"
+    )
+    condominio: Condominio | None = Relationship(back_populates="contractor_histories")
+    contractor_visit: ContractorVisit | None = Relationship(back_populates="histories")
+    category: ContractorHistoryCategory | None = Relationship(back_populates="histories")
 
 
 class Task(SQLModel, table=True):
@@ -631,7 +702,7 @@ class MoradorBase(SQLModel):
     email: EmailStr | None = Field(default=None, max_length=255)
     mobile: str = Field(default="", max_length=20)  # Changed to str for phone numbers
     receives_flat_reading_sms: bool = Field(default=False)
-    receives_twilio_sms: bool = Field(default=True)
+    receives_twilio_sms: bool = Field(default=False)
     flat_id: uuid.UUID
 
 
@@ -881,6 +952,73 @@ class ContractorVisitAdminPublic(SQLModel):
 class ContractorVisitsPublic(SQLModel):
     data: list[ContractorVisitAdminPublic]
     count: int
+
+
+class ContractorHistoryCategoryCreate(SQLModel):
+    name: str = Field(min_length=1, max_length=100)
+
+
+class ContractorHistoryCategoryPublic(SQLModel):
+    id: uuid.UUID
+    name: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class ContractorHistoryCategoriesPublic(SQLModel):
+    data: list[ContractorHistoryCategoryPublic]
+    count: int
+
+
+class ContractorHistoryUpsert(SQLModel):
+    category_id: uuid.UUID
+    created_new_visit: bool = False
+    next_enabled: bool = False
+    next_interval_unit: str | None = Field(default=None, max_length=10)
+    next_interval_value: int | None = Field(default=None, ge=1)
+    contractor_visit_id: uuid.UUID | None = None
+    name: str | None = Field(default=None, max_length=255)
+    company: str | None = Field(default=None, max_length=255)
+    building_id: uuid.UUID | None = None
+    job_description: str | None = Field(default=None, max_length=255)
+    mobile: str | None = Field(default=None, max_length=30)
+    in_at: datetime | None = None
+    out_at: datetime | None = None
+
+
+class ContractorHistoryPublic(SQLModel):
+    id: uuid.UUID
+    category_id: uuid.UUID
+    category_name: str
+    contractor_visit_id: uuid.UUID
+    created_new_visit: bool
+    next_enabled: bool
+    next_interval_unit: str | None
+    next_interval_value: int | None
+    next_job_at: datetime | None
+    next_notify_at: datetime | None
+    next_notification_sent_at: datetime | None
+    name: str
+    company: str
+    building_name: str
+    job_description: str
+    mobile: str
+    visit_in_at: datetime
+    visit_out_at: datetime | None
+    history_created_at: datetime
+    history_updated_at: datetime
+    condominio_id: uuid.UUID
+
+
+class ContractorHistoriesPublic(SQLModel):
+    data: list[ContractorHistoryPublic]
+    count: int
+
+
+class ContractorHistoryExecutionSummary(SQLModel):
+    checked: int
+    triggered: int
+    sms_sent: int
 
 
 class ContractorOpenVisitPublic(SQLModel):

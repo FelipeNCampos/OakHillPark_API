@@ -78,7 +78,7 @@ def _ensure_morador_sms_schema(session: Session) -> None:
         session.execute(
             text(
                 "ALTER TABLE morador "
-                "ADD COLUMN receives_twilio_sms BOOLEAN NOT NULL DEFAULT TRUE"
+                "ADD COLUMN receives_twilio_sms BOOLEAN NOT NULL DEFAULT FALSE"
             )
         )
         session.commit()
@@ -260,6 +260,179 @@ def ensure_contractor_visit_schema(session: Session) -> None:
     session.commit()
 
 
+def ensure_contractor_history_schema(session: Session) -> None:
+    bind = session.get_bind()
+    inspector = inspect(bind)
+
+    if not inspector.has_table("contractorhistorycategory"):
+        session.execute(
+            text(
+                """
+                CREATE TABLE contractorhistorycategory (
+                    id UUID PRIMARY KEY,
+                    name VARCHAR(100) NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL,
+                    updated_at TIMESTAMPTZ NOT NULL,
+                    condominio_id UUID NOT NULL REFERENCES condominio (id) ON DELETE CASCADE
+                )
+                """
+            )
+        )
+        session.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_contractorhistorycategory_name "
+                "ON contractorhistorycategory (name)"
+            )
+        )
+        session.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_contractorhistorycategory_condominio_id "
+                "ON contractorhistorycategory (condominio_id)"
+            )
+        )
+        session.commit()
+
+    if inspector.has_table("contractorhistory"):
+        columns = {
+            column["name"] for column in inspector.get_columns("contractorhistory")
+        }
+        if "created_new_visit" not in columns:
+            session.execute(
+                text(
+                    "ALTER TABLE contractorhistory "
+                    "ADD COLUMN created_new_visit BOOLEAN NOT NULL DEFAULT FALSE"
+                )
+            )
+            session.commit()
+        columns = {
+            column["name"] for column in inspector.get_columns("contractorhistory")
+        }
+        if "next_enabled" not in columns:
+            session.execute(
+                text(
+                    "ALTER TABLE contractorhistory "
+                    "ADD COLUMN next_enabled BOOLEAN NOT NULL DEFAULT FALSE"
+                )
+            )
+            session.commit()
+        columns = {
+            column["name"] for column in inspector.get_columns("contractorhistory")
+        }
+        if "next_interval_unit" not in columns:
+            session.execute(
+                text(
+                    "ALTER TABLE contractorhistory "
+                    "ADD COLUMN next_interval_unit VARCHAR(10)"
+                )
+            )
+            session.commit()
+        columns = {
+            column["name"] for column in inspector.get_columns("contractorhistory")
+        }
+        if "next_interval_value" not in columns:
+            session.execute(
+                text(
+                    "ALTER TABLE contractorhistory "
+                    "ADD COLUMN next_interval_value INTEGER"
+                )
+            )
+            session.commit()
+        columns = {
+            column["name"] for column in inspector.get_columns("contractorhistory")
+        }
+        if "next_job_at" not in columns:
+            session.execute(
+                text(
+                    "ALTER TABLE contractorhistory "
+                    "ADD COLUMN next_job_at TIMESTAMPTZ"
+                )
+            )
+            session.commit()
+        columns = {
+            column["name"] for column in inspector.get_columns("contractorhistory")
+        }
+        if "next_notify_at" not in columns:
+            session.execute(
+                text(
+                    "ALTER TABLE contractorhistory "
+                    "ADD COLUMN next_notify_at TIMESTAMPTZ"
+                )
+            )
+            session.commit()
+        columns = {
+            column["name"] for column in inspector.get_columns("contractorhistory")
+        }
+        if "next_notification_sent_at" not in columns:
+            session.execute(
+                text(
+                    "ALTER TABLE contractorhistory "
+                    "ADD COLUMN next_notification_sent_at TIMESTAMPTZ"
+                )
+            )
+            session.commit()
+        session.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_contractorhistory_next_notify_at "
+                "ON contractorhistory (next_notify_at)"
+            )
+        )
+        session.commit()
+        return
+
+    session.execute(
+        text(
+            """
+            CREATE TABLE contractorhistory (
+                id UUID PRIMARY KEY,
+                created_new_visit BOOLEAN NOT NULL DEFAULT FALSE,
+                next_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                next_interval_unit VARCHAR(10),
+                next_interval_value INTEGER,
+                next_job_at TIMESTAMPTZ,
+                next_notify_at TIMESTAMPTZ,
+                next_notification_sent_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL,
+                condominio_id UUID NOT NULL REFERENCES condominio (id) ON DELETE CASCADE,
+                contractor_visit_id UUID NOT NULL REFERENCES contractorvisit (id) ON DELETE CASCADE,
+                category_id UUID NOT NULL REFERENCES contractorhistorycategory (id) ON DELETE CASCADE
+            )
+            """
+        )
+    )
+    session.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_contractorhistory_condominio_id "
+            "ON contractorhistory (condominio_id)"
+        )
+    )
+    session.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_contractorhistory_contractor_visit_id "
+            "ON contractorhistory (contractor_visit_id)"
+        )
+    )
+    session.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_contractorhistory_category_id "
+            "ON contractorhistory (category_id)"
+        )
+    )
+    session.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_contractorhistory_created_at "
+            "ON contractorhistory (created_at)"
+        )
+    )
+    session.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_contractorhistory_next_notify_at "
+            "ON contractorhistory (next_notify_at)"
+        )
+    )
+    session.commit()
+
+
 # make sure all SQLModel models are imported (app.models) before initializing DB
 # otherwise, SQLModel might fail to initialize relationships properly
 # for more details: https://github.com/fastapi/full-stack-fastapi-template/issues/28
@@ -279,6 +452,7 @@ def init_db(session: Session) -> None:
     _ensure_reminder_schedule_schema(session)
     ensure_notification_history_schema(session)
     ensure_contractor_visit_schema(session)
+    ensure_contractor_history_schema(session)
 
     user = session.exec(
         select(User).where(User.email == settings.FIRST_SUPERUSER)

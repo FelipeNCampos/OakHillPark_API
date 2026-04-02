@@ -224,6 +224,35 @@ def update_bin_session(
     )
 
 
+@router.delete(
+    "/sessions/{id}",
+    response_model=Message,
+    dependencies=[Depends(require_cargo(2))],
+)
+def delete_bin_session(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+) -> Message:
+    item = session.get(BinSession, id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Bin session not found")
+
+    building = session.get(Building, item.building_id)
+    if not building:
+        raise HTTPException(status_code=404, detail="Building not found")
+
+    if not current_user.is_superuser and (
+        current_user.condominio_id != building.condominio_id
+    ):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    session.delete(item)
+    session.commit()
+    return Message(message="Bin session deleted successfully")
+
+
 @router.post("/", response_model=Message, status_code=201)
 def create_bin_miss_collection(
     *, session: SessionDep, payload: BinMissCollectionCreate

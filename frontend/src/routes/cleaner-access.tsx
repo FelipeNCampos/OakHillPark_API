@@ -199,9 +199,9 @@ function CleanerAccess() {
   }
 
   return (
-    <div className="min-h-screen bg-[#f5f1ee] px-3 py-6 sm:px-4 sm:py-8">
-      <div className="mx-auto max-w-xl">
-        <div className="rounded-2xl bg-white p-5 shadow-lg sm:p-8">
+    <div className="mobile-page-shell min-h-screen bg-[#f5f1ee] px-3 py-6 sm:px-4 sm:py-8">
+      <div className="mx-auto w-full max-w-xl">
+        <div className="mobile-page-panel rounded-2xl bg-white p-5 shadow-lg sm:p-8">
           <h1 className="mb-2 text-center text-2xl font-bold text-[#55311c]">
             Cleaner Access
           </h1>
@@ -210,7 +210,7 @@ function CleanerAccess() {
           </p>
 
           <div className="space-y-4">
-            <div className="rounded-lg border border-[#e5e0dc] bg-[#f9f7f5] p-4">
+              <div className="rounded-lg border border-[#e5e0dc] bg-[#f9f7f5] p-4 break-words">
               <p className="text-sm font-semibold text-[#55311c]">Building</p>
               <p className="text-lg font-bold text-[#55311c]">
                 {buildingLabel || "Not provided"}

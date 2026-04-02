@@ -1,20 +1,22 @@
 import base64
 import binascii
 import re
-from datetime import date, datetime
+import uuid
+from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from sqlalchemy import or_
 from sqlmodel import func, select
 
 from app.api.deps import CurrentUser, SessionDep
 from app.models import (
+    Building,
     Condominio,
     FireAlarmExternalCertificate,
     FireAlarmExternalCertificateCreate,
     FireAlarmExternalCertificatePublic,
     FireAlarmExternalCertificatesPublic,
+    Message,
     User,
 )
 
@@ -26,7 +28,6 @@ router = APIRouter(
 DATA_URL_PATTERN = re.compile(
     r"^data:(?P<mime>[-\w.+/]+/[-\w.+]+)?;base64,(?P<data>[A-Za-z0-9+/=\s]+)$"
 )
-TIME_PATTERN = re.compile(r"^\d{2}:\d{2}$")
 MAX_MEDIA_BYTES = 10 * 1024 * 1024
 
 
@@ -49,14 +50,15 @@ def _resolve_user_condominio_id(session: SessionDep, user: User):
 
 def _certificate_to_public(
     certificate: FireAlarmExternalCertificate,
+    *,
+    building_name: str | None = None,
 ) -> FireAlarmExternalCertificatePublic:
     return FireAlarmExternalCertificatePublic(
         id=certificate.id,
         condominio_id=certificate.condominio_id,
+        building_id=certificate.building_id,
+        building_name=building_name,
         certificate_date=certificate.certificate_date,
-        certificate_time=certificate.certificate_time,
-        company=certificate.company,
-        professional=certificate.professional,
         media_1_name=certificate.media_1_name,
         media_1_data=certificate.media_1_data,
         media_2_name=certificate.media_2_name,
@@ -96,15 +98,33 @@ def _normalise_media_data(field_name: str, value: str | None) -> str | None:
     return stripped
 
 
-def _normalise_time(value: str) -> str:
-    stripped = value.strip()
-    if not TIME_PATTERN.fullmatch(stripped):
-        raise HTTPException(status_code=400, detail="Time must be in HH:MM format")
-    try:
-        datetime.strptime(stripped, "%H:%M")
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Invalid time value") from exc
-    return stripped
+def _require_building_for_condominio(
+    session: SessionDep,
+    *,
+    condominio_id: uuid.UUID,
+    building_id: uuid.UUID,
+) -> Building:
+    building = session.exec(
+        select(Building).where(
+            Building.id == building_id,
+            Building.condominio_id == condominio_id,
+        )
+    ).first()
+    if not building:
+        raise HTTPException(status_code=404, detail="Building not found")
+    return building
+
+
+def _require_certificate_for_condominio(
+    session: SessionDep,
+    *,
+    condominio_id: uuid.UUID,
+    certificate_id: uuid.UUID,
+) -> FireAlarmExternalCertificate:
+    certificate = session.get(FireAlarmExternalCertificate, certificate_id)
+    if not certificate or certificate.condominio_id != condominio_id:
+        raise HTTPException(status_code=404, detail="Certificate not found")
+    return certificate
 
 
 @router.get("/", response_model=FireAlarmExternalCertificatesPublic)
@@ -128,20 +148,22 @@ def read_fire_alarm_external_certificates(
 
     if search and search.strip():
         query = f"%{search.strip()}%"
-        filters.append(
-            or_(
-                FireAlarmExternalCertificate.company.ilike(query),
-                FireAlarmExternalCertificate.professional.ilike(query),
-            )
-        )
+        filters.append(Building.nome.ilike(query))
 
     if date_from:
         filters.append(FireAlarmExternalCertificate.certificate_date >= date_from)
     if date_to:
         filters.append(FireAlarmExternalCertificate.certificate_date <= date_to)
 
-    count_statement = select(func.count()).select_from(FireAlarmExternalCertificate)
-    statement = select(FireAlarmExternalCertificate)
+    count_statement = (
+        select(func.count())
+        .select_from(FireAlarmExternalCertificate)
+        .join(Building, FireAlarmExternalCertificate.building_id == Building.id, isouter=True)
+    )
+    statement = (
+        select(FireAlarmExternalCertificate, Building)
+        .join(Building, FireAlarmExternalCertificate.building_id == Building.id, isouter=True)
+    )
     for item_filter in filters:
         count_statement = count_statement.where(item_filter)
         statement = statement.where(item_filter)
@@ -151,7 +173,6 @@ def read_fire_alarm_external_certificates(
         statement
         .order_by(
             FireAlarmExternalCertificate.certificate_date.desc(),
-            FireAlarmExternalCertificate.certificate_time.desc(),
             FireAlarmExternalCertificate.created_at.desc(),
         )
         .offset(skip)
@@ -159,7 +180,13 @@ def read_fire_alarm_external_certificates(
     ).all()
 
     return FireAlarmExternalCertificatesPublic(
-        data=[_certificate_to_public(item) for item in certificates],
+        data=[
+            _certificate_to_public(
+                certificate,
+                building_name=building.nome if building else None,
+            )
+            for certificate, building in certificates
+        ],
         count=count,
     )
 
@@ -178,15 +205,21 @@ def create_fire_alarm_external_certificate(
     if not condominio_id:
         raise HTTPException(status_code=400, detail="No condominio configured")
 
+    building = _require_building_for_condominio(
+        session,
+        condominio_id=condominio_id,
+        building_id=payload.building_id,
+    )
     media_1_data = _normalise_media_data("media_1_data", payload.media_1_data)
     media_2_data = _normalise_media_data("media_2_data", payload.media_2_data)
 
     certificate = FireAlarmExternalCertificate(
         condominio_id=condominio_id,
+        building_id=building.id,
         certificate_date=payload.certificate_date,
-        certificate_time=_normalise_time(payload.certificate_time),
-        company=payload.company.strip(),
-        professional=payload.professional.strip(),
+        certificate_time="",
+        company="",
+        professional="",
         media_1_name=_normalise_media_name(payload.media_1_name)
         if media_1_data
         else None,
@@ -200,4 +233,80 @@ def create_fire_alarm_external_certificate(
     session.add(certificate)
     session.commit()
     session.refresh(certificate)
-    return _certificate_to_public(certificate)
+    return _certificate_to_public(certificate, building_name=building.nome)
+
+
+@router.patch(
+    "/{certificate_id}",
+    response_model=FireAlarmExternalCertificatePublic,
+)
+def update_fire_alarm_external_certificate(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    certificate_id: uuid.UUID,
+    payload: FireAlarmExternalCertificateCreate,
+) -> FireAlarmExternalCertificatePublic:
+    if not _is_manager(current_user):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    condominio_id = _resolve_user_condominio_id(session, current_user)
+    if not condominio_id:
+        raise HTTPException(status_code=400, detail="No condominio configured")
+
+    certificate = _require_certificate_for_condominio(
+        session,
+        condominio_id=condominio_id,
+        certificate_id=certificate_id,
+    )
+    building = _require_building_for_condominio(
+        session,
+        condominio_id=condominio_id,
+        building_id=payload.building_id,
+    )
+    media_1_data = _normalise_media_data("media_1_data", payload.media_1_data)
+    media_2_data = _normalise_media_data("media_2_data", payload.media_2_data)
+
+    certificate.building_id = building.id
+    certificate.certificate_date = payload.certificate_date
+    certificate.media_1_name = (
+        _normalise_media_name(payload.media_1_name) if media_1_data else None
+    )
+    certificate.media_1_data = media_1_data
+    certificate.media_2_name = (
+        _normalise_media_name(payload.media_2_name) if media_2_data else None
+    )
+    certificate.media_2_data = media_2_data
+
+    session.add(certificate)
+    session.commit()
+    session.refresh(certificate)
+    return _certificate_to_public(certificate, building_name=building.nome)
+
+
+@router.delete(
+    "/{certificate_id}",
+    response_model=Message,
+)
+def delete_fire_alarm_external_certificate(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    certificate_id: uuid.UUID,
+) -> Message:
+    if not _is_manager(current_user):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    condominio_id = _resolve_user_condominio_id(session, current_user)
+    if not condominio_id:
+        raise HTTPException(status_code=400, detail="No condominio configured")
+
+    certificate = _require_certificate_for_condominio(
+        session,
+        condominio_id=condominio_id,
+        certificate_id=certificate_id,
+    )
+
+    session.delete(certificate)
+    session.commit()
+    return Message(message="Certificate deleted successfully")

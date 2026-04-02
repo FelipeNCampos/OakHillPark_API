@@ -267,6 +267,12 @@ class ContractorVisit(SQLModel, table=True):
     mobile: str = Field(default="", max_length=30)
     extra_media_name: str | None = Field(default=None, max_length=255)
     extra_media_data: str | None = Field(default=None)
+    extra_media_2_name: str | None = Field(default=None, max_length=255)
+    extra_media_2_data: str | None = Field(default=None)
+    extra_media_3_name: str | None = Field(default=None, max_length=255)
+    extra_media_3_data: str | None = Field(default=None)
+    extra_media_4_name: str | None = Field(default=None, max_length=255)
+    extra_media_4_data: str | None = Field(default=None)
     in_at: datetime = Field(
         default_factory=get_datetime_utc,
         sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
@@ -446,6 +452,9 @@ class FireAlarmExternalCertificate(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     condominio_id: uuid.UUID = Field(
         foreign_key="condominio.id", nullable=False, ondelete="CASCADE", index=True
+    )
+    building_id: uuid.UUID | None = Field(
+        default=None, foreign_key="building.id", ondelete="SET NULL", index=True
     )
     certificate_date: date = Field(index=True)
     certificate_time: str = Field(default="", max_length=5)
@@ -933,6 +942,12 @@ class ContractorVisitPublic(SQLModel):
 class ContractorVisitMediaUpdate(SQLModel):
     extra_media_name: str | None = Field(default=None, max_length=255)
     extra_media_data: str | None = None
+    extra_media_2_name: str | None = Field(default=None, max_length=255)
+    extra_media_2_data: str | None = None
+    extra_media_3_name: str | None = Field(default=None, max_length=255)
+    extra_media_3_data: str | None = None
+    extra_media_4_name: str | None = Field(default=None, max_length=255)
+    extra_media_4_data: str | None = None
 
 
 class ContractorVisitAdminPublic(SQLModel):
@@ -944,6 +959,12 @@ class ContractorVisitAdminPublic(SQLModel):
     mobile: str
     extra_media_name: str | None
     extra_media_data: str | None
+    extra_media_2_name: str | None
+    extra_media_2_data: str | None
+    extra_media_3_name: str | None
+    extra_media_3_data: str | None
+    extra_media_4_name: str | None
+    extra_media_4_data: str | None
     in_at: datetime
     out_at: datetime | None
     condominio_id: uuid.UUID
@@ -1037,10 +1058,8 @@ class ContractorOpenVisitsPublic(SQLModel):
 
 
 class FireAlarmExternalCertificateCreate(SQLModel):
+    building_id: uuid.UUID
     certificate_date: date
-    certificate_time: str = Field(min_length=1, max_length=5)
-    company: str = Field(min_length=1, max_length=255)
-    professional: str = Field(min_length=1, max_length=255)
     media_1_name: str | None = Field(default=None, max_length=255)
     media_1_data: str | None = None
     media_2_name: str | None = Field(default=None, max_length=255)
@@ -1050,10 +1069,9 @@ class FireAlarmExternalCertificateCreate(SQLModel):
 class FireAlarmExternalCertificatePublic(SQLModel):
     id: uuid.UUID
     condominio_id: uuid.UUID
+    building_id: uuid.UUID | None
+    building_name: str | None = None
     certificate_date: date
-    certificate_time: str
-    company: str
-    professional: str
     media_1_name: str | None
     media_1_data: str | None
     media_2_name: str | None

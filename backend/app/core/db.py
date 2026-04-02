@@ -178,6 +178,16 @@ def ensure_notification_history_schema(session: Session) -> None:
 
 
 def ensure_contractor_visit_schema(session: Session) -> None:
+    media_columns = (
+        ("extra_media_name", "VARCHAR(255)"),
+        ("extra_media_data", "TEXT"),
+        ("extra_media_2_name", "VARCHAR(255)"),
+        ("extra_media_2_data", "TEXT"),
+        ("extra_media_3_name", "VARCHAR(255)"),
+        ("extra_media_3_data", "TEXT"),
+        ("extra_media_4_name", "VARCHAR(255)"),
+        ("extra_media_4_data", "TEXT"),
+    )
     bind = session.get_bind()
     inspector = inspect(bind)
     if inspector.has_table("contractorvisit"):
@@ -200,23 +210,17 @@ def ensure_contractor_visit_schema(session: Session) -> None:
             )
             session.commit()
         columns = {column["name"] for column in inspector.get_columns("contractorvisit")}
-        if "extra_media_name" not in columns:
+        for column_name, column_type in media_columns:
+            if column_name in columns:
+                continue
             session.execute(
                 text(
                     "ALTER TABLE contractorvisit "
-                    "ADD COLUMN extra_media_name VARCHAR(255)"
+                    f"ADD COLUMN {column_name} {column_type}"
                 )
             )
             session.commit()
-        columns = {column["name"] for column in inspector.get_columns("contractorvisit")}
-        if "extra_media_data" not in columns:
-            session.execute(
-                text(
-                    "ALTER TABLE contractorvisit "
-                    "ADD COLUMN extra_media_data TEXT"
-                )
-            )
-            session.commit()
+            columns = {column["name"] for column in inspector.get_columns("contractorvisit")}
         return
 
     session.execute(
@@ -232,6 +236,12 @@ def ensure_contractor_visit_schema(session: Session) -> None:
                 mobile VARCHAR(30) NOT NULL,
                 extra_media_name VARCHAR(255),
                 extra_media_data TEXT,
+                extra_media_2_name VARCHAR(255),
+                extra_media_2_data TEXT,
+                extra_media_3_name VARCHAR(255),
+                extra_media_3_data TEXT,
+                extra_media_4_name VARCHAR(255),
+                extra_media_4_data TEXT,
                 in_at TIMESTAMPTZ NOT NULL,
                 out_at TIMESTAMPTZ,
                 condominio_id UUID NOT NULL REFERENCES condominio (id) ON DELETE CASCADE

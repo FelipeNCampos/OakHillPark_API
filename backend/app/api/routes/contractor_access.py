@@ -50,14 +50,18 @@ DATA_URL_PATTERN = re.compile(
 E164_PHONE_REGEX = re.compile(r"^\+[1-9]\d{8,19}$")
 MAX_MEDIA_BYTES = 10 * 1024 * 1024
 TEMPORARY_CONTRACTOR_DOOR_CODES = {
-    "Falcon": "FalconCode",
-    "Martlett": "MartlettCode",
-    "Merlin": "MerlinCode",
-    "Northwood": "NorthwoodCode",
-    "Oak Lodge": "OakLodgeCode",
-    "Office": "OfficeCode",
+    "Merlin": "CZ1247",
+    "Northwood": "CX1249",
+    "Oak": "Back Door: CY1285\nBoiler: CZ9612YX",
+    "Oak Lodge": "Back Door: CY1285\nBoiler: CZ9612YX",
 }
 NEXT_INTERVAL_UNITS = {"week", "month"}
+CONTRACTOR_MEDIA_FIELDS = (
+    ("extra_media_name", "extra_media_data"),
+    ("extra_media_2_name", "extra_media_2_data"),
+    ("extra_media_3_name", "extra_media_3_data"),
+    ("extra_media_4_name", "extra_media_4_data"),
+)
 
 
 def _is_manager(user: User) -> bool:
@@ -101,6 +105,12 @@ def _contractor_visit_to_admin_public(
         mobile=item.mobile,
         extra_media_name=item.extra_media_name,
         extra_media_data=item.extra_media_data,
+        extra_media_2_name=item.extra_media_2_name,
+        extra_media_2_data=item.extra_media_2_data,
+        extra_media_3_name=item.extra_media_3_name,
+        extra_media_3_data=item.extra_media_3_data,
+        extra_media_4_name=item.extra_media_4_name,
+        extra_media_4_data=item.extra_media_4_data,
         in_at=item.in_at,
         out_at=item.out_at,
         condominio_id=item.condominio_id,
@@ -165,7 +175,7 @@ def _normalise_media_name(value: str | None) -> str | None:
     return stripped or None
 
 
-def _normalise_media_data(value: str | None) -> str | None:
+def _normalise_media_data(field_name: str, value: str | None) -> str | None:
     if not value:
         return None
     stripped = value.strip()
@@ -174,18 +184,39 @@ def _normalise_media_data(value: str | None) -> str | None:
 
     match = DATA_URL_PATTERN.fullmatch(stripped)
     if not match:
-        raise HTTPException(status_code=422, detail="Invalid extra_media_data")
+        raise HTTPException(status_code=422, detail=f"Invalid {field_name}")
 
     try:
         file_bytes = base64.b64decode(match.group("data"), validate=True)
     except (binascii.Error, ValueError) as exc:
-        raise HTTPException(status_code=422, detail="Invalid extra_media_data") from exc
+        raise HTTPException(status_code=422, detail=f"Invalid {field_name}") from exc
 
     if not file_bytes:
-        raise HTTPException(status_code=422, detail="Empty extra_media_data")
+        raise HTTPException(status_code=422, detail=f"Empty {field_name}")
     if len(file_bytes) > MAX_MEDIA_BYTES:
-        raise HTTPException(status_code=413, detail="extra_media_data is too large")
+        raise HTTPException(status_code=413, detail=f"{field_name} is too large")
     return stripped
+
+
+def _apply_contractor_visit_media_updates(
+    item: ContractorVisit,
+    payload: ContractorVisitMediaUpdate,
+) -> None:
+    for name_field, data_field in CONTRACTOR_MEDIA_FIELDS:
+        if data_field in payload.model_fields_set:
+            media_data = _normalise_media_data(data_field, getattr(payload, data_field))
+            setattr(item, data_field, media_data)
+            if not media_data:
+                setattr(item, name_field, None)
+        if name_field in payload.model_fields_set:
+            media_data = getattr(item, data_field)
+            setattr(
+                item,
+                name_field,
+                _normalise_media_name(getattr(payload, name_field))
+                if media_data
+                else None,
+            )
 
 
 def _require_condominio(session: SessionDep, condominio_id: uuid.UUID) -> Condominio:
@@ -1073,15 +1104,7 @@ def update_contractor_visit_media(
     if not item or item.condominio_id != condominio_id:
         raise HTTPException(status_code=404, detail="Contractor visit not found")
 
-    if (
-        "extra_media_data" in payload.model_fields_set
-        or "extra_media_name" in payload.model_fields_set
-    ):
-        media_data = _normalise_media_data(payload.extra_media_data)
-        item.extra_media_data = media_data
-        item.extra_media_name = (
-            _normalise_media_name(payload.extra_media_name) if media_data else None
-        )
+    _apply_contractor_visit_media_updates(item, payload)
 
     session.add(item)
     session.commit()

@@ -48,6 +48,12 @@ type ContractorConfirmation = {
   doorCode: string | null
 }
 
+const getDoorCodeLines = (value?: string | null) =>
+  value
+    ?.split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean) || []
+
 const isRequestOptions = (params?: ApiParams): params is RequestOptions => {
   if (!params || typeof params !== "object") return false
   return "method" in params || "body" in params
@@ -228,9 +234,9 @@ function ContractorAccess() {
     })
 
   return (
-    <div className="min-h-screen bg-[#f5f1ee] px-3 py-6 sm:px-4 sm:py-8">
-      <div className="mx-auto max-w-xl">
-        <div className="rounded-2xl bg-white p-5 shadow-lg sm:p-8">
+    <div className="mobile-page-shell min-h-screen bg-[#f5f1ee] px-3 py-6 sm:px-4 sm:py-8">
+      <div className="mx-auto w-full max-w-xl">
+        <div className="mobile-page-panel rounded-2xl bg-white p-5 shadow-lg sm:p-8">
           <h1 className="mb-2 text-center text-2xl font-bold text-[#55311c]">
             Contractor Access
           </h1>
@@ -403,7 +409,7 @@ function ContractorAccess() {
               )}
 
               {selectedVisit && (
-                <div className="rounded-lg border border-[#e5e0dc] bg-[#f9f7f5] p-4 text-sm text-[#55311c]">
+                <div className="rounded-lg border border-[#e5e0dc] bg-[#f9f7f5] p-4 text-sm text-[#55311c] break-words">
                   <p>
                     <strong>Mobile:</strong> {selectedVisit.mobile}
                   </p>
@@ -462,7 +468,7 @@ function ContractorAccess() {
                 This page will close in 5 seconds.
               </p>
             )}
-            {confirmation.operation === "in" && (
+            {confirmation.operation === "in" && confirmation.doorCode && (
               <div className="mt-5 rounded-2xl border border-[#e5e0dc] bg-[#f9f7f5] p-4 text-left">
                 <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#8c7569]">
                   Building
@@ -473,17 +479,41 @@ function ContractorAccess() {
                 <p className="mt-4 text-xs font-semibold uppercase tracking-[0.24em] text-[#8c7569]">
                   Door code
                 </p>
-                {confirmation.doorCode ? (
-                  <div className="mt-2 rounded-2xl bg-white px-4 py-4 text-center shadow-sm ring-1 ring-[#e5e0dc]">
-                    <p className="font-mono text-3xl font-bold tracking-[0.32em] text-[#55311c]">
-                      {confirmation.doorCode}
-                    </p>
+                <div className="mt-2 rounded-2xl bg-white px-4 py-4 shadow-sm ring-1 ring-[#e5e0dc]">
+                  <div className="space-y-3">
+                    {getDoorCodeLines(confirmation.doorCode).map((line) => {
+                      const [label, ...codeParts] = line.split(":")
+                      const code = codeParts.join(":").trim()
+                      const hasLabel = Boolean(code)
+
+                      return (
+                        <div
+                          key={line}
+                          className={`${
+                            hasLabel
+                              ? "flex items-center justify-between gap-3 rounded-xl bg-[#f9f7f5] px-3 py-3"
+                              : "text-center"
+                          }`}
+                        >
+                          {hasLabel ? (
+                            <>
+                              <span className="text-sm font-semibold text-[#55311c]">
+                                {label.trim()}
+                              </span>
+                              <span className="font-mono text-lg font-bold tracking-[0.18em] text-[#55311c] sm:text-xl">
+                                {code}
+                              </span>
+                            </>
+                          ) : (
+                            <p className="font-mono text-3xl font-bold tracking-[0.32em] text-[#55311c]">
+                              {line}
+                            </p>
+                          )}
+                        </div>
+                      )
+                    })}
                   </div>
-                ) : (
-                  <p className="mt-2 text-sm text-[rgba(0,0,0,0.65)]">
-                    No door code is configured for this building yet.
-                  </p>
-                )}
+                </div>
               </div>
             )}
             {confirmation.operation === "in" && (

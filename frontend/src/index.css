@@ -112,11 +112,25 @@
 }
 
 @layer base {
+  html,
+  body,
+  #root {
+    width: 100%;
+    max-width: 100%;
+    min-height: 100%;
+  }
+
   * {
     @apply border-border outline-ring/50;
   }
   body {
     @apply bg-background text-foreground;
+  }
+  img,
+  video,
+  canvas,
+  svg {
+    max-width: 100%;
   }
   button,
   [role="button"] {
@@ -125,10 +139,6 @@
 }
 
 @media (max-width: 768px) {
-  body {
-    overflow-x: hidden;
-  }
-
   button,
   [role="button"],
   input,
@@ -137,31 +147,60 @@
     min-height: 42px;
   }
 
-  .dashboard-mobile-root {
+  .dashboard-mobile-root,
+  .mobile-page-shell {
     width: 100%;
-    overflow-x: hidden;
+    max-width: 100%;
   }
 
   .dashboard-mobile-root .mx-auto.max-w-7xl,
-  .dashboard-mobile-root .mx-auto.max-w-5xl {
+  .dashboard-mobile-root .mx-auto.max-w-5xl,
+  .mobile-page-shell .mx-auto.max-w-xl {
     width: 100%;
+    min-width: 0;
+    max-width: 100%;
   }
 
-  .dashboard-mobile-root .overflow-x-auto {
+  .dashboard-mobile-root main,
+  .dashboard-mobile-root main > *,
+  .dashboard-mobile-root .flex-1,
+  .dashboard-mobile-root .mx-auto,
+  .dashboard-mobile-root .grid,
+  .dashboard-mobile-root .rounded-lg,
+  .mobile-page-shell .mobile-page-panel,
+  .mobile-page-shell .rounded-lg,
+  .mobile-page-shell .rounded-2xl {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .dashboard-mobile-root .overflow-x-auto,
+  .mobile-page-shell .overflow-x-auto,
+  #root .overflow-x-auto {
     width: 100%;
     overflow-x: auto;
+    overflow-y: visible;
     -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    touch-action: pan-x pan-y;
+    padding-bottom: 4px;
   }
 
-  .dashboard-mobile-root .overflow-x-auto table {
-    min-width: 680px;
+  .dashboard-mobile-root .overflow-x-auto table,
+  .mobile-page-shell .overflow-x-auto table,
+  #root .overflow-x-auto table {
+    width: max-content;
+    min-width: max(100%, 640px);
   }
 
   .dashboard-mobile-root table th,
   .dashboard-mobile-root table td {
-    white-space: nowrap;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
     padding: 8px 10px;
     font-size: 12px;
+    vertical-align: top;
   }
 
   .dashboard-mobile-root .recharts-responsive-container {
@@ -172,5 +211,21 @@
   .dashboard-mobile-root .grid.lg\:grid-cols-2,
   .dashboard-mobile-root .grid.xl\:grid-cols-3 {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mobile-page-shell .mobile-page-panel {
+    width: 100%;
+    overflow: hidden;
+    border-radius: 1rem;
+    padding: 1rem;
+  }
+
+  .mobile-page-shell h1,
+  .mobile-page-shell h2,
+  .mobile-page-shell p,
+  .mobile-page-shell label,
+  .mobile-page-shell strong,
+  .mobile-page-shell span {
+    overflow-wrap: anywhere;
   }
 }

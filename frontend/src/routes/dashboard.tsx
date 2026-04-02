@@ -183,14 +183,24 @@ interface ContractorVisitAdmin {
   mobile: string
   extra_media_name?: string | null
   extra_media_data?: string | null
+  extra_media_2_name?: string | null
+  extra_media_2_data?: string | null
+  extra_media_3_name?: string | null
+  extra_media_3_data?: string | null
+  extra_media_4_name?: string | null
+  extra_media_4_data?: string | null
   in_at: string
   out_at?: string | null
   condominio_id: EntityId
 }
 
+interface ContractorMediaSlotState {
+  name: string
+  data: string | null
+}
+
 interface ContractorMediaFormState {
-  mediaName: string
-  mediaData: string | null
+  slots: ContractorMediaSlotState[]
 }
 
 type ReminderScheduleUnit = "day" | "week" | "month"
@@ -223,10 +233,9 @@ type FireAlarmLogByDate = Record<string, Record<string, FireAlarmLogRow>>
 interface FireAlarmExternalCertificate {
   id: EntityId
   condominio_id: EntityId
+  building_id?: EntityId | null
+  building_name?: string | null
   certificate_date: string
-  certificate_time: string
-  company: string
-  professional: string
   media_1_name?: string | null
   media_1_data?: string | null
   media_2_name?: string | null
@@ -241,10 +250,8 @@ interface FireAlarmExternalCertificatesResponse {
 }
 
 interface FireAlarmExternalCertificateFormState {
+  buildingId: string
   certificateDate: string
-  certificateTime: string
-  company: string
-  professional: string
   media1Name: string
   media1Data: string | null
   media2Name: string
@@ -666,6 +673,8 @@ const CONTRACTOR_HISTORY_EXECUTE_DUE_COOLDOWN_MS = 60 * 1000
 const FIRE_ALARM_ANCHOR_DATE = "2026-02-26"
 const FIRE_ALARM_ANCHOR_REPETITION = 14
 const FIRE_ALARM_STORAGE_KEY = "ohp_fire_alarm_schedule_v1"
+const FIRE_ALARM_DELETED_DATES_STORAGE_KEY =
+  "ohp_fire_alarm_schedule_deleted_dates_v1"
 const LIFT_SCHEDULE_STORAGE_KEY = "ohp_lift_schedule_v1"
 const LIGHT_SCHEDULE_STORAGE_KEY = "ohp_emergency_light_schedule_v1"
 const FIRE_ALARM_ANCHOR_CALL_POINTS: Record<FireAlarmBuildingId, string> = {
@@ -1445,6 +1454,30 @@ const toTimeInputValue = (dateValue?: string | null) => {
   return `${hours}:${minutes}`
 }
 
+const readDateSetFromStorage = (storageKey: string) => {
+  if (typeof window === "undefined") return new Set<string>()
+
+  try {
+    const raw = localStorage.getItem(storageKey)
+    if (!raw) return new Set<string>()
+
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return new Set<string>()
+
+    return new Set(
+      parsed.filter((value): value is string => typeof value === "string"),
+    )
+  } catch {
+    return new Set<string>()
+  }
+}
+
+const writeDateSetToStorage = (storageKey: string, dates: Iterable<string>) => {
+  if (typeof window === "undefined") return
+
+  localStorage.setItem(storageKey, JSON.stringify([...new Set(dates)].sort()))
+}
+
 const formatDateToGb = (isoDate: string) => {
   const [year, month, day] = isoDate.split("-")
   if (!year || !month || !day) return isoDate
@@ -1477,17 +1510,78 @@ const getDataUrlMimeType = (value?: string | null) => {
 const isPdfDataUrl = (value?: string | null) =>
   getDataUrlMimeType(value) === "application/pdf"
 
+const CONTRACTOR_MEDIA_SLOT_COUNT = 4
+
+const createEmptyContractorMediaSlot = (): ContractorMediaSlotState => ({
+  name: "",
+  data: null,
+})
+
+const getEmptyContractorMediaForm = (): ContractorMediaFormState => ({
+  slots: Array.from({ length: CONTRACTOR_MEDIA_SLOT_COUNT }, () =>
+    createEmptyContractorMediaSlot(),
+  ),
+})
+
+const getContractorVisitMediaSlots = (
+  visit: ContractorVisitAdmin,
+): ContractorMediaSlotState[] => [
+  {
+    name: visit.extra_media_name || "",
+    data: visit.extra_media_data || null,
+  },
+  {
+    name: visit.extra_media_2_name || "",
+    data: visit.extra_media_2_data || null,
+  },
+  {
+    name: visit.extra_media_3_name || "",
+    data: visit.extra_media_3_data || null,
+  },
+  {
+    name: visit.extra_media_4_name || "",
+    data: visit.extra_media_4_data || null,
+  },
+]
+
+const buildContractorMediaPayload = (
+  mediaForm: ContractorMediaFormState,
+): Record<string, string | null> => {
+  const payload: Record<string, string | null> = {}
+
+  mediaForm.slots.forEach((slot, index) => {
+    const slotSuffix = index === 0 ? "" : `_${index + 1}`
+    const fallbackName = `contractor-media-${index + 1}`
+
+    payload[`extra_media${slotSuffix}_name`] = slot.data
+      ? slot.name.trim() || fallbackName
+      : null
+    payload[`extra_media${slotSuffix}_data`] = slot.data || null
+  })
+
+  return payload
+}
+
 const getEmptyFireAlarmExternalCertificateForm =
   (): FireAlarmExternalCertificateFormState => ({
+    buildingId: "",
     certificateDate: toDateInputValue(),
-    certificateTime: "",
-    company: "",
-    professional: "",
     media1Name: "",
     media1Data: null,
     media2Name: "",
     media2Data: null,
   })
+
+const getFireAlarmExternalCertificateFormFromRecord = (
+  certificate: FireAlarmExternalCertificate,
+): FireAlarmExternalCertificateFormState => ({
+  buildingId: certificate.building_id ? String(certificate.building_id) : "",
+  certificateDate: certificate.certificate_date || toDateInputValue(),
+  media1Name: certificate.media_1_name || "",
+  media1Data: certificate.media_1_data || null,
+  media2Name: certificate.media_2_name || "",
+  media2Data: certificate.media_2_data || null,
+})
 
 const parseIsoDateToUtc = (isoDate: string) => {
   const [yearRaw, monthRaw, dayRaw] = isoDate.split("-")
@@ -1817,7 +1911,7 @@ function ClientDashboard() {
   }
 
   return (
-    <div className="dashboard-mobile-root flex min-h-screen bg-[#f5f1ee]">
+    <div className="dashboard-mobile-root flex min-h-screen w-full bg-[#f5f1ee]">
       {/* Sidebar */}
       <aside
         className={`fixed left-0 top-0 h-screen bg-white shadow-lg transition-all duration-300 ease-in-out ${
@@ -1930,7 +2024,7 @@ function ClientDashboard() {
       </aside>
 
       {/* Main Content */}
-      <div className="flex flex-1 flex-col">
+      <div className="flex min-w-0 flex-1 flex-col">
         {/* Header */}
         <header className="bg-white shadow-md">
           <div className="flex flex-wrap items-center justify-between gap-3 px-3 py-3 sm:px-6 sm:py-4">
@@ -1984,7 +2078,7 @@ function ClientDashboard() {
         </header>
 
         {/* Page Content */}
-        <main className="flex-1 overflow-auto px-3 py-4 sm:px-6 sm:py-8">
+        <main className="flex-1 overflow-y-auto px-3 py-4 sm:px-6 sm:py-8">
           {renderContent()}
         </main>
       </div>
@@ -2687,7 +2781,7 @@ function BuildingReadingsTable({
   }
 
   return (
-    <div className="overflow-x-hidden md:overflow-x-auto">
+    <div className="overflow-x-auto">
       {/* Building Header */}
       <div className="relative mb-4 flex items-center justify-between gap-2 rounded-t-lg bg-[#2d8659] p-3 text-white md:p-4">
         {/* Previous Button */}
@@ -4421,7 +4515,7 @@ function FlatReadingsTable({
   }
 
   return (
-    <div className="overflow-x-hidden md:overflow-x-auto">
+    <div className="overflow-x-auto">
       {/* Flat Header */}
       <div className="relative mb-4 flex items-center justify-between gap-2 rounded-t-lg bg-[#2d8659] p-3 text-white md:p-4">
         {/* Previous Button */}
@@ -7242,10 +7336,9 @@ function ContractorsContent() {
   const [isMediaDialogOpen, setIsMediaDialogOpen] = useState(false)
   const [selectedVisit, setSelectedVisit] =
     useState<ContractorVisitAdmin | null>(null)
-  const [mediaForm, setMediaForm] = useState<ContractorMediaFormState>({
-    mediaName: "",
-    mediaData: null,
-  })
+  const [mediaForm, setMediaForm] = useState<ContractorMediaFormState>(
+    getEmptyContractorMediaForm,
+  )
   const deferredSearch = useDeferredValue(search.trim())
 
   const { data, isLoading } = useQuery<ApiListResponse<ContractorVisitAdmin>>({
@@ -7280,7 +7373,7 @@ function ContractorsContent() {
       showSuccessToast("Contractor media updated successfully")
       setIsMediaDialogOpen(false)
       setSelectedVisit(null)
-      setMediaForm({ mediaName: "", mediaData: null })
+      setMediaForm(getEmptyContractorMediaForm())
       queryClient.invalidateQueries({ queryKey: ["contractor-visits"] })
     },
     onError: (error: unknown) => {
@@ -7296,20 +7389,31 @@ function ContractorsContent() {
     setIsMediaDialogOpen(open)
     if (!open) {
       setSelectedVisit(null)
-      setMediaForm({ mediaName: "", mediaData: null })
+      setMediaForm(getEmptyContractorMediaForm())
     }
   }
 
   const handleOpenMediaDialog = (visit: ContractorVisitAdmin) => {
     setSelectedVisit(visit)
     setMediaForm({
-      mediaName: visit.extra_media_name || "",
-      mediaData: visit.extra_media_data || null,
+      slots: getContractorVisitMediaSlots(visit),
     })
     setIsMediaDialogOpen(true)
   }
 
+  const updateMediaSlot = (
+    slotIndex: number,
+    updater: (slot: ContractorMediaSlotState) => ContractorMediaSlotState,
+  ) => {
+    setMediaForm((previous) => ({
+      slots: previous.slots.map((slot, index) =>
+        index === slotIndex ? updater(slot) : slot,
+      ),
+    }))
+  }
+
   const handleMediaFileChange = async (
+    slotIndex: number,
     event: React.ChangeEvent<HTMLInputElement>,
   ) => {
     const file = event.target.files?.[0]
@@ -7317,10 +7421,10 @@ function ContractorsContent() {
 
     try {
       const dataUrl = await readFileAsDataUrl(file)
-      setMediaForm({
-        mediaName: file.name,
-        mediaData: dataUrl,
-      })
+      updateMediaSlot(slotIndex, () => ({
+        name: file.name,
+        data: dataUrl,
+      }))
     } catch (error) {
       showErrorToast(
         error instanceof Error ? error.message : "Could not read media",
@@ -7335,12 +7439,7 @@ function ContractorsContent() {
 
     contractorMediaMutation.mutate({
       id: selectedVisit.id,
-      payload: {
-        extra_media_name: mediaForm.mediaData
-          ? mediaForm.mediaName.trim() || "contractor-media"
-          : null,
-        extra_media_data: mediaForm.mediaData || null,
-      },
+      payload: buildContractorMediaPayload(mediaForm),
     })
   }
 
@@ -7370,8 +7469,8 @@ function ContractorsContent() {
               Contractors
             </h2>
             <p className="mt-1 text-sm text-[rgba(0,0,0,0.7)]">
-              Review contractor check-in records and attach one extra media file
-              for internal follow-up.
+              Review contractor check-in records and attach up to 4 internal
+              media files for follow-up.
             </p>
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -7459,7 +7558,7 @@ function ContractorsContent() {
                   Mobile
                 </th>
                 <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
-                  Photo
+                  Media
                 </th>
                 <th className="border border-[#736055] px-3 py-2 text-center text-sm font-semibold text-white">
                   Action
@@ -7488,82 +7587,100 @@ function ContractorsContent() {
                 </tr>
               )}
               {!isLoading &&
-                visits.map((visit) => (
-                  <tr key={visit.id} className="bg-white hover:bg-[#f8f5f3]">
-                    <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
-                      {formatDate(visit.in_at)}
-                    </td>
-                    <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
-                      {formatTime(visit.in_at)}
-                    </td>
-                    <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
-                      {formatTime(visit.out_at)}
-                    </td>
-                    <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
-                      {visit.name}
-                    </td>
-                    <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
-                      {visit.company}
-                    </td>
-                    <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
-                      {visit.building_name}
-                    </td>
-                    <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
-                      {visit.job_description}
-                    </td>
-                    <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
-                      {visit.mobile}
-                    </td>
-                    <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
-                      {visit.extra_media_data ? (
-                        <div className="flex flex-col gap-2">
-                          {isImageDataUrl(visit.extra_media_data) && (
-                            <img
-                              src={visit.extra_media_data}
-                              alt={visit.extra_media_name || "Contractor media"}
-                              className="h-16 w-16 rounded border border-[#d9d0ca] object-cover"
-                            />
-                          )}
-                          <a
-                            href={visit.extra_media_data}
-                            download={
-                              visit.extra_media_name || "contractor-media"
-                            }
-                            className="text-xs font-semibold text-[#8c7569] underline"
-                          >
-                            {visit.extra_media_name || "Download media"}
-                          </a>
-                        </div>
-                      ) : (
-                        <span className="text-xs text-[rgba(0,0,0,0.55)]">
-                          No media
-                        </span>
-                      )}
-                    </td>
-                    <td className="border border-[#e5e0dc] px-3 py-2 text-center text-sm">
-                      <button
-                        type="button"
-                        onClick={() => handleOpenMediaDialog(visit)}
-                        className="rounded border border-[#8c7569] px-3 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
-                      >
-                        {visit.extra_media_data ? "Edit media" : "Add media"}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                visits.map((visit) => {
+                  const mediaSlots = getContractorVisitMediaSlots(visit)
+                    .map((slot, index) => ({
+                      ...slot,
+                      slotNumber: index + 1,
+                    }))
+                    .filter((slot) => slot.data)
+                  const hasMedia = mediaSlots.length > 0
+
+                  return (
+                    <tr key={visit.id} className="bg-white hover:bg-[#f8f5f3]">
+                      <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                        {formatDate(visit.in_at)}
+                      </td>
+                      <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                        {formatTime(visit.in_at)}
+                      </td>
+                      <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                        {formatTime(visit.out_at)}
+                      </td>
+                      <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                        {visit.name}
+                      </td>
+                      <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                        {visit.company}
+                      </td>
+                      <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                        {visit.building_name}
+                      </td>
+                      <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                        {visit.job_description}
+                      </td>
+                      <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                        {visit.mobile}
+                      </td>
+                      <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                        {hasMedia ? (
+                          <div className="grid max-w-[20rem] grid-cols-1 gap-2 sm:grid-cols-2">
+                            {mediaSlots.map((slot) => (
+                              <div
+                                key={`${visit.id}-media-${slot.slotNumber}`}
+                                className="rounded border border-[#e5e0dc] bg-[#faf8f6] p-2"
+                              >
+                                <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.7)]">
+                                  Media {slot.slotNumber}
+                                </p>
+                                {isImageDataUrl(slot.data) && (
+                                  <img
+                                    src={slot.data ?? undefined}
+                                    alt={slot.name || "Contractor media"}
+                                    className="mb-2 h-16 w-16 rounded border border-[#d9d0ca] object-cover"
+                                  />
+                                )}
+                                <a
+                                  href={slot.data ?? undefined}
+                                  download={slot.name || `contractor-media-${slot.slotNumber}`}
+                                  className="break-words text-xs font-semibold text-[#8c7569] underline"
+                                >
+                                  {slot.name || `Download media ${slot.slotNumber}`}
+                                </a>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-[rgba(0,0,0,0.55)]">
+                            No media
+                          </span>
+                        )}
+                      </td>
+                      <td className="border border-[#e5e0dc] px-3 py-2 text-center text-sm">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenMediaDialog(visit)}
+                          className="rounded border border-[#8c7569] px-3 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+                        >
+                          {hasMedia ? "Edit media" : "Add media"}
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
             </tbody>
           </table>
         </div>
       </div>
 
       <Dialog open={isMediaDialogOpen} onOpenChange={handleMediaDialogChange}>
-        <DialogContent className="border-[#e5e0dc] bg-white text-[#55311c] sm:max-w-2xl">
+        <DialogContent className="border-[#e5e0dc] bg-white text-[#55311c] sm:max-w-4xl">
           <DialogHeader>
             <DialogTitle className="text-[#55311c]">
-              Contractor extra media
+              Contractor media
             </DialogTitle>
             <DialogDescription className="text-[rgba(0,0,0,0.7)]">
-              Attach one internal media file to this contractor record.
+              Attach up to 4 internal media files to this contractor record.
             </DialogDescription>
           </DialogHeader>
 
@@ -7584,80 +7701,103 @@ function ContractorsContent() {
                 </p>
               </div>
 
-              <div>
-                <label
-                  htmlFor="contractor-extra-media-name"
-                  className="mb-1 block text-sm font-semibold text-[#55311c]"
-                >
-                  Media name
-                </label>
-                <input
-                  id="contractor-extra-media-name"
-                  type="text"
-                  value={mediaForm.mediaName}
-                  onChange={(event) =>
-                    setMediaForm((previous) => ({
-                      ...previous,
-                      mediaName: event.target.value,
-                    }))
-                  }
-                  placeholder="Enter a media name"
-                  className="w-full rounded border border-[#d9d0ca] bg-white px-3 py-2 text-[#55311c] focus:border-[#8c7569] focus:outline-none"
-                />
-              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                {mediaForm.slots.map((slot, slotIndex) => (
+                  <div
+                    key={`contractor-media-slot-${slotIndex + 1}`}
+                    className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4"
+                  >
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <p className="text-sm font-semibold text-[#55311c]">
+                        Media {slotIndex + 1}
+                      </p>
+                      {slot.data && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateMediaSlot(slotIndex, () =>
+                              createEmptyContractorMediaSlot(),
+                            )
+                          }
+                          className="rounded border border-[#d9d0ca] px-3 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+                        >
+                          Remove media
+                        </button>
+                      )}
+                    </div>
 
-              <div>
-                <label
-                  htmlFor="contractor-extra-media-file"
-                  className="mb-1 block text-sm font-semibold text-[#55311c]"
-                >
-                  Media file
-                </label>
-                <input
-                  id="contractor-extra-media-file"
-                  type="file"
-                  onChange={handleMediaFileChange}
-                  className="block w-full text-sm text-[#55311c] file:mr-4 file:rounded file:border-0 file:bg-[#8c7569] file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-[#55311c]"
-                />
-              </div>
+                    <div className="space-y-3">
+                      <div>
+                        <label
+                          htmlFor={`contractor-extra-media-name-${slotIndex + 1}`}
+                          className="mb-1 block text-sm font-semibold text-[#55311c]"
+                        >
+                          Media name
+                        </label>
+                        <input
+                          id={`contractor-extra-media-name-${slotIndex + 1}`}
+                          type="text"
+                          value={slot.name}
+                          onChange={(event) =>
+                            updateMediaSlot(slotIndex, (previous) => ({
+                              ...previous,
+                              name: event.target.value,
+                            }))
+                          }
+                          placeholder={`Enter a media name for slot ${slotIndex + 1}`}
+                          className="w-full rounded border border-[#d9d0ca] bg-white px-3 py-2 text-[#55311c] focus:border-[#8c7569] focus:outline-none"
+                        />
+                      </div>
 
-              {mediaForm.mediaData && (
-                <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
-                  <div className="mb-3 flex items-center justify-between gap-3">
-                    <p className="text-sm font-semibold text-[#55311c]">
-                      Current media preview
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setMediaForm({
-                          mediaName: "",
-                          mediaData: null,
-                        })
-                      }
-                      className="rounded border border-[#d9d0ca] px-3 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
-                    >
-                      Remove media
-                    </button>
+                      <div>
+                        <label
+                          htmlFor={`contractor-extra-media-file-${slotIndex + 1}`}
+                          className="mb-1 block text-sm font-semibold text-[#55311c]"
+                        >
+                          Media file
+                        </label>
+                        <input
+                          id={`contractor-extra-media-file-${slotIndex + 1}`}
+                          type="file"
+                          onChange={(event) =>
+                            handleMediaFileChange(slotIndex, event)
+                          }
+                          className="block w-full text-sm text-[#55311c] file:mr-4 file:rounded file:border-0 file:bg-[#8c7569] file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-[#55311c]"
+                        />
+                      </div>
+
+                      {slot.data ? (
+                        <div className="rounded border border-[#e5e0dc] bg-white p-3">
+                          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.7)]">
+                            Current media preview
+                          </p>
+                          {isImageDataUrl(slot.data) ? (
+                            <img
+                              src={slot.data}
+                              alt={slot.name || `Contractor media ${slotIndex + 1}`}
+                              className="max-h-56 rounded border border-[#d9d0ca] object-contain"
+                            />
+                          ) : (
+                            <a
+                              href={slot.data}
+                              download={
+                                slot.name || `contractor-media-${slotIndex + 1}`
+                              }
+                              className="text-sm font-semibold text-[#8c7569] underline"
+                            >
+                              Download current media
+                            </a>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-[rgba(0,0,0,0.55)]">
+                          No media selected for this slot.
+                        </p>
+                      )}
+                    </div>
                   </div>
-
-                  {isImageDataUrl(mediaForm.mediaData) ? (
-                    <img
-                      src={mediaForm.mediaData}
-                      alt={mediaForm.mediaName || "Contractor media"}
-                      className="max-h-72 rounded border border-[#d9d0ca] object-contain"
-                    />
-                  ) : (
-                    <a
-                      href={mediaForm.mediaData}
-                      download={mediaForm.mediaName || "contractor-media"}
-                      className="text-sm font-semibold text-[#8c7569] underline"
-                    >
-                      Download current media
-                    </a>
-                  )}
-                </div>
-              )}
+                ))}
+              </div>
             </div>
           )}
 
@@ -8193,6 +8333,14 @@ function FireAlarmSchedulePage() {
   const [certificateDateFrom, setCertificateDateFrom] = useState("")
   const [certificateDateTo, setCertificateDateTo] = useState("")
   const [isCertificateDialogOpen, setIsCertificateDialogOpen] = useState(false)
+  const [deletingHistoryDate, setDeletingHistoryDate] = useState<string | null>(
+    null,
+  )
+  const [editingCertificate, setEditingCertificate] =
+    useState<FireAlarmExternalCertificate | null>(null)
+  const [deletingCertificateId, setDeletingCertificateId] = useState<
+    EntityId | null
+  >(null)
   const [certificatePreview, setCertificatePreview] =
     useState<CertificateMediaPreviewState | null>(null)
   const [certificateForm, setCertificateForm] =
@@ -8200,26 +8348,35 @@ function FireAlarmSchedulePage() {
       getEmptyFireAlarmExternalCertificateForm,
     )
   const deferredCertificateSearch = useDeferredValue(certificateSearch.trim())
+  const isEditingCertificate = Boolean(editingCertificate)
 
   useEffect(() => {
     try {
       const raw = localStorage.getItem(FIRE_ALARM_STORAGE_KEY)
+      const deletedDates = readDateSetFromStorage(
+        FIRE_ALARM_DELETED_DATES_STORAGE_KEY,
+      )
       if (!raw) {
-        localStorage.setItem(
-          FIRE_ALARM_STORAGE_KEY,
-          JSON.stringify(FIRE_ALARM_INITIAL_LOGS),
+        const initialLogs = Object.fromEntries(
+          Object.entries(FIRE_ALARM_INITIAL_LOGS).filter(
+            ([date]) => !deletedDates.has(date),
+          ),
         )
-        setAllLogs(FIRE_ALARM_INITIAL_LOGS)
+        localStorage.setItem(FIRE_ALARM_STORAGE_KEY, JSON.stringify(initialLogs))
+        setAllLogs(initialLogs)
         setRows(
-          FIRE_ALARM_INITIAL_LOGS[selectedDate] || getDefaultFireAlarmRows(),
+          initialLogs[selectedDate] || getDefaultFireAlarmRows(),
         )
         return
       }
       const parsed = JSON.parse(raw) as FireAlarmLogByDate
       const merged = mergeFireAlarmLogsWithInitialSeed(parsed)
-      localStorage.setItem(FIRE_ALARM_STORAGE_KEY, JSON.stringify(merged))
-      setAllLogs(merged)
-      setRows(merged[selectedDate] || getDefaultFireAlarmRows())
+      const filteredLogs = Object.fromEntries(
+        Object.entries(merged).filter(([date]) => !deletedDates.has(date)),
+      ) as FireAlarmLogByDate
+      localStorage.setItem(FIRE_ALARM_STORAGE_KEY, JSON.stringify(filteredLogs))
+      setAllLogs(filteredLogs)
+      setRows(filteredLogs[selectedDate] || getDefaultFireAlarmRows())
     } catch {
       setAllLogs({})
       setRows(getDefaultFireAlarmRows())
@@ -8419,12 +8576,25 @@ function FireAlarmSchedulePage() {
     placeholderData: keepPreviousData,
   })
 
+  const { data: certificateBuildingsData } = useQuery<ApiListResponse<Building>>({
+    queryKey: ["buildings", "fire-alarm-certificates"],
+    queryFn: () => apiCall("/api/v1/buildings/condominio"),
+    enabled: activeView === "certificates" || isCertificateDialogOpen,
+  })
+
+  const buildExternalCertificatePayload = () => ({
+    building_id: certificateForm.buildingId,
+    certificate_date: certificateForm.certificateDate,
+    media_1_name: certificateForm.media1Name || null,
+    media_1_data: certificateForm.media1Data,
+    media_2_name: certificateForm.media2Name || null,
+    media_2_data: certificateForm.media2Data,
+  })
+
   const createExternalCertificateMutation = useMutation({
     mutationFn: (payload: {
+      building_id: string
       certificate_date: string
-      certificate_time: string
-      company: string
-      professional: string
       media_1_name?: string | null
       media_1_data?: string | null
       media_2_name?: string | null
@@ -8435,7 +8605,8 @@ function FireAlarmSchedulePage() {
         body: payload,
       }),
     onSuccess: () => {
-      showSuccessToast("External certificate saved")
+      showSuccessToast("Certificate saved")
+      setEditingCertificate(null)
       setIsCertificateDialogOpen(false)
       setCertificateForm(getEmptyFireAlarmExternalCertificateForm())
       queryClient.invalidateQueries({
@@ -8446,20 +8617,99 @@ function FireAlarmSchedulePage() {
       showErrorToast(
         error instanceof Error
           ? error.message
-          : "Could not save the external certificate",
+          : "Could not save the certificate",
       )
+    },
+  })
+
+  const updateExternalCertificateMutation = useMutation({
+    mutationFn: ({
+      id,
+      payload,
+    }: {
+      id: EntityId
+      payload: {
+        building_id: string
+        certificate_date: string
+        media_1_name?: string | null
+        media_1_data?: string | null
+        media_2_name?: string | null
+        media_2_data?: string | null
+      }
+    }) =>
+      apiCall(`/api/v1/fire-alarm-external-certificates/${id}`, {
+        method: "PATCH",
+        body: payload,
+      }),
+    onSuccess: () => {
+      showSuccessToast("Certificate updated")
+      setEditingCertificate(null)
+      setIsCertificateDialogOpen(false)
+      setCertificateForm(getEmptyFireAlarmExternalCertificateForm())
+      queryClient.invalidateQueries({
+        queryKey: ["fire-alarm-external-certificates"],
+      })
+    },
+    onError: (error: unknown) => {
+      showErrorToast(
+        error instanceof Error
+          ? error.message
+          : "Could not update the certificate",
+      )
+    },
+  })
+
+  const deleteExternalCertificateMutation = useMutation({
+    mutationFn: (id: EntityId) =>
+      apiCall(`/api/v1/fire-alarm-external-certificates/${id}`, {
+        method: "DELETE",
+      }),
+    onSuccess: () => {
+      showSuccessToast("Certificate deleted")
+      queryClient.invalidateQueries({
+        queryKey: ["fire-alarm-external-certificates"],
+      })
+    },
+    onError: (error: unknown) => {
+      showErrorToast(
+        error instanceof Error
+          ? error.message
+          : "Could not delete the certificate",
+      )
+    },
+    onSettled: () => {
+      setDeletingCertificateId(null)
     },
   })
 
   const externalCertificates = externalCertificatesData?.data || []
   const externalCertificatesCount =
     externalCertificatesData?.count || externalCertificates.length
+  const certificateBuildings = (certificateBuildingsData?.data || []) as Building[]
+  const isSavingCertificate =
+    createExternalCertificateMutation.isPending ||
+    updateExternalCertificateMutation.isPending
 
   const handleCertificateDialogChange = (open: boolean) => {
     setIsCertificateDialogOpen(open)
     if (!open) {
+      setEditingCertificate(null)
       setCertificateForm(getEmptyFireAlarmExternalCertificateForm())
     }
+  }
+
+  const handleOpenCreateCertificateDialog = () => {
+    setEditingCertificate(null)
+    setCertificateForm(getEmptyFireAlarmExternalCertificateForm())
+    setIsCertificateDialogOpen(true)
+  }
+
+  const handleEditExternalCertificate = (
+    certificate: FireAlarmExternalCertificate,
+  ) => {
+    setEditingCertificate(certificate)
+    setCertificateForm(getFireAlarmExternalCertificateFormFromRecord(certificate))
+    setIsCertificateDialogOpen(true)
   }
 
   const handleCertificatePreviewOpen = ({
@@ -8467,10 +8717,12 @@ function FireAlarmSchedulePage() {
     fileName,
     subtitle,
   }: CertificateMediaPreviewState) => {
+    const normalisedSubtitle = subtitle.replace("â€¢", "|").replace("•", "|")
+
     setCertificatePreview({
       dataUrl,
       fileName: fileName.trim() || "certificate-document",
-      subtitle,
+      subtitle: normalisedSubtitle,
     })
   }
 
@@ -8521,34 +8773,94 @@ function FireAlarmSchedulePage() {
     )
   }
 
-  const handleCreateExternalCertificate = () => {
+  const handleSubmitExternalCertificate = () => {
+    if (!certificateForm.buildingId) {
+      showErrorToast("Building is required")
+      return
+    }
     if (!certificateForm.certificateDate) {
       showErrorToast("Date is required")
       return
     }
-    if (!certificateForm.certificateTime) {
-      showErrorToast("Time is required")
-      return
-    }
-    if (!certificateForm.company.trim()) {
-      showErrorToast("Company is required")
-      return
-    }
-    if (!certificateForm.professional.trim()) {
-      showErrorToast("Professional is required")
+
+    const payload = buildExternalCertificatePayload()
+
+    if (editingCertificate) {
+      updateExternalCertificateMutation.mutate({
+        id: editingCertificate.id,
+        payload,
+      })
       return
     }
 
-    createExternalCertificateMutation.mutate({
-      certificate_date: certificateForm.certificateDate,
-      certificate_time: certificateForm.certificateTime,
-      company: certificateForm.company.trim(),
-      professional: certificateForm.professional.trim(),
-      media_1_name: certificateForm.media1Name || null,
-      media_1_data: certificateForm.media1Data,
-      media_2_name: certificateForm.media2Name || null,
-      media_2_data: certificateForm.media2Data,
-    })
+    createExternalCertificateMutation.mutate(payload)
+  }
+
+  const handleDeleteExternalCertificate = (
+    certificate: FireAlarmExternalCertificate,
+  ) => {
+    if (deleteExternalCertificateMutation.isPending) return
+
+    const buildingLabel = certificate.building_name || "this building"
+    const dateLabel = formatDateToGb(certificate.certificate_date)
+    const confirmed =
+      typeof window === "undefined"
+        ? true
+        : window.confirm(
+            `Delete the certificate for ${buildingLabel} on ${dateLabel}?`,
+          )
+
+    if (!confirmed) return
+
+    setDeletingCertificateId(certificate.id)
+    deleteExternalCertificateMutation.mutate(certificate.id)
+  }
+
+  const handleEditHistoryRecord = (date: string) => {
+    setSelectedDate(date)
+    setActiveView("schedule")
+  }
+
+  const handleDeleteHistoryRecord = (date: string) => {
+    if (deletingHistoryDate) return
+
+    const confirmed =
+      typeof window === "undefined"
+        ? true
+        : window.confirm(
+            `Delete the fire alarm history record for ${formatDateToGb(date)}?`,
+          )
+
+    if (!confirmed) return
+
+    try {
+      setDeletingHistoryDate(date)
+
+      const nextLogs = { ...allLogs }
+      delete nextLogs[date]
+
+      const deletedDates = readDateSetFromStorage(
+        FIRE_ALARM_DELETED_DATES_STORAGE_KEY,
+      )
+      deletedDates.add(date)
+
+      localStorage.setItem(FIRE_ALARM_STORAGE_KEY, JSON.stringify(nextLogs))
+      writeDateSetToStorage(FIRE_ALARM_DELETED_DATES_STORAGE_KEY, deletedDates)
+
+      setAllLogs(nextLogs)
+      if (selectedDate === date) {
+        setRows(getDefaultFireAlarmRows())
+      }
+      showSuccessToast("Fire alarm history record deleted")
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Could not delete the fire alarm history record"
+      showErrorToast(message)
+    } finally {
+      setDeletingHistoryDate(null)
+    }
   }
 
   const renderCertificateMediaCell = (
@@ -8571,7 +8883,7 @@ function FireAlarmSchedulePage() {
               handleCertificatePreviewOpen({
                 dataUrl: mediaData,
                 fileName: mediaName || `certificate-media-${slot}`,
-                subtitle: `${certificate.company} • ${certificate.professional}`,
+                subtitle: `${certificate.building_name || "Building"} • ${formatDateToGb(certificate.certificate_date)}`,
               })
             }
             className="block"
@@ -8589,7 +8901,7 @@ function FireAlarmSchedulePage() {
             handleCertificatePreviewOpen({
               dataUrl: mediaData,
               fileName: mediaName || `certificate-media-${slot}`,
-              subtitle: `${certificate.company} • ${certificate.professional}`,
+              subtitle: `${certificate.building_name || "Building"} • ${formatDateToGb(certificate.certificate_date)}`,
             })
           }
           className="inline-flex rounded border border-[#8c7569] px-2 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
@@ -8606,10 +8918,10 @@ function FireAlarmSchedulePage() {
         <div className="flex flex-col gap-3 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4 md:flex-row md:items-start md:justify-between">
           <div>
             <h3 className="text-lg font-bold text-[#55311c]">
-              External fire alarm certificates
+              Fire alarm certificates
             </h3>
             <p className="text-sm text-[rgba(0,0,0,0.65)]">
-              Search certificates by professional, company, or date.
+              Register only the building, date and up to 2 media files.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -8622,10 +8934,10 @@ function FireAlarmSchedulePage() {
             </button>
             <button
               type="button"
-              onClick={() => setIsCertificateDialogOpen(true)}
+              onClick={handleOpenCreateCertificateDialog}
               className="rounded-lg bg-[#8c7569] px-3 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c]"
             >
-              Add record
+              Add certificate
             </button>
           </div>
         </div>
@@ -8644,7 +8956,7 @@ function FireAlarmSchedulePage() {
                 type="text"
                 value={certificateSearch}
                 onChange={(event) => setCertificateSearch(event.target.value)}
-                placeholder="Search by professional or company"
+                placeholder="Search by building"
                 className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
               />
             </div>
@@ -8700,29 +9012,23 @@ function FireAlarmSchedulePage() {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[980px] border-collapse">
+          <table className="w-full min-w-[900px] border-collapse">
             <thead>
               <tr className="bg-[#8c7569]">
+                <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
+                  Building
+                </th>
                 <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
                   Date
                 </th>
                 <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
-                  Time
+                  Media 1
                 </th>
                 <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
-                  Company
+                  Media 2
                 </th>
                 <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
-                  Professional
-                </th>
-                <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
-                  Doc 1
-                </th>
-                <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
-                  Doc 2
-                </th>
-                <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
-                  Added
+                  Actions
                 </th>
               </tr>
             </thead>
@@ -8730,7 +9036,7 @@ function FireAlarmSchedulePage() {
               {isLoadingExternalCertificates && (
                 <tr>
                   <td
-                    colSpan={7}
+                    colSpan={5}
                     className="border border-[#e5e0dc] bg-white px-3 py-4 text-center text-sm text-[rgba(0,0,0,0.7)]"
                   >
                     Loading certificates...
@@ -8741,7 +9047,7 @@ function FireAlarmSchedulePage() {
                 externalCertificates.length === 0 && (
                   <tr>
                     <td
-                      colSpan={7}
+                      colSpan={5}
                       className="border border-[#e5e0dc] bg-white px-3 py-4 text-center text-sm text-[rgba(0,0,0,0.7)]"
                     >
                       No certificates found for the selected filters.
@@ -8755,16 +9061,10 @@ function FireAlarmSchedulePage() {
                     className="bg-white hover:bg-[#f8f5f3]"
                   >
                     <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                      {certificate.building_name || "-"}
+                    </td>
+                    <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
                       {formatDateToGb(certificate.certificate_date)}
-                    </td>
-                    <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
-                      {certificate.certificate_time}
-                    </td>
-                    <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
-                      {certificate.company}
-                    </td>
-                    <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
-                      {certificate.professional}
                     </td>
                     <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
                       {renderCertificateMediaCell(certificate, 1)}
@@ -8773,7 +9073,31 @@ function FireAlarmSchedulePage() {
                       {renderCertificateMediaCell(certificate, 2)}
                     </td>
                     <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
-                      {new Date(certificate.created_at).toLocaleString("en-GB")}
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleEditExternalCertificate(certificate)}
+                          disabled={
+                            isSavingCertificate ||
+                            deleteExternalCertificateMutation.isPending
+                          }
+                          className="rounded-lg border border-[#8c7569] px-3 py-2 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleDeleteExternalCertificate(certificate)
+                          }
+                          disabled={deleteExternalCertificateMutation.isPending}
+                          className="rounded-lg border border-[#d28a6f] px-3 py-2 text-xs font-semibold text-[#8a3d1b] transition-all duration-200 hover:bg-[#fff1ea] disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {deletingCertificateId === certificate.id
+                            ? "Deleting..."
+                            : "Delete"}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -8788,14 +9112,39 @@ function FireAlarmSchedulePage() {
           <DialogContent className="border-[#e5e0dc] bg-white text-[#55311c] sm:max-w-3xl">
             <DialogHeader>
               <DialogTitle className="text-[#55311c]">
-                Add external certificate
+                {isEditingCertificate ? "Edit certificate" : "Add certificate"}
               </DialogTitle>
               <DialogDescription className="text-[rgba(0,0,0,0.7)]">
-                Record a new external fire alarm certificate entry.
+                {isEditingCertificate
+                  ? "Update the building, date and up to 2 media files."
+                  : "Record building, date and up to 2 media files."}
               </DialogDescription>
             </DialogHeader>
 
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div>
+                <label
+                  htmlFor="fire-alarm-certificate-form-building"
+                  className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+                >
+                  Building
+                </label>
+                <select
+                  id="fire-alarm-certificate-form-building"
+                  value={certificateForm.buildingId}
+                  onChange={(event) =>
+                    handleCertificateFieldChange("buildingId", event.target.value)
+                  }
+                  className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                >
+                  <option value="">Select a building</option>
+                  {certificateBuildings.map((building) => (
+                    <option key={building.id} value={String(building.id)}>
+                      {building.nome}
+                    </option>
+                  ))}
+                </select>
+              </div>
               <div>
                 <label
                   htmlFor="fire-alarm-certificate-form-date"
@@ -8813,65 +9162,6 @@ function FireAlarmSchedulePage() {
                       event.target.value,
                     )
                   }
-                  className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
-                />
-              </div>
-              <div>
-                <label
-                  htmlFor="fire-alarm-certificate-form-time"
-                  className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
-                >
-                  Time
-                </label>
-                <input
-                  id="fire-alarm-certificate-form-time"
-                  type="time"
-                  value={certificateForm.certificateTime}
-                  onChange={(event) =>
-                    handleCertificateFieldChange(
-                      "certificateTime",
-                      event.target.value,
-                    )
-                  }
-                  className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
-                />
-              </div>
-              <div>
-                <label
-                  htmlFor="fire-alarm-certificate-form-company"
-                  className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
-                >
-                  Company
-                </label>
-                <input
-                  id="fire-alarm-certificate-form-company"
-                  type="text"
-                  value={certificateForm.company}
-                  onChange={(event) =>
-                    handleCertificateFieldChange("company", event.target.value)
-                  }
-                  placeholder="Company name"
-                  className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
-                />
-              </div>
-              <div>
-                <label
-                  htmlFor="fire-alarm-certificate-form-professional"
-                  className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
-                >
-                  Professional
-                </label>
-                <input
-                  id="fire-alarm-certificate-form-professional"
-                  type="text"
-                  value={certificateForm.professional}
-                  onChange={(event) =>
-                    handleCertificateFieldChange(
-                      "professional",
-                      event.target.value,
-                    )
-                  }
-                  placeholder="Professional name"
                   className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
                 />
               </div>
@@ -9013,13 +9303,15 @@ function FireAlarmSchedulePage() {
               </button>
               <button
                 type="button"
-                onClick={handleCreateExternalCertificate}
-                disabled={createExternalCertificateMutation.isPending}
+                onClick={handleSubmitExternalCertificate}
+                disabled={isSavingCertificate}
                 className="rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {createExternalCertificateMutation.isPending
+                {isSavingCertificate
                   ? "Saving..."
-                  : "Save record"}
+                  : isEditingCertificate
+                    ? "Save changes"
+                    : "Save record"}
               </button>
             </DialogFooter>
           </DialogContent>
@@ -9117,7 +9409,7 @@ function FireAlarmSchedulePage() {
               Fire alarm schedule history
             </h3>
             <p className="text-sm text-[rgba(0,0,0,0.65)]">
-              Choose a saved date to open the record.
+              Choose a saved date to edit or remove the record.
             </p>
           </div>
           <button
@@ -9198,7 +9490,7 @@ function FireAlarmSchedulePage() {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[620px] border-collapse">
+          <table className="w-full min-w-[760px] border-collapse">
             <thead>
               <tr className="bg-[#8c7569]">
                 <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
@@ -9211,7 +9503,7 @@ function FireAlarmSchedulePage() {
                   Saved rows
                 </th>
                 <th className="border border-[#736055] px-3 py-2 text-center text-sm font-semibold text-white">
-                  Action
+                  Actions
                 </th>
               </tr>
             </thead>
@@ -9261,16 +9553,24 @@ function FireAlarmSchedulePage() {
                       {totalSaved} / {rowsForDate.length}
                     </td>
                     <td className="border border-[#e5e0dc] px-3 py-2 text-center text-sm">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedDate(date)
-                          setActiveView("schedule")
-                        }}
-                        className="rounded border border-[#8c7569] px-3 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
-                      >
-                        Open
-                      </button>
+                      <div className="flex flex-wrap justify-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleEditHistoryRecord(date)}
+                          disabled={Boolean(deletingHistoryDate)}
+                          className="rounded border border-[#8c7569] px-3 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteHistoryRecord(date)}
+                          disabled={Boolean(deletingHistoryDate)}
+                          className="rounded border border-[#d28a6f] px-3 py-1 text-xs font-semibold text-[#8a3d1b] transition-all duration-200 hover:bg-[#fff1ea] disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {deletingHistoryDate === date ? "Deleting..." : "Delete"}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 )
@@ -9316,6 +9616,12 @@ function FireAlarmSchedulePage() {
 
     setAllLogs(nextLogs)
     localStorage.setItem(FIRE_ALARM_STORAGE_KEY, JSON.stringify(nextLogs))
+    const deletedDates = readDateSetFromStorage(
+      FIRE_ALARM_DELETED_DATES_STORAGE_KEY,
+    )
+    if (deletedDates.delete(selectedDate)) {
+      writeDateSetToStorage(FIRE_ALARM_DELETED_DATES_STORAGE_KEY, deletedDates)
+    }
     showSuccessToast("Alarm schedule saved")
   }
 
@@ -11271,6 +11577,7 @@ function CaretakerSummary({
   })
   const [selectedBinsDateFrom, setSelectedBinsDateFrom] = useState("")
   const [selectedBinsDateTo, setSelectedBinsDateTo] = useState("")
+  const [binsHistoryPage, setBinsHistoryPage] = useState(0)
   const [selectedWeekStart, setSelectedWeekStart] = useState(() =>
     getWeekStartIso(new Date()),
   )
@@ -11279,6 +11586,9 @@ function CaretakerSummary({
   const [reportEmail, setReportEmail] = useState("")
   const [isSendingReport, setIsSendingReport] = useState(false)
   const [showReportModal, setShowReportModal] = useState(false)
+  const [deletingBinsRowKey, setDeletingBinsRowKey] = useState<string | null>(
+    null,
+  )
   const [editingCaretakerRecord, setEditingCaretakerRecord] =
     useState<CaretakerRecordEditState | null>(null)
   const [editedCaretakerTimeValue, setEditedCaretakerTimeValue] = useState("")
@@ -11513,6 +11823,8 @@ function CaretakerSummary({
     }
   }, [selectedBinsDateFrom, selectedBinsDateTo])
 
+  const binsHistoryPageSize = 10
+
   const binsTimeByBuilding = useMemo(() => {
     const totals = new Map<string, number>()
     binSessionsGrouped.forEach((session) => {
@@ -11595,7 +11907,7 @@ function CaretakerSummary({
     })
   }, [workTimeSessionsGrouped])
 
-  const visibleHistoryRows = useMemo(() => {
+  const filteredHistoryRows = useMemo(() => {
     const sourceRows =
       activeTab === "summary" ? workTimeHistoryRows : binHistoryRows
     const filteredRows =
@@ -11606,17 +11918,39 @@ function CaretakerSummary({
               selectedWeekStart,
             ),
           )
-        : sourceRows
+        : sourceRows.filter((row) =>
+            isDateWithinRange(
+              toDateKey(row.inValue || row.outValue),
+              binsDateFrom,
+              binsDateTo,
+            ),
+          )
     return [...filteredRows]
       .sort((a, b) => b.sortTime - a.sortTime)
-      .slice(0, 20)
   }, [
     activeTab,
     binHistoryRows,
+    binsDateFrom,
+    binsDateTo,
     selectedWeekStart,
     toDateKey,
     workTimeHistoryRows,
   ])
+
+  const totalBinsHistoryPages = useMemo(
+    () =>
+      Math.max(1, Math.ceil(filteredHistoryRows.length / binsHistoryPageSize)),
+    [filteredHistoryRows.length],
+  )
+
+  const visibleHistoryRows = useMemo(() => {
+    if (activeTab !== "bins") {
+      return filteredHistoryRows.slice(0, 20)
+    }
+
+    const start = binsHistoryPage * binsHistoryPageSize
+    return filteredHistoryRows.slice(start, start + binsHistoryPageSize)
+  }, [activeTab, binsHistoryPage, filteredHistoryRows])
 
   useEffect(() => {
     if (activeTab !== "summary") return
@@ -11629,6 +11963,30 @@ function CaretakerSummary({
         : selectedWeekStart,
     )
   }, [activeTab, selectedWeekStart, selectedWorkDate])
+
+  useEffect(() => {
+    setBinsHistoryPage(0)
+  }, [activeTab, binsDateFrom, binsDateTo])
+
+  useEffect(() => {
+    if (activeTab !== "bins") return
+
+    setBinsHistoryPage((currentPage) =>
+      Math.min(currentPage, Math.max(0, totalBinsHistoryPages - 1)),
+    )
+  }, [activeTab, totalBinsHistoryPages])
+
+  const binsHistoryRangeStart =
+    activeTab === "bins" && filteredHistoryRows.length > 0
+      ? binsHistoryPage * binsHistoryPageSize + 1
+      : 0
+  const binsHistoryRangeEnd =
+    activeTab === "bins"
+      ? Math.min(
+          (binsHistoryPage + 1) * binsHistoryPageSize,
+          filteredHistoryRows.length,
+        )
+      : 0
 
   const formatDurationFromMinutes = (minutes: number) => {
     if (minutes <= 0) return "0m"
@@ -11803,6 +12161,54 @@ function CaretakerSummary({
       showErrorToast(message)
     } finally {
       setIsSavingCaretakerRecordEdit(false)
+    }
+  }
+
+  const handleDeleteBinsHistoryRow = async ({
+    rowKey,
+    inRecordId,
+    outRecordId,
+    buildingLabel,
+    dateValue,
+  }: {
+    rowKey: string
+    inRecordId: EntityId | null
+    outRecordId: EntityId | null
+    buildingLabel: string
+    dateValue: string | null
+  }) => {
+    const recordIds = [inRecordId, outRecordId].filter(
+      (value): value is EntityId => Boolean(value),
+    )
+    if (recordIds.length === 0) return
+
+    const dateLabel = formatDate(dateValue)
+    const confirmed =
+      typeof window === "undefined"
+        ? true
+        : window.confirm(
+            `Delete the bins record for ${buildingLabel} on ${dateLabel}?`,
+          )
+
+    if (!confirmed) return
+
+    try {
+      setDeletingBinsRowKey(rowKey)
+      for (const recordId of recordIds) {
+        await apiCall(`/api/v1/bins/sessions/${recordId}`, {
+          method: "DELETE",
+        })
+      }
+      await queryClient.invalidateQueries({
+        queryKey: ["bins", "sessions", "caretaker-summary"],
+      })
+      showSuccessToast("Bin record deleted successfully")
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to delete bin record"
+      showErrorToast(message)
+    } finally {
+      setDeletingBinsRowKey(null)
     }
   }
 
@@ -12074,6 +12480,11 @@ function CaretakerSummary({
               <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700">
                 Used
               </th>
+              {activeTab === "bins" && (
+                <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700">
+                  Action
+                </th>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -12082,7 +12493,7 @@ function CaretakerSummary({
               <tr>
                 <td
                   className="border border-gray-400 px-3 py-3 text-center text-sm text-gray-600"
-                  colSpan={5}
+                  colSpan={activeTab === "bins" ? 6 : 5}
                 >
                   Loading...
                 </td>
@@ -12094,7 +12505,7 @@ function CaretakerSummary({
                 <tr>
                   <td
                     className="border border-gray-400 px-3 py-3 text-center text-sm text-gray-600"
-                    colSpan={5}
+                    colSpan={activeTab === "bins" ? 6 : 5}
                   >
                     No records found.
                   </td>
@@ -12156,12 +12567,69 @@ function CaretakerSummary({
                   <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
                     {formatUsed(row.inValue, row.outValue)}
                   </td>
+                  {activeTab === "bins" && row.kind === "bins" && (
+                    <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleDeleteBinsHistoryRow({
+                            rowKey: row.key,
+                            inRecordId: row.inRecordId,
+                            outRecordId: row.outRecordId,
+                            buildingLabel: row.buildingLabel,
+                            dateValue: row.inValue || row.outValue,
+                          })
+                        }
+                        disabled={
+                          deletingBinsRowKey === row.key ||
+                          (!row.inRecordId && !row.outRecordId)
+                        }
+                        className="rounded border border-red-300 px-3 py-1 text-xs font-semibold text-red-700 transition-all duration-200 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {deletingBinsRowKey === row.key ? "Deleting..." : "Delete"}
+                      </button>
+                    </td>
+                  )}
                 </tr>
               )
             })}
           </tbody>
         </table>
       </div>
+
+      {activeTab === "bins" && filteredHistoryRows.length > 0 && (
+        <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-[#55311c]">
+            Showing {binsHistoryRangeStart}-{binsHistoryRangeEnd} of{" "}
+            {filteredHistoryRows.length} bin record(s)
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setBinsHistoryPage(Math.max(0, binsHistoryPage - 1))}
+              disabled={binsHistoryPage === 0}
+              className="rounded border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Previous
+            </button>
+            <span className="flex items-center px-2 text-sm font-semibold text-[#55311c]">
+              {binsHistoryPage + 1} / {totalBinsHistoryPages}
+            </span>
+            <button
+              type="button"
+              onClick={() =>
+                setBinsHistoryPage(
+                  Math.min(totalBinsHistoryPages - 1, binsHistoryPage + 1),
+                )
+              }
+              disabled={binsHistoryPage >= totalBinsHistoryPages - 1}
+              className="rounded border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
 
       {showReportModal && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-3 sm:items-center sm:px-4">

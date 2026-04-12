@@ -4,7 +4,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query"
-import { useDeferredValue, useMemo, useState } from "react"
+import { useDeferredValue, useEffect, useMemo, useState } from "react"
 
 import { OpenAPI } from "@/client"
 import {
@@ -403,6 +403,8 @@ export function ContractorHistoryContent() {
   const [isHistoryDialogOpen, setIsHistoryDialogOpen] = useState(false)
   const [isCategoryDialogOpen, setIsCategoryDialogOpen] = useState(false)
   const [newCategoryName, setNewCategoryName] = useState("")
+  const [page, setPage] = useState(0)
+  const pageSize = 10
   const deferredSearch = useDeferredValue(search.trim())
 
   const { data: buildingsData } = useQuery<ApiListResponse<Building>>({
@@ -439,11 +441,13 @@ export function ContractorHistoryContent() {
       dateTo,
       buildingFilter,
       categoryFilter,
+      page,
+      pageSize,
     ],
     queryFn: () =>
       apiCall("/api/v1/contractor-access/history", {
-        skip: 0,
-        limit: 200,
+        skip: page * pageSize,
+        limit: pageSize,
         search: deferredSearch || undefined,
         date_from: dateFrom || undefined,
         date_to: dateTo || undefined,
@@ -476,6 +480,17 @@ export function ContractorHistoryContent() {
     [historiesData?.data],
   )
   const totalHistories = historiesData?.count || histories.length
+  const totalPages = Math.max(1, Math.ceil(totalHistories / pageSize))
+  const rangeStart = totalHistories === 0 ? 0 : page * pageSize + 1
+  const rangeEnd = Math.min((page + 1) * pageSize, totalHistories)
+
+  useEffect(() => {
+    setPage(0)
+  }, [deferredSearch, dateFrom, dateTo, buildingFilter, categoryFilter])
+
+  useEffect(() => {
+    setPage((currentPage) => Math.min(currentPage, Math.max(0, totalPages - 1)))
+  }, [totalPages])
 
   const selectedContractorOption = useMemo(
     () =>
@@ -1439,7 +1454,9 @@ export function ContractorHistoryContent() {
         </div>
 
         <p className="text-xs text-[rgba(0,0,0,0.6)]">
-          Showing {totalHistories} history record(s).
+          {totalHistories === 0
+            ? "Showing 0 history record(s)."
+            : `Showing ${rangeStart}-${rangeEnd} of ${totalHistories} history record(s).`}
         </p>
       </div>
 
@@ -1623,6 +1640,32 @@ export function ContractorHistoryContent() {
             </tbody>
           </table>
         </div>
+
+        {totalHistories > 0 && (
+          <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-[#55311c]">
+              Page {page + 1} of {totalPages}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setPage(Math.max(0, page - 1))}
+                disabled={page === 0}
+                className="rounded border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Previous
+              </button>
+              <button
+                type="button"
+                onClick={() => setPage(Math.min(totalPages - 1, page + 1))}
+                disabled={page >= totalPages - 1}
+                className="rounded border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       <Dialog

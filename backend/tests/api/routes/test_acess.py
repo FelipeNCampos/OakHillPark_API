@@ -299,6 +299,103 @@ def test_create_acess_rejects_office_for_cleaner(
     db.commit()
 
 
+def test_create_acess_uses_manual_timestamp_without_sending_sms(
+    client: TestClient,
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cleaner, building_a, building_b = _create_cleaner_sms_scenario(db)
+    manual_time = datetime(2026, 4, 10, 9, 30, tzinfo=timezone.utc)
+    monkeypatch.setattr(settings, "CLEANER_STATUS_SMS_TO", "7952474965")
+
+    with patch("app.api.routes.acess.get_default_funcionario", return_value=cleaner):
+        with patch("app.api.routes.acess.send_sms_notification", return_value="SM123") as sms_mock:
+            response = client.post(
+                f"{settings.API_V1_STR}/acess/",
+                json={
+                    "building_id": str(building_a.id),
+                    "operacao": 0,
+                    "data": manual_time.isoformat(),
+                },
+            )
+
+    assert response.status_code == 200
+    saved_acess = db.get(Acess, response.json()["id"])
+    assert saved_acess is not None
+    assert saved_acess.data.astimezone(timezone.utc) == manual_time
+    sms_mock.assert_not_called()
+
+    db.exec(delete(Acess).where(Acess.funcionario_id == cleaner.id))
+    db.exec(delete(Building).where(Building.id.in_([building_a.id, building_b.id])))
+    db.exec(delete(Funcionario).where(Funcionario.id == cleaner.id))
+    db.exec(delete(User).where(User.condominio_id == cleaner.condominio_id))
+    db.exec(delete(Condominio).where(Condominio.id == cleaner.condominio_id))
+    db.commit()
+
+
+def test_create_acess_allows_manual_cleaner_out_without_open_session(
+    client: TestClient,
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cleaner, building_a, building_b = _create_cleaner_sms_scenario(db)
+    manual_time = datetime(2026, 4, 10, 17, 45, tzinfo=timezone.utc)
+    db.add(
+        Acess(
+            status=True,
+            data=datetime(2026, 4, 10, 8, 0, tzinfo=timezone.utc),
+            operacao=0,
+            building_id=building_a.id,
+            funcionario_id=cleaner.id,
+        )
+    )
+    db.add(
+        Acess(
+            status=True,
+            data=datetime(2026, 4, 10, 10, 0, tzinfo=timezone.utc),
+            operacao=0,
+            building_id=building_b.id,
+            funcionario_id=cleaner.id,
+        )
+    )
+    db.add(
+        Acess(
+            status=True,
+            data=datetime(2026, 4, 10, 11, 0, tzinfo=timezone.utc),
+            operacao=1,
+            building_id=building_b.id,
+            funcionario_id=cleaner.id,
+        )
+    )
+    db.commit()
+    monkeypatch.setattr(settings, "CLEANER_STATUS_SMS_TO", "7952474965")
+
+    with patch("app.api.routes.acess.get_default_funcionario", return_value=cleaner):
+        with patch("app.api.routes.acess.send_sms_notification", return_value="SM123") as sms_mock:
+            response = client.post(
+                f"{settings.API_V1_STR}/acess/",
+                json={
+                    "building_id": str(building_a.id),
+                    "operacao": 1,
+                    "data": manual_time.isoformat(),
+                },
+            )
+
+    assert response.status_code == 200
+    saved_acess = db.get(Acess, response.json()["id"])
+    assert saved_acess is not None
+    assert saved_acess.operacao == 1
+    assert saved_acess.data.astimezone(timezone.utc) == manual_time
+    sms_mock.assert_not_called()
+
+    db.exec(delete(Acess).where(Acess.funcionario_id == cleaner.id))
+    db.exec(delete(Building).where(Building.id.in_([building_a.id, building_b.id])))
+    db.exec(delete(Funcionario).where(Funcionario.id == cleaner.id))
+    db.exec(delete(User).where(User.condominio_id == cleaner.condominio_id))
+    db.exec(delete(Condominio).where(Condominio.id == cleaner.condominio_id))
+    db.commit()
+
+
 def test_get_last_acess_prefers_open_session_when_switch_generates_same_timestamp_records(
     db: Session,
 ) -> None:

@@ -29,6 +29,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import useAuth, { isLoggedIn } from "@/hooks/useAuth"
 import useCustomToast from "@/hooks/useCustomToast"
 
@@ -128,6 +134,13 @@ interface CleanerRecordEditState {
   inOriginalIso: string | null
   outRecordId: EntityId | null
   outOriginalIso: string | null
+}
+
+interface CleanerManualActionState {
+  mode: "checkin" | "checkout"
+  buildingId: EntityId
+  buildingLabel: string
+  referenceIso: string
 }
 
 interface Morador {
@@ -350,6 +363,9 @@ const formatFlatLabel = (
   flatNumber?: number | null,
   flatLabel?: string | null,
 ) => `Flat ${formatFlatNumber(flatNumber, flatLabel)}`
+
+const isOfficeBuilding = (building: Pick<Building, "nome">) =>
+  building.nome.trim().toLowerCase() === "office"
 
 type ApiQueryParams = Record<
   string,
@@ -2103,6 +2119,16 @@ function OverviewContent({
   user: UserProfile
   onNavigate: (tabId: string) => void
 }) {
+  const shortcutCards = [
+    { label: "Residents", tabId: "residents" },
+    { label: "Caretaker", tabId: "caretaker" },
+    { label: "Cleaner", tabId: "cleaner" },
+    { label: "Bins", tabId: "bins" },
+    { label: "Twilio", tabId: "twillio" },
+    { label: "Fire alarm", tabId: "schedule-alarm" },
+    { label: "Contractor", tabId: "contractors" },
+  ]
+
   return (
     <div className="mx-auto max-w-7xl">
       {/* Welcome Section */}
@@ -2110,72 +2136,21 @@ function OverviewContent({
         <h2 className="mb-2 font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
           Welcome, {user?.full_name || "Manager"}!
         </h2>
-        <p className="text-[rgba(0,0,0,0.7)]">
-          Manage all condo operations in one place.
-        </p>
       </div>
 
-      {/* Shortcut Grid */}
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
-        <button
-          type="button"
-          onClick={() => onNavigate("buildings-add")}
-          className="rounded-lg bg-white p-6 text-left shadow-md transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
-        >
-          <div className="mb-2 flex items-center justify-between">
-            <h3 className="font-['Nunito',sans-serif] text-sm font-semibold uppercase tracking-wide text-[#8c7569]">
-              Shortcut
-            </h3>
-            <svg
-              className="h-8 w-8 text-[#8c7569]"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <title>Add Readings</title>
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M12 4v16m8-8H4"
-              />
-            </svg>
-          </div>
-          <p className="text-3xl font-bold text-[#55311c]">Add Readings</p>
-          <p className="mt-1 text-sm text-[rgba(0,0,0,0.6)]">
-            Open the buildings readings screen and add new readings.
-          </p>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => onNavigate("flats-add")}
-          className="rounded-lg bg-white p-6 text-left shadow-md transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
-        >
-          <div className="mb-2 flex items-center justify-between">
-            <h3 className="font-['Nunito',sans-serif] text-sm font-semibold uppercase tracking-wide text-[#8c7569]">
-              Shortcut
-            </h3>
-            <svg
-              className="h-8 w-8 text-[#8c7569]"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <title>Add Flat Readings</title>
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M4 7h16M7 4v16m10-10v10M9 20h6"
-              />
-            </svg>
-          </div>
-          <p className="text-3xl font-bold text-[#55311c]">Add Flat Readings</p>
-          <p className="mt-1 text-sm text-[rgba(0,0,0,0.6)]">
-            Open the flats readings screen and add new flat readings.
-          </p>
-        </button>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {shortcutCards.map((card) => (
+          <button
+            key={card.tabId}
+            type="button"
+            onClick={() => onNavigate(card.tabId)}
+            className="flex min-h-28 items-center justify-center rounded-lg bg-white px-4 py-5 text-center shadow-md transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
+          >
+            <span className="font-['Nunito',sans-serif] text-xl font-bold text-[#55311c]">
+              {card.label}
+            </span>
+          </button>
+        ))}
       </div>
     </div>
   )
@@ -2201,7 +2176,9 @@ function BuildingsReadingsContent({
     queryFn: () => apiCall("/api/v1/buildings/condominio"),
   })
 
-  const buildings = buildingsData?.data || []
+  const buildings = (buildingsData?.data || []).filter(
+    (building) => !isOfficeBuilding(building),
+  )
 
   // Set first building as selected if available
   const firstBuildingId = buildings[0]?.id
@@ -3911,7 +3888,9 @@ function FlatsReadingsContent({
     queryFn: () => apiCall("/api/v1/buildings/condominio"),
   })
 
-  const buildings = buildingsData?.data || []
+  const buildings = (buildingsData?.data || []).filter(
+    (building) => !isOfficeBuilding(building),
+  )
   const selectedBuilding = buildings.find(
     (building) => building.id === selectedBuildingId,
   )
@@ -7642,10 +7621,14 @@ function ContractorsContent() {
                                 )}
                                 <a
                                   href={slot.data ?? undefined}
-                                  download={slot.name || `contractor-media-${slot.slotNumber}`}
+                                  download={
+                                    slot.name ||
+                                    `contractor-media-${slot.slotNumber}`
+                                  }
                                   className="break-words text-xs font-semibold text-[#8c7569] underline"
                                 >
-                                  {slot.name || `Download media ${slot.slotNumber}`}
+                                  {slot.name ||
+                                    `Download media ${slot.slotNumber}`}
                                 </a>
                               </div>
                             ))}
@@ -7774,7 +7757,9 @@ function ContractorsContent() {
                           {isImageDataUrl(slot.data) ? (
                             <img
                               src={slot.data}
-                              alt={slot.name || `Contractor media ${slotIndex + 1}`}
+                              alt={
+                                slot.name || `Contractor media ${slotIndex + 1}`
+                              }
                               className="max-h-56 rounded border border-[#d9d0ca] object-contain"
                             />
                           ) : (
@@ -8338,9 +8323,8 @@ function FireAlarmSchedulePage() {
   )
   const [editingCertificate, setEditingCertificate] =
     useState<FireAlarmExternalCertificate | null>(null)
-  const [deletingCertificateId, setDeletingCertificateId] = useState<
-    EntityId | null
-  >(null)
+  const [deletingCertificateId, setDeletingCertificateId] =
+    useState<EntityId | null>(null)
   const [certificatePreview, setCertificatePreview] =
     useState<CertificateMediaPreviewState | null>(null)
   const [certificateForm, setCertificateForm] =
@@ -8362,11 +8346,12 @@ function FireAlarmSchedulePage() {
             ([date]) => !deletedDates.has(date),
           ),
         )
-        localStorage.setItem(FIRE_ALARM_STORAGE_KEY, JSON.stringify(initialLogs))
-        setAllLogs(initialLogs)
-        setRows(
-          initialLogs[selectedDate] || getDefaultFireAlarmRows(),
+        localStorage.setItem(
+          FIRE_ALARM_STORAGE_KEY,
+          JSON.stringify(initialLogs),
         )
+        setAllLogs(initialLogs)
+        setRows(initialLogs[selectedDate] || getDefaultFireAlarmRows())
         return
       }
       const parsed = JSON.parse(raw) as FireAlarmLogByDate
@@ -8576,7 +8561,9 @@ function FireAlarmSchedulePage() {
     placeholderData: keepPreviousData,
   })
 
-  const { data: certificateBuildingsData } = useQuery<ApiListResponse<Building>>({
+  const { data: certificateBuildingsData } = useQuery<
+    ApiListResponse<Building>
+  >({
     queryKey: ["buildings", "fire-alarm-certificates"],
     queryFn: () => apiCall("/api/v1/buildings/condominio"),
     enabled: activeView === "certificates" || isCertificateDialogOpen,
@@ -8685,7 +8672,8 @@ function FireAlarmSchedulePage() {
   const externalCertificates = externalCertificatesData?.data || []
   const externalCertificatesCount =
     externalCertificatesData?.count || externalCertificates.length
-  const certificateBuildings = (certificateBuildingsData?.data || []) as Building[]
+  const certificateBuildings = (certificateBuildingsData?.data ||
+    []) as Building[]
   const isSavingCertificate =
     createExternalCertificateMutation.isPending ||
     updateExternalCertificateMutation.isPending
@@ -8708,7 +8696,9 @@ function FireAlarmSchedulePage() {
     certificate: FireAlarmExternalCertificate,
   ) => {
     setEditingCertificate(certificate)
-    setCertificateForm(getFireAlarmExternalCertificateFormFromRecord(certificate))
+    setCertificateForm(
+      getFireAlarmExternalCertificateFormFromRecord(certificate),
+    )
     setIsCertificateDialogOpen(true)
   }
 
@@ -8814,6 +8804,11 @@ function FireAlarmSchedulePage() {
 
     setDeletingCertificateId(certificate.id)
     deleteExternalCertificateMutation.mutate(certificate.id)
+  }
+
+  const handleOpenHistoryRecord = (date: string) => {
+    setSelectedDate(date)
+    setActiveView("schedule")
   }
 
   const handleEditHistoryRecord = (date: string) => {
@@ -9076,7 +9071,9 @@ function FireAlarmSchedulePage() {
                       <div className="flex flex-wrap gap-2">
                         <button
                           type="button"
-                          onClick={() => handleEditExternalCertificate(certificate)}
+                          onClick={() =>
+                            handleEditExternalCertificate(certificate)
+                          }
                           disabled={
                             isSavingCertificate ||
                             deleteExternalCertificateMutation.isPending
@@ -9133,7 +9130,10 @@ function FireAlarmSchedulePage() {
                   id="fire-alarm-certificate-form-building"
                   value={certificateForm.buildingId}
                   onChange={(event) =>
-                    handleCertificateFieldChange("buildingId", event.target.value)
+                    handleCertificateFieldChange(
+                      "buildingId",
+                      event.target.value,
+                    )
                   }
                   className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
                 >
@@ -9553,24 +9553,53 @@ function FireAlarmSchedulePage() {
                       {totalSaved} / {rowsForDate.length}
                     </td>
                     <td className="border border-[#e5e0dc] px-3 py-2 text-center text-sm">
-                      <div className="flex flex-wrap justify-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => handleEditHistoryRecord(date)}
-                          disabled={Boolean(deletingHistoryDate)}
-                          className="rounded border border-[#8c7569] px-3 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteHistoryRecord(date)}
-                          disabled={Boolean(deletingHistoryDate)}
-                          className="rounded border border-[#d28a6f] px-3 py-1 text-xs font-semibold text-[#8a3d1b] transition-all duration-200 hover:bg-[#fff1ea] disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {deletingHistoryDate === date ? "Deleting..." : "Delete"}
-                        </button>
-                      </div>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type="button"
+                            aria-label="Open actions menu"
+                            disabled={Boolean(deletingHistoryDate)}
+                            className="inline-flex h-8 w-8 items-center justify-center rounded border border-[#8c7569] bg-white text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            <svg
+                              className="h-4 w-4"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                            >
+                              <title>Actions</title>
+                              <path d="M4 7h16" />
+                              <path d="M4 12h16" />
+                              <path d="M4 17h16" />
+                            </svg>
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            disabled={Boolean(deletingHistoryDate)}
+                            onClick={() => handleOpenHistoryRecord(date)}
+                          >
+                            Open
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            disabled={Boolean(deletingHistoryDate)}
+                            onClick={() => handleEditHistoryRecord(date)}
+                          >
+                            Edit
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            disabled={Boolean(deletingHistoryDate)}
+                            variant="destructive"
+                            onClick={() => handleDeleteHistoryRecord(date)}
+                          >
+                            {deletingHistoryDate === date
+                              ? "Deleting..."
+                              : "Delete"}
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </td>
                   </tr>
                 )
@@ -9858,6 +9887,7 @@ function BuildingSchedulePage({
   const [reportDateTo, setReportDateTo] = useState("")
   const [reportEmail, setReportEmail] = useState("")
   const [isSendingReport, setIsSendingReport] = useState(false)
+  const deletedDatesStorageKey = `${storageKey}-deleted-dates`
   const initialLogs = useMemo(
     () => getInitialLogsByScheduleId(scheduleId),
     [scheduleId],
@@ -9870,11 +9900,15 @@ function BuildingSchedulePage({
   useEffect(() => {
     try {
       const raw = localStorage.getItem(storageKey)
+      const deletedDates = readDateSetFromStorage(deletedDatesStorageKey)
       if (!raw) {
-        const normalizedInitialLogs =
-          scheduleId === "light"
-            ? normalizeLightScheduleLogs(initialLogs)
-            : initialLogs
+        const normalizedInitialLogs = Object.fromEntries(
+          Object.entries(
+            scheduleId === "light"
+              ? normalizeLightScheduleLogs(initialLogs)
+              : initialLogs,
+          ).filter(([date]) => !deletedDates.has(date)),
+        ) as FireAlarmLogByDate
         localStorage.setItem(storageKey, JSON.stringify(normalizedInitialLogs))
         setAllLogs(normalizedInitialLogs)
         setRows(
@@ -9889,10 +9923,13 @@ function BuildingSchedulePage({
       const mergedSource =
         scheduleId === "light" ? normalizeLightScheduleLogs(parsed) : parsed
       const merged = mergeLogsWithInitialSeed(mergedSource, initialLogs)
-      localStorage.setItem(storageKey, JSON.stringify(merged))
-      setAllLogs(merged)
+      const filteredMerged = Object.fromEntries(
+        Object.entries(merged).filter(([date]) => !deletedDates.has(date)),
+      ) as FireAlarmLogByDate
+      localStorage.setItem(storageKey, JSON.stringify(filteredMerged))
+      setAllLogs(filteredMerged)
       setRows(
-        merged[selectedDate] ||
+        filteredMerged[selectedDate] ||
           (scheduleId === "light"
             ? normalizeLightScheduleRows(emptyRows)
             : emptyRows),
@@ -9905,7 +9942,14 @@ function BuildingSchedulePage({
           : emptyRows,
       )
     }
-  }, [emptyRows, initialLogs, scheduleId, selectedDate, storageKey])
+  }, [
+    deletedDatesStorageKey,
+    emptyRows,
+    initialLogs,
+    scheduleId,
+    selectedDate,
+    storageKey,
+  ])
 
   const buildingRows = useMemo(
     () => getBuildingsForSchedule(scheduleId),
@@ -10015,7 +10059,48 @@ function BuildingSchedulePage({
     }
     setAllLogs(nextLogs)
     localStorage.setItem(storageKey, JSON.stringify(nextLogs))
+    const deletedDates = readDateSetFromStorage(deletedDatesStorageKey)
+    if (deletedDates.delete(selectedDate)) {
+      writeDateSetToStorage(deletedDatesStorageKey, deletedDates)
+    }
     showSuccessToast(`${title} saved`)
+  }
+
+  const handleOpenHistoryRecord = (date: string) => {
+    setSelectedDate(date)
+    setActiveView("schedule")
+  }
+
+  const handleEditHistoryRecord = (date: string) => {
+    setSelectedDate(date)
+    setActiveView("schedule")
+  }
+
+  const handleDeleteHistoryRecord = (date: string) => {
+    const confirmed =
+      typeof window === "undefined"
+        ? true
+        : window.confirm(`Delete the ${title.toLowerCase()} record for ${formatDateToGb(date)}?`)
+
+    if (!confirmed) return
+
+    const nextLogs = { ...allLogs }
+    delete nextLogs[date]
+    setAllLogs(nextLogs)
+    localStorage.setItem(storageKey, JSON.stringify(nextLogs))
+    const deletedDates = readDateSetFromStorage(deletedDatesStorageKey)
+    deletedDates.add(date)
+    writeDateSetToStorage(deletedDatesStorageKey, deletedDates)
+
+    if (selectedDate === date) {
+      setRows(
+        scheduleId === "light"
+          ? normalizeLightScheduleRows(emptyRows)
+          : emptyRows,
+      )
+    }
+
+    showSuccessToast(`${title} record deleted`)
   }
 
   async function handleSendReport() {
@@ -10263,16 +10348,47 @@ function BuildingSchedulePage({
                       {totalSaved} / {buildingRows.length}
                     </td>
                     <td className="border border-[#e5e0dc] px-3 py-2 text-center text-sm">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedDate(date)
-                          setActiveView("schedule")
-                        }}
-                        className="rounded border border-[#8c7569] px-3 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
-                      >
-                        Open
-                      </button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type="button"
+                            aria-label="Open actions menu"
+                            className="inline-flex h-8 w-8 items-center justify-center rounded border border-[#8c7569] bg-white text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+                          >
+                            <svg
+                              className="h-4 w-4"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                            >
+                              <title>Actions</title>
+                              <path d="M4 7h16" />
+                              <path d="M4 12h16" />
+                              <path d="M4 17h16" />
+                            </svg>
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            onClick={() => handleOpenHistoryRecord(date)}
+                          >
+                            Open
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => handleEditHistoryRecord(date)}
+                          >
+                            Edit
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            variant="destructive"
+                            onClick={() => handleDeleteHistoryRecord(date)}
+                          >
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </td>
                   </tr>
                 )
@@ -10481,7 +10597,7 @@ function CleanerSummary() {
     ApiListResponse<AcessRecord>
   >({
     queryKey: ["acess", "cleaner"],
-    queryFn: () => apiCall("/api/v1/acess/", { skip: 0, limit: 200 }),
+    queryFn: () => apiCall("/api/v1/acess/", { skip: 0, limit: 1000 }),
   })
 
   const { data: buildingsData } = useQuery<ApiListResponse<Building>>({
@@ -10493,15 +10609,26 @@ function CleanerSummary() {
   const buildings = (buildingsData?.data || []) as Building[]
   const [editingCleanerRecord, setEditingCleanerRecord] =
     useState<CleanerRecordEditState | null>(null)
+  const [cleanerManualAction, setCleanerManualAction] =
+    useState<CleanerManualActionState | null>(null)
   const [editedCleanerInTimeValue, setEditedCleanerInTimeValue] = useState("")
   const [editedCleanerOutTimeValue, setEditedCleanerOutTimeValue] = useState("")
+  const [cleanerManualTimeValue, setCleanerManualTimeValue] = useState("")
   const [isSavingCleanerRecordEdit, setIsSavingCleanerRecordEdit] =
     useState(false)
-  const [isCreatingCleanerTimeout, setIsCreatingCleanerTimeout] = useState<
-    string | null
-  >(null)
+  const [isSavingCleanerManualAction, setIsSavingCleanerManualAction] =
+    useState(false)
+  const [cleanerSearch, setCleanerSearch] = useState("")
+  const [cleanerBuildingFilter, setCleanerBuildingFilter] = useState("")
+  const [cleanerUsedFilterType, setCleanerUsedFilterType] = useState<
+    "all" | "greater" | "less"
+  >("all")
+  const [cleanerUsedFilterValue, setCleanerUsedFilterValue] = useState("")
+  const [cleanerHistoryPage, setCleanerHistoryPage] = useState(0)
   const [selectedCleanerDateFrom, setSelectedCleanerDateFrom] = useState("")
   const [selectedCleanerDateTo, setSelectedCleanerDateTo] = useState("")
+  const cleanerDeferredSearch = useDeferredValue(cleanerSearch.trim())
+  const cleanerHistoryPageSize = 10
 
   const buildingMap = useMemo(() => {
     const map = new Map<EntityId, string>()
@@ -10666,9 +10793,108 @@ function CleanerSummary() {
     }
   }, [selectedCleanerDateFrom, selectedCleanerDateTo])
 
-  const tableSessions = useMemo(
-    () => enrichedSessions.slice(0, 20),
+  const cleanerBuildingOptions = useMemo(
+    () =>
+      [...new Set(enrichedSessions.map((session) => session.buildingLabel))]
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b)),
     [enrichedSessions],
+  )
+
+  const filteredCleanerSessions = useMemo(() => {
+    const normalizedSearch = cleanerDeferredSearch.toLowerCase()
+    const usedHoursFilter = Number(cleanerUsedFilterValue)
+
+    return enrichedSessions.filter((session) => {
+      const dateValue = session.inRecord?.data || session.outRecord?.data || null
+      const usedLabel = formatUsed(session.inRecord?.data, session.outRecord?.data)
+      const matchesSearch =
+        !normalizedSearch ||
+        [
+          session.buildingLabel,
+          formatDate(dateValue),
+          formatTime(session.inRecord?.data),
+          formatTime(session.outRecord?.data),
+          usedLabel,
+        ].some((value) => value.toLowerCase().includes(normalizedSearch))
+
+      if (!matchesSearch) return false
+      if (
+        cleanerBuildingFilter &&
+        session.buildingLabel !== cleanerBuildingFilter
+      ) {
+        return false
+      }
+
+      if (
+        cleanerUsedFilterType !== "all" &&
+        cleanerUsedFilterValue.trim() &&
+        !Number.isNaN(usedHoursFilter)
+      ) {
+        const usedHours = session.durationMinutes / 60
+        if (
+          cleanerUsedFilterType === "greater" &&
+          !(usedHours > usedHoursFilter)
+        ) {
+          return false
+        }
+        if (
+          cleanerUsedFilterType === "less" &&
+          !(usedHours < usedHoursFilter)
+        ) {
+          return false
+        }
+      }
+
+      return true
+    })
+  }, [
+    cleanerBuildingFilter,
+    cleanerDeferredSearch,
+    cleanerUsedFilterType,
+    cleanerUsedFilterValue,
+    enrichedSessions,
+  ])
+
+  const totalCleanerHistoryPages = useMemo(
+    () =>
+      Math.max(
+        1,
+        Math.ceil(filteredCleanerSessions.length / cleanerHistoryPageSize),
+      ),
+    [filteredCleanerSessions.length],
+  )
+
+  const visibleCleanerSessions = useMemo(() => {
+    const start = cleanerHistoryPage * cleanerHistoryPageSize
+    return filteredCleanerSessions.slice(
+      start,
+      start + cleanerHistoryPageSize,
+    )
+  }, [cleanerHistoryPage, filteredCleanerSessions])
+
+  useEffect(() => {
+    setCleanerHistoryPage(0)
+  }, [
+    cleanerDeferredSearch,
+    cleanerBuildingFilter,
+    cleanerUsedFilterType,
+    cleanerUsedFilterValue,
+  ])
+
+  useEffect(() => {
+    setCleanerHistoryPage((currentPage) =>
+      Math.min(currentPage, Math.max(0, totalCleanerHistoryPages - 1)),
+    )
+  }, [totalCleanerHistoryPages])
+
+  const cleanerHistoryRangeStart =
+    filteredCleanerSessions.length > 0
+      ? cleanerHistoryPage * cleanerHistoryPageSize + 1
+      : 0
+  const cleanerHistoryRangeEnd = Math.min(
+    (cleanerHistoryPage + 1) * cleanerHistoryPageSize,
+    filteredCleanerSessions.length,
   )
 
   const buildingHoursData = useMemo(() => {
@@ -10856,35 +11082,111 @@ function CleanerSummary() {
     }
   }
 
-  const handleCleanerTimeOut = async (session: {
-    inRecord?: AcessRecord
-    outRecord?: AcessRecord
-  }) => {
-    if (!session.inRecord?.building_id || session.outRecord?.id) return
+  const resetCleanerManualAction = () => {
+    setCleanerManualAction(null)
+    setCleanerManualTimeValue("")
+  }
 
-    const inRecordKey = String(session.inRecord.id)
+  const handleCleanerManualActionDialogChange = (open: boolean) => {
+    if (!open && !isSavingCleanerManualAction) {
+      resetCleanerManualAction()
+    }
+  }
+
+  const handleOpenCleanerManualAction = (
+    session: {
+      inRecord?: AcessRecord
+      outRecord?: AcessRecord
+      buildingLabel: string
+    },
+    mode: CleanerManualActionState["mode"],
+  ) => {
+    const referenceRecord =
+      mode === "checkin" ? session.outRecord : session.inRecord
+
+    if (!referenceRecord?.building_id || !referenceRecord.data) {
+      showErrorToast("Could not identify the record date")
+      return
+    }
+
+    setCleanerManualAction({
+      mode,
+      buildingId: referenceRecord.building_id,
+      buildingLabel: session.buildingLabel,
+      referenceIso: referenceRecord.data,
+    })
+    setCleanerManualTimeValue("")
+  }
+
+  const handleSaveCleanerManualAction = async () => {
+    if (!cleanerManualAction) return
+
+    if (!cleanerManualTimeValue) {
+      showErrorToast("Time is required")
+      return
+    }
+
+    const [hoursRaw, minutesRaw] = cleanerManualTimeValue.split(":")
+    const hours = Number(hoursRaw)
+    const minutes = Number(minutesRaw)
+    if (
+      Number.isNaN(hours) ||
+      Number.isNaN(minutes) ||
+      hours < 0 ||
+      hours > 23 ||
+      minutes < 0 ||
+      minutes > 59
+    ) {
+      showErrorToast("Invalid time")
+      return
+    }
+
+    const referenceDate = new Date(cleanerManualAction.referenceIso)
+    if (Number.isNaN(referenceDate.getTime())) {
+      showErrorToast("Invalid record date")
+      return
+    }
+
+    const nextActionDate = new Date(referenceDate)
+    nextActionDate.setHours(hours, minutes, 0, 0)
+
+    if (cleanerManualAction.mode === "checkin") {
+      if (nextActionDate.getTime() >= referenceDate.getTime()) {
+        showErrorToast("Check in must be before Time OUT")
+        return
+      }
+    } else if (nextActionDate.getTime() <= referenceDate.getTime()) {
+      showErrorToast("Check out must be after Time IN")
+      return
+    }
 
     try {
-      setIsCreatingCleanerTimeout(inRecordKey)
+      setIsSavingCleanerManualAction(true)
       await apiCall("/api/v1/acess/", {
         method: "POST",
         body: {
-          building_id: session.inRecord.building_id,
-          operacao: 1,
+          building_id: cleanerManualAction.buildingId,
+          operacao: cleanerManualAction.mode === "checkin" ? 0 : 1,
+          data: nextActionDate.toISOString(),
         },
       })
       await queryClient.invalidateQueries({
         queryKey: ["acess", "cleaner"],
       })
-      showSuccessToast("Cleaner time out created successfully")
+      resetCleanerManualAction()
+      showSuccessToast(
+        `Cleaner ${
+          cleanerManualAction.mode === "checkin" ? "check in" : "check out"
+        } created successfully`,
+      )
     } catch (error) {
       const message =
         error instanceof Error
           ? error.message
-          : "Failed to create cleaner time out"
+          : "Failed to create cleaner action"
       showErrorToast(message)
     } finally {
-      setIsCreatingCleanerTimeout(null)
+      setIsSavingCleanerManualAction(false)
     }
   }
 
@@ -11023,6 +11325,92 @@ function CleanerSummary() {
         )}
       </div>
 
+      <div className="mb-4 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
+        <div className="grid gap-3 md:grid-cols-4">
+          <div>
+            <label
+              htmlFor="cleaner-history-search"
+              className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+            >
+              Search
+            </label>
+            <input
+              id="cleaner-history-search"
+              type="text"
+              value={cleanerSearch}
+              onChange={(event) => setCleanerSearch(event.target.value)}
+              placeholder="Date, building, time or used"
+              className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+            />
+          </div>
+          <div>
+            <label
+              htmlFor="cleaner-history-building-filter"
+              className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+            >
+              Building
+            </label>
+            <select
+              id="cleaner-history-building-filter"
+              value={cleanerBuildingFilter}
+              onChange={(event) => setCleanerBuildingFilter(event.target.value)}
+              className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+            >
+              <option value="">All buildings</option>
+              {cleanerBuildingOptions.map((building) => (
+                <option key={building} value={building}>
+                  {building}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label
+              htmlFor="cleaner-history-used-filter-type"
+              className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+            >
+              Used filter
+            </label>
+            <select
+              id="cleaner-history-used-filter-type"
+              value={cleanerUsedFilterType}
+              onChange={(event) =>
+                setCleanerUsedFilterType(
+                  event.target.value === "greater"
+                    ? "greater"
+                    : event.target.value === "less"
+                      ? "less"
+                      : "all",
+                )
+              }
+              className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+            >
+              <option value="all">All</option>
+              <option value="greater">Greater than</option>
+              <option value="less">Less than</option>
+            </select>
+          </div>
+          <div>
+            <label
+              htmlFor="cleaner-history-used-filter-value"
+              className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+            >
+              Used hours
+            </label>
+            <input
+              id="cleaner-history-used-filter-value"
+              type="number"
+              min="0"
+              step="0.25"
+              value={cleanerUsedFilterValue}
+              onChange={(event) => setCleanerUsedFilterValue(event.target.value)}
+              placeholder="e.g. 2"
+              className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+            />
+          </div>
+        </div>
+      </div>
+
       <div className="overflow-x-auto">
         <table className="w-full border-collapse">
           <thead>
@@ -11058,7 +11446,7 @@ function CleanerSummary() {
                 </td>
               </tr>
             )}
-            {!isLoadingAcess && tableSessions.length === 0 && (
+            {!isLoadingAcess && visibleCleanerSessions.length === 0 && (
               <tr>
                 <td
                   className="border border-gray-400 px-3 py-3 text-center text-sm text-gray-600"
@@ -11068,16 +11456,16 @@ function CleanerSummary() {
                 </td>
               </tr>
             )}
-            {tableSessions.map((session, index) => {
+            {visibleCleanerSessions.map((session, index) => {
               const dateLabel = formatDate(
                 session.inRecord?.data || session.outRecord?.data,
               )
-              const canTimeOut = Boolean(
+              const canCheckOut = Boolean(
                 session.inRecord?.id && !session.outRecord?.id,
               )
-              const isTimingOut =
-                isCreatingCleanerTimeout !== null &&
-                isCreatingCleanerTimeout === String(session.inRecord?.id)
+              const canCheckIn = Boolean(
+                !session.inRecord?.id && session.outRecord?.id,
+              )
 
               return (
                 <tr
@@ -11091,10 +11479,40 @@ function CleanerSummary() {
                     {session.buildingLabel}
                   </td>
                   <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
-                    {formatTime(session.inRecord?.data)}
+                    <div className="flex items-center justify-between gap-2">
+                      {session.inRecord?.data ? (
+                        <span>{formatTime(session.inRecord?.data)}</span>
+                      ) : null}
+                      {canCheckIn && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleOpenCleanerManualAction(session, "checkin")
+                          }
+                          className="rounded border border-[#8c7569] px-2 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Check in
+                        </button>
+                      )}
+                    </div>
                   </td>
                   <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
-                    {formatTime(session.outRecord?.data)}
+                    <div className="flex items-center justify-between gap-2">
+                      {session.outRecord?.data ? (
+                        <span>{formatTime(session.outRecord?.data)}</span>
+                      ) : null}
+                      {canCheckOut && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleOpenCleanerManualAction(session, "checkout")
+                          }
+                          className="rounded border border-[#8c7569] px-2 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Check out
+                        </button>
+                      )}
+                    </div>
                   </td>
                   <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
                     {formatUsed(
@@ -11103,35 +11521,21 @@ function CleanerSummary() {
                     )}
                   </td>
                   <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleOpenCleanerRecordEdit(
-                            session.inRecord?.id || null,
-                            session.inRecord?.data || null,
-                            session.outRecord?.id || null,
-                            session.outRecord?.data || null,
-                          )
-                        }
-                        disabled={
-                          !session.inRecord?.id && !session.outRecord?.id
-                        }
-                        className="rounded bg-[#8c7569] px-2 py-1 text-xs font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        Edit
-                      </button>
-                      {canTimeOut && (
-                        <button
-                          type="button"
-                          onClick={() => handleCleanerTimeOut(session)}
-                          disabled={isTimingOut}
-                          className="rounded border border-[#8c7569] px-2 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {isTimingOut ? "Saving..." : "Time out"}
-                        </button>
-                      )}
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleOpenCleanerRecordEdit(
+                          session.inRecord?.id || null,
+                          session.inRecord?.data || null,
+                          session.outRecord?.id || null,
+                          session.outRecord?.data || null,
+                        )
+                      }
+                      disabled={!session.inRecord?.id && !session.outRecord?.id}
+                      className="rounded bg-[#8c7569] px-2 py-1 text-xs font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Edit
+                    </button>
                   </td>
                 </tr>
               )
@@ -11139,6 +11543,42 @@ function CleanerSummary() {
           </tbody>
         </table>
       </div>
+
+      {filteredCleanerSessions.length > 0 && (
+        <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-[#55311c]">
+            Showing {cleanerHistoryRangeStart}-{cleanerHistoryRangeEnd} of{" "}
+            {filteredCleanerSessions.length} cleaner record(s)
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() =>
+                setCleanerHistoryPage(Math.max(0, cleanerHistoryPage - 1))
+              }
+              disabled={cleanerHistoryPage === 0}
+              className="rounded border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Previous
+            </button>
+            <span className="flex items-center px-2 text-sm font-semibold text-[#55311c]">
+              {cleanerHistoryPage + 1} / {totalCleanerHistoryPages}
+            </span>
+            <button
+              type="button"
+              onClick={() =>
+                setCleanerHistoryPage(
+                  Math.min(totalCleanerHistoryPages - 1, cleanerHistoryPage + 1),
+                )
+              }
+              disabled={cleanerHistoryPage >= totalCleanerHistoryPages - 1}
+              className="rounded border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
 
       {editingCleanerRecord && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-3 sm:items-center sm:px-4">
@@ -11213,6 +11653,82 @@ function CleanerSummary() {
           </div>
         </div>
       )}
+
+      <Dialog
+        open={Boolean(cleanerManualAction)}
+        onOpenChange={handleCleanerManualActionDialogChange}
+      >
+        <DialogContent className="border-[#e5e0dc] bg-white text-[#55311c] sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-[#55311c]">
+              {cleanerManualAction?.mode === "checkin"
+                ? "Create cleaner check in"
+                : "Create cleaner check out"}
+            </DialogTitle>
+            <DialogDescription className="text-[rgba(0,0,0,0.7)]">
+              Enter the time for{" "}
+              {cleanerManualAction
+                ? formatDate(cleanerManualAction.referenceIso)
+                : "-"}{" "}
+              at{" "}
+              <span className="font-semibold text-[#55311c]">
+                {cleanerManualAction?.buildingLabel || "-"}
+              </span>
+              .
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-3">
+            <div>
+              <label
+                className="block text-sm font-semibold text-[#55311c]"
+                htmlFor="cleaner-manual-time"
+              >
+                Time
+              </label>
+              <input
+                id="cleaner-manual-time"
+                type="time"
+                value={cleanerManualTimeValue}
+                onChange={(event) =>
+                  setCleanerManualTimeValue(event.target.value)
+                }
+                className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+              />
+            </div>
+            {cleanerManualAction && (
+              <p className="text-xs text-[rgba(0,0,0,0.65)]">
+                {cleanerManualAction.mode === "checkin"
+                  ? `Time IN must be before ${formatTime(
+                      cleanerManualAction.referenceIso,
+                    )}.`
+                  : `Time OUT must be after ${formatTime(
+                      cleanerManualAction.referenceIso,
+                    )}.`}
+              </p>
+            )}
+          </div>
+
+          <DialogFooter>
+            <button
+              type="button"
+              onClick={resetCleanerManualAction}
+              disabled={isSavingCleanerManualAction}
+              className="w-full rounded-lg border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleSaveCleanerManualAction}
+              disabled={isSavingCleanerManualAction}
+              className="w-full rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+            >
+              {isSavingCleanerManualAction ? "Saving..." : "Save"}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
@@ -11577,7 +12093,13 @@ function CaretakerSummary({
   })
   const [selectedBinsDateFrom, setSelectedBinsDateFrom] = useState("")
   const [selectedBinsDateTo, setSelectedBinsDateTo] = useState("")
-  const [binsHistoryPage, setBinsHistoryPage] = useState(0)
+  const [caretakerSearch, setCaretakerSearch] = useState("")
+  const [caretakerBuildingFilter, setCaretakerBuildingFilter] = useState("")
+  const [caretakerUsedFilterType, setCaretakerUsedFilterType] = useState<
+    "all" | "greater" | "less"
+  >("all")
+  const [caretakerUsedFilterValue, setCaretakerUsedFilterValue] = useState("")
+  const [caretakerHistoryPage, setCaretakerHistoryPage] = useState(0)
   const [selectedWeekStart, setSelectedWeekStart] = useState(() =>
     getWeekStartIso(new Date()),
   )
@@ -11594,6 +12116,8 @@ function CaretakerSummary({
   const [editedCaretakerTimeValue, setEditedCaretakerTimeValue] = useState("")
   const [isSavingCaretakerRecordEdit, setIsSavingCaretakerRecordEdit] =
     useState(false)
+  const caretakerDeferredSearch = useDeferredValue(caretakerSearch.trim())
+  const caretakerHistoryPageSize = 10
 
   const workTimeSessionsGrouped = useMemo(() => {
     const sorted = [...workTimeRecords]
@@ -11713,6 +12237,21 @@ function CaretakerSummary({
       `${formatDateToBr(selectedWeekStart)} - ${formatDateToBr(selectedWeekEnd)}`,
     [selectedWeekEnd, selectedWeekStart],
   )
+  const selectedWorkMonthKey = useMemo(
+    () => selectedWeekStart.slice(0, 7),
+    [selectedWeekStart],
+  )
+  const selectedWorkMonthLabel = useMemo(() => {
+    const [yearRaw, monthRaw] = selectedWorkMonthKey.split("-")
+    const year = Number(yearRaw)
+    const month = Number(monthRaw)
+    if (!year || !month) return selectedWorkMonthKey
+    return new Date(Date.UTC(year, month - 1, 1)).toLocaleDateString("en-GB", {
+      month: "long",
+      year: "numeric",
+      timeZone: "UTC",
+    })
+  }, [selectedWorkMonthKey])
 
   const workTimeDayHours = useMemo(() => {
     let totalMinutes = 0
@@ -11763,6 +12302,27 @@ function CaretakerSummary({
     () => Math.max(20 - workTimeWeekHours, 0),
     [workTimeWeekHours],
   )
+  const workTimeMonthHours = useMemo(() => {
+    let totalMinutes = 0
+    workTimeSessionsGrouped.forEach((session) => {
+      const sessionDate = toDateKey(
+        session.inRecord?.data || session.outRecord?.data,
+      )
+      if (!sessionDate.startsWith(`${selectedWorkMonthKey}-`)) return
+
+      totalMinutes += getDurationMinutes(
+        session.inRecord?.data,
+        session.outRecord?.data,
+        false,
+      )
+    })
+    return Number((totalMinutes / 60).toFixed(2))
+  }, [
+    getDurationMinutes,
+    selectedWorkMonthKey,
+    workTimeSessionsGrouped,
+    toDateKey,
+  ])
 
   const binSessionsGrouped = useMemo(() => {
     const sorted = [...binSessions]
@@ -11823,8 +12383,6 @@ function CaretakerSummary({
     }
   }, [selectedBinsDateFrom, selectedBinsDateTo])
 
-  const binsHistoryPageSize = 10
-
   const binsTimeByBuilding = useMemo(() => {
     const totals = new Map<string, number>()
     binSessionsGrouped.forEach((session) => {
@@ -11884,10 +12442,15 @@ function CaretakerSummary({
         outValue: session.outRecord?.data || null,
         inRecordId: session.inRecord?.id || null,
         outRecordId: session.outRecord?.id || null,
+        durationMinutes: getDurationMinutes(
+          session.inRecord?.data,
+          session.outRecord?.data,
+          true,
+        ),
         sortTime,
       }
     })
-  }, [binSessionsGrouped, buildingMap])
+  }, [binSessionsGrouped, buildingMap, getDurationMinutes])
 
   const workTimeHistoryRows = useMemo(() => {
     return workTimeSessionsGrouped.map((session, index) => {
@@ -11902,10 +12465,15 @@ function CaretakerSummary({
         outValue: session.outRecord?.data || null,
         inRecordId: session.inRecord?.id || null,
         outRecordId: session.outRecord?.id || null,
+        durationMinutes: getDurationMinutes(
+          session.inRecord?.data,
+          session.outRecord?.data,
+          false,
+        ),
         sortTime,
       }
     })
-  }, [workTimeSessionsGrouped])
+  }, [getDurationMinutes, workTimeSessionsGrouped])
 
   const filteredHistoryRows = useMemo(() => {
     const sourceRows =
@@ -11925,8 +12493,7 @@ function CaretakerSummary({
               binsDateTo,
             ),
           )
-    return [...filteredRows]
-      .sort((a, b) => b.sortTime - a.sortTime)
+    return [...filteredRows].sort((a, b) => b.sortTime - a.sortTime)
   }, [
     activeTab,
     binHistoryRows,
@@ -11937,20 +12504,84 @@ function CaretakerSummary({
     workTimeHistoryRows,
   ])
 
-  const totalBinsHistoryPages = useMemo(
+  const caretakerBuildingOptions = useMemo(
     () =>
-      Math.max(1, Math.ceil(filteredHistoryRows.length / binsHistoryPageSize)),
-    [filteredHistoryRows.length],
+      [...new Set(filteredHistoryRows.map((row) => row.buildingLabel))]
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b)),
+    [filteredHistoryRows],
+  )
+
+  const filteredCaretakerHistoryRows = useMemo(() => {
+    const normalizedSearch = caretakerDeferredSearch.toLowerCase()
+    const usedHoursFilter = Number(caretakerUsedFilterValue)
+
+    return filteredHistoryRows.filter((row) => {
+      const matchesSearch =
+        !normalizedSearch ||
+        [
+          row.buildingLabel,
+          formatDate(row.inValue || row.outValue),
+          formatTime(row.inValue),
+          formatTime(row.outValue),
+          formatUsed(row.inValue, row.outValue),
+        ].some((value) => value.toLowerCase().includes(normalizedSearch))
+
+      if (!matchesSearch) return false
+      if (
+        caretakerBuildingFilter &&
+        row.buildingLabel !== caretakerBuildingFilter
+      ) {
+        return false
+      }
+      if (
+        caretakerUsedFilterType !== "all" &&
+        caretakerUsedFilterValue.trim() &&
+        !Number.isNaN(usedHoursFilter)
+      ) {
+        const usedHours = row.durationMinutes / 60
+        if (
+          caretakerUsedFilterType === "greater" &&
+          !(usedHours > usedHoursFilter)
+        ) {
+          return false
+        }
+        if (
+          caretakerUsedFilterType === "less" &&
+          !(usedHours < usedHoursFilter)
+        ) {
+          return false
+        }
+      }
+      return true
+    })
+  }, [
+    caretakerBuildingFilter,
+    caretakerDeferredSearch,
+    caretakerUsedFilterType,
+    caretakerUsedFilterValue,
+    filteredHistoryRows,
+  ])
+
+  const totalCaretakerHistoryPages = useMemo(
+    () =>
+      Math.max(
+        1,
+        Math.ceil(filteredCaretakerHistoryRows.length / caretakerHistoryPageSize),
+      ),
+    [filteredCaretakerHistoryRows.length],
   )
 
   const visibleHistoryRows = useMemo(() => {
-    if (activeTab !== "bins") {
-      return filteredHistoryRows.slice(0, 20)
-    }
-
-    const start = binsHistoryPage * binsHistoryPageSize
-    return filteredHistoryRows.slice(start, start + binsHistoryPageSize)
-  }, [activeTab, binsHistoryPage, filteredHistoryRows])
+    const start = caretakerHistoryPage * caretakerHistoryPageSize
+    return filteredCaretakerHistoryRows.slice(
+      start,
+      start + caretakerHistoryPageSize,
+    )
+  }, [
+    caretakerHistoryPage,
+    filteredCaretakerHistoryRows,
+  ])
 
   useEffect(() => {
     if (activeTab !== "summary") return
@@ -11965,28 +12596,32 @@ function CaretakerSummary({
   }, [activeTab, selectedWeekStart, selectedWorkDate])
 
   useEffect(() => {
-    setBinsHistoryPage(0)
-  }, [activeTab, binsDateFrom, binsDateTo])
+    setCaretakerHistoryPage(0)
+  }, [
+    activeTab,
+    caretakerDeferredSearch,
+    caretakerBuildingFilter,
+    caretakerUsedFilterType,
+    caretakerUsedFilterValue,
+    selectedWeekStart,
+    binsDateFrom,
+    binsDateTo,
+  ])
 
   useEffect(() => {
-    if (activeTab !== "bins") return
-
-    setBinsHistoryPage((currentPage) =>
-      Math.min(currentPage, Math.max(0, totalBinsHistoryPages - 1)),
+    setCaretakerHistoryPage((currentPage) =>
+      Math.min(currentPage, Math.max(0, totalCaretakerHistoryPages - 1)),
     )
-  }, [activeTab, totalBinsHistoryPages])
+  }, [totalCaretakerHistoryPages])
 
-  const binsHistoryRangeStart =
-    activeTab === "bins" && filteredHistoryRows.length > 0
-      ? binsHistoryPage * binsHistoryPageSize + 1
+  const caretakerHistoryRangeStart =
+    filteredCaretakerHistoryRows.length > 0
+      ? caretakerHistoryPage * caretakerHistoryPageSize + 1
       : 0
-  const binsHistoryRangeEnd =
-    activeTab === "bins"
-      ? Math.min(
-          (binsHistoryPage + 1) * binsHistoryPageSize,
-          filteredHistoryRows.length,
-        )
-      : 0
+  const caretakerHistoryRangeEnd = Math.min(
+    (caretakerHistoryPage + 1) * caretakerHistoryPageSize,
+    filteredCaretakerHistoryRows.length,
+  )
 
   const formatDurationFromMinutes = (minutes: number) => {
     if (minutes <= 0) return "0m"
@@ -12229,12 +12864,12 @@ function CaretakerSummary({
       {activeTab === "summary" ? (
         <>
           <div className="mb-6 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
-            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-              <div>
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-center">
+              <div className="lg:pr-6">
                 <p className="text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]">
                   Weekly Hours
                 </p>
-                <div className="mt-2 flex items-end gap-3">
+                <div className="mt-2 flex flex-wrap items-end gap-3">
                   <span className="font-['Nunito',sans-serif] text-4xl font-bold text-[#55311c]">
                     {workTimeWeekHours.toFixed(2)}h
                   </span>
@@ -12246,11 +12881,24 @@ function CaretakerSummary({
                   {remainingWeeklyTargetHours.toFixed(2)}h left to reach 20h
                 </p>
               </div>
-              <div className="flex flex-col gap-2 md:items-end">
+              <div className="lg:border-l lg:border-[#e5e0dc] lg:px-6">
+                <p className="text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]">
+                  Monthly Hours
+                </p>
+                <div className="mt-2 flex flex-wrap items-end gap-3">
+                  <span className="font-['Nunito',sans-serif] text-4xl font-bold text-[#55311c]">
+                    {workTimeMonthHours.toFixed(2)}h
+                  </span>
+                  <span className="pb-1 text-sm text-[rgba(85,49,28,0.72)]">
+                    {selectedWorkMonthLabel}
+                  </span>
+                </div>
+              </div>
+              <div className="flex flex-col gap-2 lg:border-l lg:border-[#e5e0dc] lg:items-end lg:pl-6">
                 <span className="text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]">
                   Week Filter
                 </span>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2 lg:justify-end">
                   <button
                     type="button"
                     onClick={() =>
@@ -12461,6 +13109,96 @@ function CaretakerSummary({
         </div>
       )}
 
+      <div className="mb-4 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
+        <div className="grid gap-3 md:grid-cols-4">
+          <div>
+            <label
+              htmlFor="caretaker-history-search"
+              className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+            >
+              Search
+            </label>
+            <input
+              id="caretaker-history-search"
+              type="text"
+              value={caretakerSearch}
+              onChange={(event) => setCaretakerSearch(event.target.value)}
+              placeholder="Date, building, time or used"
+              className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+            />
+          </div>
+          <div>
+            <label
+              htmlFor="caretaker-history-building-filter"
+              className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+            >
+              Building
+            </label>
+            <select
+              id="caretaker-history-building-filter"
+              value={caretakerBuildingFilter}
+              onChange={(event) =>
+                setCaretakerBuildingFilter(event.target.value)
+              }
+              className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+            >
+              <option value="">All buildings</option>
+              {caretakerBuildingOptions.map((building) => (
+                <option key={building} value={building}>
+                  {building}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label
+              htmlFor="caretaker-history-used-filter-type"
+              className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+            >
+              Used filter
+            </label>
+            <select
+              id="caretaker-history-used-filter-type"
+              value={caretakerUsedFilterType}
+              onChange={(event) =>
+                setCaretakerUsedFilterType(
+                  event.target.value === "greater"
+                    ? "greater"
+                    : event.target.value === "less"
+                      ? "less"
+                      : "all",
+                )
+              }
+              className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+            >
+              <option value="all">All</option>
+              <option value="greater">Greater than</option>
+              <option value="less">Less than</option>
+            </select>
+          </div>
+          <div>
+            <label
+              htmlFor="caretaker-history-used-filter-value"
+              className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+            >
+              Used hours
+            </label>
+            <input
+              id="caretaker-history-used-filter-value"
+              type="number"
+              min="0"
+              step="0.25"
+              value={caretakerUsedFilterValue}
+              onChange={(event) =>
+                setCaretakerUsedFilterValue(event.target.value)
+              }
+              placeholder="e.g. 2"
+              className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+            />
+          </div>
+        </div>
+      </div>
+
       <div className="overflow-x-auto">
         <table className="w-full border-collapse">
           <thead>
@@ -12586,7 +13324,9 @@ function CaretakerSummary({
                         }
                         className="rounded border border-red-300 px-3 py-1 text-xs font-semibold text-red-700 transition-all duration-200 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        {deletingBinsRowKey === row.key ? "Deleting..." : "Delete"}
+                        {deletingBinsRowKey === row.key
+                          ? "Deleting..."
+                          : "Delete"}
                       </button>
                     </td>
                   )}
@@ -12597,32 +13337,40 @@ function CaretakerSummary({
         </table>
       </div>
 
-      {activeTab === "bins" && filteredHistoryRows.length > 0 && (
+      {filteredCaretakerHistoryRows.length > 0 && (
         <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm text-[#55311c]">
-            Showing {binsHistoryRangeStart}-{binsHistoryRangeEnd} of{" "}
-            {filteredHistoryRows.length} bin record(s)
+            Showing {caretakerHistoryRangeStart}-{caretakerHistoryRangeEnd} of{" "}
+            {filteredCaretakerHistoryRows.length}{" "}
+            {activeTab === "bins" ? "bin" : "work time"} record(s)
           </p>
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={() => setBinsHistoryPage(Math.max(0, binsHistoryPage - 1))}
-              disabled={binsHistoryPage === 0}
+              onClick={() =>
+                setCaretakerHistoryPage(Math.max(0, caretakerHistoryPage - 1))
+              }
+              disabled={caretakerHistoryPage === 0}
               className="rounded border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-50"
             >
               Previous
             </button>
             <span className="flex items-center px-2 text-sm font-semibold text-[#55311c]">
-              {binsHistoryPage + 1} / {totalBinsHistoryPages}
+              {caretakerHistoryPage + 1} / {totalCaretakerHistoryPages}
             </span>
             <button
               type="button"
               onClick={() =>
-                setBinsHistoryPage(
-                  Math.min(totalBinsHistoryPages - 1, binsHistoryPage + 1),
+                setCaretakerHistoryPage(
+                  Math.min(
+                    totalCaretakerHistoryPages - 1,
+                    caretakerHistoryPage + 1,
+                  ),
                 )
               }
-              disabled={binsHistoryPage >= totalBinsHistoryPages - 1}
+              disabled={
+                caretakerHistoryPage >= totalCaretakerHistoryPages - 1
+              }
               className="rounded border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-50"
             >
               Next
@@ -13807,6 +14555,20 @@ function ResidentsContent() {
   )
 }
 
+function getDefaultResidentFormData() {
+  return {
+    nome: "",
+    email: "",
+    mobile: "",
+    cargo: 0,
+    receives_flat_reading_sms: false,
+    receives_twilio_sms: false,
+    car1: "",
+    car2: "",
+    flat_id: "",
+  }
+}
+
 function AddResidentForm({
   onBack,
   editingId,
@@ -13818,17 +14580,7 @@ function AddResidentForm({
 }) {
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
-  const [formData, setFormData] = useState({
-    nome: "",
-    email: "",
-    mobile: "",
-    cargo: 0,
-    receives_flat_reading_sms: true,
-    receives_twilio_sms: false,
-    car1: "",
-    car2: "",
-    flat_id: "",
-  })
+  const [formData, setFormData] = useState(getDefaultResidentFormData)
   const [activeEditingId, setActiveEditingId] = useState<EntityId | null>(
     editingId,
   )
@@ -13881,18 +14633,39 @@ function AddResidentForm({
     )?.resident ?? null
   const shouldShowCarFields = activeEditingId
     ? activePreviewResident?.cargo === 0
-    : Number(formData.cargo) === 0
+    : formData.cargo === 0
   const activeEditTitle = activePreviewResident
     ? `Edit ${getResidentRoleEditToken(activePreviewResident.cargo)}`
     : (editContext?.editTitle ?? "Edit resident")
 
   useEffect(() => {
     setActiveEditingId(editingId)
+    if (!editingId) {
+      setFormData(getDefaultResidentFormData())
+    }
   }, [editingId])
 
   const { data: buildingsData } = useQuery<ApiListResponse<Building>>({
     queryKey: ["buildings"],
     queryFn: () => apiCall("/api/v1/buildings/condominio"),
+  })
+
+  const deleteResidentMutation = useMutation({
+    mutationFn: async (id: EntityId) =>
+      apiCall(`/api/v1/moradores/${id}`, {
+        method: "DELETE",
+      }),
+    onSuccess: async () => {
+      showSuccessToast("Resident deleted successfully!")
+      await queryClient.invalidateQueries({ queryKey: ["Residents"] })
+      await queryClient.invalidateQueries({ queryKey: ["buildings"] })
+      onBack()
+    },
+    onError: (error) => {
+      const message =
+        error instanceof Error ? error.message : "Error deleting resident"
+      showErrorToast(message)
+    },
   })
 
   // Load editing morador data if editingId is set
@@ -13962,11 +14735,29 @@ function AddResidentForm({
     const nextValue =
       e.target instanceof HTMLInputElement && e.target.type === "checkbox"
         ? e.target.checked
-        : value
+        : name === "cargo"
+          ? Number(value)
+          : value
     setFormData((prev) => ({
       ...prev,
       [name]: nextValue,
     }))
+  }
+
+  const handleDeleteResident = () => {
+    if (!activeEditingId || deleteResidentMutation.isPending) return
+
+    const residentName =
+      formData.nome.trim() || activePreviewResident?.nome || ""
+    const confirmationMessage = residentName
+      ? `Delete ${residentName}?`
+      : "Delete this resident?"
+    const confirmed =
+      typeof window === "undefined" ? true : window.confirm(confirmationMessage)
+
+    if (!confirmed) return
+
+    deleteResidentMutation.mutate(activeEditingId)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -14248,15 +15039,28 @@ function AddResidentForm({
                   onChange={handleInputChange}
                   className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
                 >
-                  <option value="0">Resident</option>
-                  <option value="1">Owner</option>
+                  <option value="0">Owner 1</option>
+                  <option value="1">Owner 2</option>
                   <option value="2">Tenant</option>
+                  <option value="3">Agent</option>
                 </select>
               </div>
             )}
           </div>
 
           <div className="mt-8 flex justify-end gap-4">
+            {activeEditingId && (
+              <button
+                type="button"
+                onClick={handleDeleteResident}
+                disabled={deleteResidentMutation.isPending || isSubmitting}
+                className="rounded-lg border border-[#d28a6f] px-6 py-3 font-['Nunito',sans-serif] text-[#8a3d1b] transition-all duration-300 hover:bg-[#fff1ea] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {deleteResidentMutation.isPending
+                  ? "Deleting..."
+                  : "Delete Resident"}
+              </button>
+            )}
             <button
               type="button"
               onClick={onBack}
@@ -14266,7 +15070,7 @@ function AddResidentForm({
             </button>
             <button
               type="submit"
-              disabled={isSubmitting}
+              disabled={isSubmitting || deleteResidentMutation.isPending}
               className="rounded-lg bg-[#8c7569] px-6 py-3 font-['Nunito',sans-serif] text-white transition-all duration-300 hover:bg-[#55311c] disabled:opacity-50"
             >
               {isSubmitting

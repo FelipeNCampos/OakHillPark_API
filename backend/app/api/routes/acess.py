@@ -256,21 +256,27 @@ def create_acess(*, session: SessionDep, acess_in: AcessCreate) -> Any:
             detail="Office is not valid for cleaner access",
         )
 
-    access_time = datetime.datetime.now()
+    is_manual_backfill = "data" in acess_in.model_fields_set
+    access_time = acess_in.data if is_manual_backfill else datetime.datetime.now()
     access_date = access_time.date()
     should_send_cleaner_in_sms = (
-        acess_in.operacao == 0
+        not is_manual_backfill
+        and acess_in.operacao == 0
         and not _has_cleaner_in_for_day(session, default_cleaner.id, access_date)
     )
     had_completed_all_buildings = False
-    if acess_in.operacao == 1:
+    if not is_manual_backfill and acess_in.operacao == 1:
         had_completed_all_buildings = _has_all_buildings_cleaner_in_and_out_for_day(
             session, default_cleaner, access_date
         )
 
-    last_acess = get_last_acess(session, default_cleaner.id)
+    last_acess = (
+        get_last_acess(session, default_cleaner.id)
+        if not is_manual_backfill
+        else None
+    )
 
-    if acess_in.operacao == 0:
+    if not is_manual_backfill and acess_in.operacao == 0:
         if last_acess and last_acess.operacao == 0:
             if last_acess.building_id == acess_in.building_id:
                 raise HTTPException(
@@ -288,13 +294,13 @@ def create_acess(*, session: SessionDep, acess_in: AcessCreate) -> Any:
             auto_close_acess = Acess.model_validate(auto_close)
             auto_close_acess.funcionario_id = default_cleaner.id
             session.add(auto_close_acess)
-    if acess_in.operacao == 1:
-        if (last_acess is None) :
+    if not is_manual_backfill and acess_in.operacao == 1:
+        if last_acess is None:
             raise HTTPException(
-            status_code=400,
+                status_code=400,
                 detail="Cleaner does not have an open session to close",
             )
-        if (last_acess.operacao == 1):
+        if last_acess.operacao == 1:
             raise HTTPException(
                 status_code=400,
                 detail="Cleaner does not have an open session to close",
@@ -317,7 +323,8 @@ def create_acess(*, session: SessionDep, acess_in: AcessCreate) -> Any:
     if should_send_cleaner_in_sms:
         _send_staff_status_sms("Cleaner IN")
     elif (
-        acess_in.operacao == 1
+        not is_manual_backfill
+        and acess_in.operacao == 1
         and not had_completed_all_buildings
         and _has_all_buildings_cleaner_in_and_out_for_day(
             session, default_cleaner, access_date

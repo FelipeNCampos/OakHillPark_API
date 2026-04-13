@@ -129,6 +129,14 @@ interface CaretakerRecordEditState {
   recordType: "work-time" | "bins"
 }
 
+interface CaretakerManualActionState {
+  mode: "checkin" | "checkout"
+  recordType: "work-time" | "bins"
+  buildingId: EntityId | null
+  buildingLabel: string
+  referenceIso: string
+}
+
 interface CleanerRecordEditState {
   inRecordId: EntityId | null
   inOriginalIso: string | null
@@ -12116,6 +12124,11 @@ function CaretakerSummary({
   const [editedCaretakerTimeValue, setEditedCaretakerTimeValue] = useState("")
   const [isSavingCaretakerRecordEdit, setIsSavingCaretakerRecordEdit] =
     useState(false)
+  const [caretakerManualAction, setCaretakerManualAction] =
+    useState<CaretakerManualActionState | null>(null)
+  const [caretakerManualTimeValue, setCaretakerManualTimeValue] = useState("")
+  const [isSavingCaretakerManualAction, setIsSavingCaretakerManualAction] =
+    useState(false)
   const caretakerDeferredSearch = useDeferredValue(caretakerSearch.trim())
   const caretakerHistoryPageSize = 10
 
@@ -12438,6 +12451,7 @@ function CaretakerSummary({
         key: `bins-${index}-${session.inRecord?.id || "in"}-${session.outRecord?.id || "out"}`,
         kind: "bins" as const,
         buildingLabel,
+        buildingId: buildingId || null,
         inValue: session.inRecord?.data || null,
         outValue: session.outRecord?.data || null,
         inRecordId: session.inRecord?.id || null,
@@ -12461,6 +12475,7 @@ function CaretakerSummary({
         key: `work-time-${index}-${session.inRecord?.id || "in"}-${session.outRecord?.id || "out"}`,
         kind: "work-time" as const,
         buildingLabel: "WORK TIME",
+        buildingId: null,
         inValue: session.inRecord?.data || null,
         outValue: session.outRecord?.data || null,
         inRecordId: session.inRecord?.id || null,
@@ -12796,6 +12811,138 @@ function CaretakerSummary({
       showErrorToast(message)
     } finally {
       setIsSavingCaretakerRecordEdit(false)
+    }
+  }
+
+  const resetCaretakerManualAction = () => {
+    setCaretakerManualAction(null)
+    setCaretakerManualTimeValue("")
+  }
+
+  const handleCaretakerManualActionDialogChange = (open: boolean) => {
+    if (!open && !isSavingCaretakerManualAction) {
+      resetCaretakerManualAction()
+    }
+  }
+
+  const handleOpenCaretakerManualAction = (
+    row: {
+      kind: "work-time" | "bins"
+      buildingLabel: string
+      buildingId: EntityId | null
+      inValue: string | null
+      outValue: string | null
+    },
+    mode: CaretakerManualActionState["mode"],
+  ) => {
+    const referenceIso = mode === "checkin" ? row.outValue : row.inValue
+    if (!referenceIso) {
+      showErrorToast("Could not identify the record date")
+      return
+    }
+
+    setCaretakerManualAction({
+      mode,
+      recordType: row.kind,
+      buildingId: row.kind === "bins" ? row.buildingId : null,
+      buildingLabel: row.buildingLabel,
+      referenceIso,
+    })
+    setCaretakerManualTimeValue("")
+  }
+
+  const handleSaveCaretakerManualAction = async () => {
+    if (!caretakerManualAction) return
+
+    if (!caretakerManualTimeValue) {
+      showErrorToast("Time is required")
+      return
+    }
+
+    const [hoursRaw, minutesRaw] = caretakerManualTimeValue.split(":")
+    const hours = Number(hoursRaw)
+    const minutes = Number(minutesRaw)
+    if (
+      Number.isNaN(hours) ||
+      Number.isNaN(minutes) ||
+      hours < 0 ||
+      hours > 23 ||
+      minutes < 0 ||
+      minutes > 59
+    ) {
+      showErrorToast("Invalid time")
+      return
+    }
+
+    const referenceDate = new Date(caretakerManualAction.referenceIso)
+    if (Number.isNaN(referenceDate.getTime())) {
+      showErrorToast("Invalid record date")
+      return
+    }
+
+    const nextActionDate = new Date(referenceDate)
+    nextActionDate.setHours(hours, minutes, 0, 0)
+
+    if (caretakerManualAction.mode === "checkin") {
+      if (nextActionDate.getTime() >= referenceDate.getTime()) {
+        showErrorToast("Check in must be before Time OUT")
+        return
+      }
+    } else if (nextActionDate.getTime() <= referenceDate.getTime()) {
+      showErrorToast("Check out must be after Time IN")
+      return
+    }
+
+    const apiPath =
+      caretakerManualAction.recordType === "work-time"
+        ? "/api/v1/acess/caretaker/work-time"
+        : "/api/v1/bins/sessions"
+    const queryKey =
+      caretakerManualAction.recordType === "work-time"
+        ? ["acess", "caretaker", "work-time"]
+        : ["bins", "sessions", "caretaker-summary"]
+
+    if (
+      caretakerManualAction.recordType === "bins" &&
+      !caretakerManualAction.buildingId
+    ) {
+      showErrorToast("Could not identify building")
+      return
+    }
+
+    try {
+      setIsSavingCaretakerManualAction(true)
+      await apiCall(apiPath, {
+        method: "POST",
+        body:
+          caretakerManualAction.recordType === "work-time"
+            ? {
+                operacao: caretakerManualAction.mode === "checkin" ? 0 : 1,
+                data: nextActionDate.toISOString(),
+              }
+            : {
+                building_id: caretakerManualAction.buildingId,
+                operacao: caretakerManualAction.mode === "checkin" ? 0 : 1,
+                data: nextActionDate.toISOString(),
+              },
+      })
+      await queryClient.invalidateQueries({
+        queryKey,
+      })
+      resetCaretakerManualAction()
+      showSuccessToast(
+        `${caretakerManualAction.recordType === "work-time" ? "Caretaker" : "Bin"} ${
+          caretakerManualAction.mode === "checkin" ? "check in" : "check out"
+        } created successfully`,
+      )
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to create caretaker action"
+      showErrorToast(message)
+    } finally {
+      setIsSavingCaretakerManualAction(false)
     }
   }
 
@@ -13251,6 +13398,8 @@ function CaretakerSummary({
               )}
             {visibleHistoryRows.map((row) => {
               const dateLabel = formatDate(row.inValue || row.outValue)
+              const canCheckIn = Boolean(!row.inValue && row.outValue)
+              const canCheckOut = Boolean(row.inValue && !row.outValue)
 
               return (
                 <tr key={row.key} className="bg-white hover:bg-gray-50">
@@ -13262,8 +13411,19 @@ function CaretakerSummary({
                   </td>
                   <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
                     <div className="flex items-center justify-between gap-2">
-                      <span>{formatTime(row.inValue)}</span>
-                      {row.inValue && row.inRecordId && (
+                      {row.inValue ? <span>{formatTime(row.inValue)}</span> : null}
+                      {canCheckIn && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleOpenCaretakerManualAction(row, "checkin")
+                          }
+                          className="rounded border border-[#8c7569] px-2 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+                        >
+                          Check in
+                        </button>
+                      )}
+                      {!canCheckIn && row.inValue && row.inRecordId && (
                         <button
                           type="button"
                           onClick={() =>
@@ -13283,8 +13443,19 @@ function CaretakerSummary({
                   </td>
                   <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
                     <div className="flex items-center justify-between gap-2">
-                      <span>{formatTime(row.outValue)}</span>
-                      {row.outValue && row.outRecordId && (
+                      {row.outValue ? <span>{formatTime(row.outValue)}</span> : null}
+                      {canCheckOut && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleOpenCaretakerManualAction(row, "checkout")
+                          }
+                          className="rounded border border-[#8c7569] px-2 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+                        >
+                          Check out
+                        </button>
+                      )}
+                      {!canCheckOut && row.outValue && row.outRecordId && (
                         <button
                           type="button"
                           onClick={() =>
@@ -13378,6 +13549,96 @@ function CaretakerSummary({
           </div>
         </div>
       )}
+
+      <Dialog
+        open={Boolean(caretakerManualAction)}
+        onOpenChange={handleCaretakerManualActionDialogChange}
+      >
+        <DialogContent className="border-[#e5e0dc] bg-white text-[#55311c] sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-[#55311c]">
+              {caretakerManualAction?.mode === "checkin"
+                ? `Create ${
+                    caretakerManualAction?.recordType === "work-time"
+                      ? "caretaker"
+                      : "bin"
+                  } check in`
+                : `Create ${
+                    caretakerManualAction?.recordType === "work-time"
+                      ? "caretaker"
+                      : "bin"
+                  } check out`}
+            </DialogTitle>
+            <DialogDescription className="text-[rgba(0,0,0,0.7)]">
+              Enter the time for{" "}
+              {caretakerManualAction
+                ? formatDate(caretakerManualAction.referenceIso)
+                : "-"}
+              {caretakerManualAction?.recordType === "bins" &&
+                caretakerManualAction.buildingLabel && (
+                  <>
+                    {" "}
+                    at{" "}
+                    <span className="font-semibold text-[#55311c]">
+                      {caretakerManualAction.buildingLabel}
+                    </span>
+                  </>
+                )}
+              .
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-3">
+            <div>
+              <label
+                className="block text-sm font-semibold text-[#55311c]"
+                htmlFor="caretaker-manual-time"
+              >
+                Time
+              </label>
+              <input
+                id="caretaker-manual-time"
+                type="time"
+                value={caretakerManualTimeValue}
+                onChange={(event) =>
+                  setCaretakerManualTimeValue(event.target.value)
+                }
+                className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+              />
+            </div>
+            {caretakerManualAction && (
+              <p className="text-xs text-[rgba(0,0,0,0.65)]">
+                {caretakerManualAction.mode === "checkin"
+                  ? `Time IN must be before ${formatTime(
+                      caretakerManualAction.referenceIso,
+                    )}.`
+                  : `Time OUT must be after ${formatTime(
+                      caretakerManualAction.referenceIso,
+                    )}.`}
+              </p>
+            )}
+          </div>
+
+          <DialogFooter>
+            <button
+              type="button"
+              onClick={resetCaretakerManualAction}
+              disabled={isSavingCaretakerManualAction}
+              className="w-full rounded-lg border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleSaveCaretakerManualAction}
+              disabled={isSavingCaretakerManualAction}
+              className="w-full rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+            >
+              {isSavingCaretakerManualAction ? "Saving..." : "Save"}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {showReportModal && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-3 sm:items-center sm:px-4">

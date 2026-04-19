@@ -122,6 +122,24 @@ interface WorkTimeSessionRecord {
   funcionario_id: EntityId
 }
 
+interface CaretakerMonthlyGoalRecord {
+  id: EntityId
+  month_start: string
+  target_hours: number
+  condominio_id: EntityId
+  created_at: string
+  updated_at: string
+}
+
+interface CaretakerMonthlyMetricRecord {
+  month_start: string
+  worked_hours: number
+  target_hours: number
+  carry_over_hours: number
+  effective_target_hours: number
+  remaining_hours: number
+}
+
 interface CaretakerRecordEditState {
   recordId: EntityId
   originalIso: string
@@ -279,6 +297,13 @@ interface FireAlarmExternalCertificateFormState {
   media2Data: string | null
 }
 
+interface FireAlarmCallPointListState {
+  buildingId: FireAlarmBuildingId
+  buildingLabel: string
+  currentCallPoint: string
+  currentLocation: string
+}
+
 interface CertificateMediaPreviewState {
   fileName: string
   dataUrl: string
@@ -371,9 +396,6 @@ const formatFlatLabel = (
   flatNumber?: number | null,
   flatLabel?: string | null,
 ) => `Flat ${formatFlatNumber(flatNumber, flatLabel)}`
-
-const isOfficeBuilding = (building: Pick<Building, "nome">) =>
-  building.nome.trim().toLowerCase() === "office"
 
 type ApiQueryParams = Record<
   string,
@@ -1351,7 +1373,7 @@ const FIRE_ALARM_BUILDINGS: FireAlarmBuildingConfig[] = [
       "009",
       "031",
       "023",
-      "L1/40",
+      "024",
       "048",
       "056",
       "064",
@@ -1369,8 +1391,8 @@ const FIRE_ALARM_BUILDINGS: FireAlarmBuildingConfig[] = [
       "BOILER",
       "LIFT ROOM",
       "GF REAR",
-      "Garage",
-      "1F REAR",
+      "Garage Front Door",
+      "Garage Back Door",
       "2F REAR",
       "3F REAR",
       "4F REAR",
@@ -1668,6 +1690,9 @@ const getFireAlarmScheduleRowsForDate = (isoDate: string) => {
     }
   })
 }
+
+const getFireAlarmBuildingConfig = (buildingId: FireAlarmBuildingId) =>
+  FIRE_ALARM_BUILDINGS.find((building) => building.id === buildingId) || null
 
 const getDefaultFireAlarmRows = (): Record<
   FireAlarmBuildingId,
@@ -2184,9 +2209,7 @@ function BuildingsReadingsContent({
     queryFn: () => apiCall("/api/v1/buildings/condominio"),
   })
 
-  const buildings = (buildingsData?.data || []).filter(
-    (building) => !isOfficeBuilding(building),
-  )
+  const buildings = (buildingsData?.data || []) as Building[]
 
   // Set first building as selected if available
   const firstBuildingId = buildings[0]?.id
@@ -3896,9 +3919,7 @@ function FlatsReadingsContent({
     queryFn: () => apiCall("/api/v1/buildings/condominio"),
   })
 
-  const buildings = (buildingsData?.data || []).filter(
-    (building) => !isOfficeBuilding(building),
-  )
+  const buildings = (buildingsData?.data || []) as Building[]
   const selectedBuilding = buildings.find(
     (building) => building.id === selectedBuildingId,
   )
@@ -6983,7 +7004,7 @@ function BinsContent() {
       {oldMissAlerts.length > 0 && (
         <div className="mb-6 rounded-lg border border-yellow-300 bg-yellow-50 p-4 shadow-md">
           <p className="font-semibold text-yellow-800">
-            Old miss collections pending late collection:
+            Old miss collections pending collected:
           </p>
           <div className="mt-2 space-y-1 text-sm text-yellow-700">
             {oldMissAlerts.map((alert) => (
@@ -7038,7 +7059,7 @@ function BinsContent() {
             >
               <option value="">All</option>
               <option value="miss">Miss Collection</option>
-              <option value="late">Late Collection</option>
+              <option value="late">Collected</option>
             </select>
           </div>
 
@@ -7114,7 +7135,7 @@ function BinsContent() {
                   </td>
                   <td className="border border-gray-300 px-4 py-3 text-[#55311c]">
                     {item.collection_status === "late"
-                      ? "Late Collection"
+                      ? "Collected"
                       : "Miss Collection"}
                   </td>
                 </tr>
@@ -8335,12 +8356,21 @@ function FireAlarmSchedulePage() {
     useState<EntityId | null>(null)
   const [certificatePreview, setCertificatePreview] =
     useState<CertificateMediaPreviewState | null>(null)
+  const [callPointListState, setCallPointListState] =
+    useState<FireAlarmCallPointListState | null>(null)
   const [certificateForm, setCertificateForm] =
     useState<FireAlarmExternalCertificateFormState>(
       getEmptyFireAlarmExternalCertificateForm,
     )
   const deferredCertificateSearch = useDeferredValue(certificateSearch.trim())
   const isEditingCertificate = Boolean(editingCertificate)
+  const callPointListBuilding = useMemo(
+    () =>
+      callPointListState
+        ? getFireAlarmBuildingConfig(callPointListState.buildingId)
+        : null,
+    [callPointListState],
+  )
 
   useEffect(() => {
     try {
@@ -9797,7 +9827,23 @@ function FireAlarmSchedulePage() {
                     {row.buildingLabel}
                   </td>
                   <td className="border border-[#e5e0dc] px-3 py-2 text-sm font-semibold text-[#55311c]">
-                    {row.callPoint}
+                    <div className="flex flex-col items-start gap-2">
+                      <span>{row.callPoint}</span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCallPointListState({
+                            buildingId: row.buildingId,
+                            buildingLabel: row.buildingLabel,
+                            currentCallPoint: row.callPoint,
+                            currentLocation: row.location,
+                          })
+                        }
+                        className="rounded border border-[#8c7569] px-2 py-1 text-xs font-semibold uppercase tracking-wide text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+                      >
+                        List
+                      </button>
+                    </div>
                   </td>
                   <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
                     {row.location}
@@ -9866,6 +9912,70 @@ function FireAlarmSchedulePage() {
           Save
         </button>
       </div>
+
+      <Dialog
+        open={Boolean(callPointListState)}
+        onOpenChange={(open) => {
+          if (!open) setCallPointListState(null)
+        }}
+      >
+        <DialogContent className="border-[#e5e0dc] bg-white text-[#55311c] sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-[#55311c]">
+              {callPointListState?.buildingLabel || "Call points"}
+            </DialogTitle>
+            <DialogDescription className="text-[rgba(0,0,0,0.7)]">
+              Ordered call points for this building.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="max-h-[60vh] space-y-2 overflow-y-auto pr-1">
+            {callPointListBuilding?.callPoints.map((callPoint, index) => {
+              const location =
+                callPointListBuilding.locations[
+                  positiveModulo(index, callPointListBuilding.locations.length)
+                ]
+              const isCurrent =
+                normalizeCallPoint(callPoint) ===
+                normalizeCallPoint(callPointListState?.currentCallPoint || "")
+
+              return (
+                <div
+                  key={`${callPointListBuilding.id}-${callPoint}`}
+                  className={`rounded-lg border px-3 py-2 ${
+                    isCurrent
+                      ? "border-[#8c7569] bg-[#f5efe9]"
+                      : "border-[#e5e0dc] bg-[#faf8f6]"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-[#55311c]">
+                        {String(index + 1).padStart(2, "0")} | {callPoint}
+                      </p>
+                      <p className="text-xs text-[rgba(0,0,0,0.68)]">
+                        {location}
+                      </p>
+                    </div>
+                    {isCurrent && (
+                      <span className="rounded-full border border-[#8c7569] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#55311c]">
+                        Current
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
+          {callPointListState && (
+            <p className="text-xs text-[rgba(0,0,0,0.68)]">
+              Current row: {callPointListState.currentCallPoint} |{" "}
+              {callPointListState.currentLocation}
+            </p>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
@@ -10626,6 +10736,9 @@ function CleanerSummary() {
     useState(false)
   const [isSavingCleanerManualAction, setIsSavingCleanerManualAction] =
     useState(false)
+  const [deletingCleanerRowKey, setDeletingCleanerRowKey] = useState<
+    string | null
+  >(null)
   const [cleanerSearch, setCleanerSearch] = useState("")
   const [cleanerBuildingFilter, setCleanerBuildingFilter] = useState("")
   const [cleanerUsedFilterType, setCleanerUsedFilterType] = useState<
@@ -11090,6 +11203,54 @@ function CleanerSummary() {
     }
   }
 
+  const handleDeleteCleanerHistoryRow = async ({
+    rowKey,
+    inRecordId,
+    outRecordId,
+    buildingLabel,
+    dateValue,
+  }: {
+    rowKey: string
+    inRecordId: EntityId | null
+    outRecordId: EntityId | null
+    buildingLabel: string
+    dateValue: string | null
+  }) => {
+    const recordIds = [inRecordId, outRecordId].filter(
+      (value): value is EntityId => Boolean(value),
+    )
+    if (recordIds.length === 0) return
+
+    const dateLabel = formatDate(dateValue)
+    const confirmed =
+      typeof window === "undefined"
+        ? true
+        : window.confirm(
+            `Delete the cleaner record for ${buildingLabel} on ${dateLabel}?`,
+          )
+
+    if (!confirmed) return
+
+    try {
+      setDeletingCleanerRowKey(rowKey)
+      for (const recordId of recordIds) {
+        await apiCall(`/api/v1/acess/${recordId}`, {
+          method: "DELETE",
+        })
+      }
+      await queryClient.invalidateQueries({
+        queryKey: ["acess", "cleaner"],
+      })
+      showSuccessToast("Cleaner record deleted successfully")
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to delete cleaner record"
+      showErrorToast(message)
+    } finally {
+      setDeletingCleanerRowKey(null)
+    }
+  }
+
   const resetCleanerManualAction = () => {
     setCleanerManualAction(null)
     setCleanerManualTimeValue("")
@@ -11465,8 +11626,12 @@ function CleanerSummary() {
               </tr>
             )}
             {visibleCleanerSessions.map((session, index) => {
+              const rowKey = `${session.inRecord?.id || "in"}-${session.outRecord?.id || "out"}-${index}`
               const dateLabel = formatDate(
                 session.inRecord?.data || session.outRecord?.data,
+              )
+              const hasAnyRecord = Boolean(
+                session.inRecord?.id || session.outRecord?.id,
               )
               const canCheckOut = Boolean(
                 session.inRecord?.id && !session.outRecord?.id,
@@ -11477,7 +11642,7 @@ function CleanerSummary() {
 
               return (
                 <tr
-                  key={`${session.inRecord?.id || "in"}-${session.outRecord?.id || "out"}-${index}`}
+                  key={rowKey}
                   className="bg-white hover:bg-gray-50"
                 >
                   <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
@@ -11529,21 +11694,61 @@ function CleanerSummary() {
                     )}
                   </td>
                   <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleOpenCleanerRecordEdit(
-                          session.inRecord?.id || null,
-                          session.inRecord?.data || null,
-                          session.outRecord?.id || null,
-                          session.outRecord?.data || null,
-                        )
-                      }
-                      disabled={!session.inRecord?.id && !session.outRecord?.id}
-                      className="rounded bg-[#8c7569] px-2 py-1 text-xs font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      Edit
-                    </button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button
+                          type="button"
+                          aria-label="Open actions menu"
+                          disabled={!hasAnyRecord || deletingCleanerRowKey === rowKey}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded border border-[#8c7569] bg-white text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <svg
+                            className="h-4 w-4"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                          >
+                            <title>Actions</title>
+                            <path d="M4 7h16" />
+                            <path d="M4 12h16" />
+                            <path d="M4 17h16" />
+                          </svg>
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          disabled={!hasAnyRecord || deletingCleanerRowKey === rowKey}
+                          onClick={() =>
+                            handleOpenCleanerRecordEdit(
+                              session.inRecord?.id || null,
+                              session.inRecord?.data || null,
+                              session.outRecord?.id || null,
+                              session.outRecord?.data || null,
+                            )
+                          }
+                        >
+                          Edit
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          disabled={!hasAnyRecord || deletingCleanerRowKey === rowKey}
+                          variant="destructive"
+                          onClick={() =>
+                            handleDeleteCleanerHistoryRow({
+                              rowKey,
+                              inRecordId: session.inRecord?.id || null,
+                              outRecordId: session.outRecord?.id || null,
+                              buildingLabel: session.buildingLabel,
+                              dateValue:
+                                session.inRecord?.data || session.outRecord?.data || null,
+                            })
+                          }
+                        >
+                          {deletingCleanerRowKey === rowKey ? "Deleting..." : "Delete"}
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </td>
                 </tr>
               )
@@ -12043,11 +12248,31 @@ function CaretakerSummary({
     queryKey: ["buildings", "caretaker-summary"],
     queryFn: () => apiCall("/api/v1/buildings/condominio"),
   })
+  const {
+    data: monthlyGoalsData,
+    isLoading: isLoadingMonthlyGoals,
+    error: monthlyGoalsError,
+  } = useQuery<ApiListResponse<CaretakerMonthlyGoalRecord>>({
+    queryKey: ["acess", "caretaker", "work-time", "goals"],
+    queryFn: () => apiCall("/api/v1/acess/caretaker/work-time/goals"),
+  })
+  const {
+    data: monthlyMetricsData,
+    isLoading: isLoadingMonthlyMetrics,
+    error: monthlyMetricsError,
+  } = useQuery<ApiListResponse<CaretakerMonthlyMetricRecord>>({
+    queryKey: ["acess", "caretaker", "work-time", "monthly-metrics"],
+    queryFn: () => apiCall("/api/v1/acess/caretaker/work-time/monthly-metrics"),
+  })
 
   const workTimeRecordsRaw = (workTimeData?.data ||
     []) as WorkTimeSessionRecord[]
   const binSessionsRaw = (binSessionsData?.data || []) as BinSessionRecord[]
   const buildings = (buildingsData?.data || []) as Building[]
+  const monthlyGoals = (monthlyGoalsData?.data ||
+    []) as CaretakerMonthlyGoalRecord[]
+  const monthlyMetrics = (monthlyMetricsData?.data ||
+    []) as CaretakerMonthlyMetricRecord[]
 
   const buildingMap = useMemo(() => {
     const map = new Map<EntityId, string>()
@@ -12124,6 +12349,13 @@ function CaretakerSummary({
   const [editedCaretakerTimeValue, setEditedCaretakerTimeValue] = useState("")
   const [isSavingCaretakerRecordEdit, setIsSavingCaretakerRecordEdit] =
     useState(false)
+  const [showMonthlyGoalsModal, setShowMonthlyGoalsModal] = useState(false)
+  const [goalFormMonth, setGoalFormMonth] = useState("")
+  const [goalFormHours, setGoalFormHours] = useState("")
+  const [editingMonthlyGoal, setEditingMonthlyGoal] =
+    useState<CaretakerMonthlyGoalRecord | null>(null)
+  const [deletingMonthlyGoalId, setDeletingMonthlyGoalId] =
+    useState<EntityId | null>(null)
   const [caretakerManualAction, setCaretakerManualAction] =
     useState<CaretakerManualActionState | null>(null)
   const [caretakerManualTimeValue, setCaretakerManualTimeValue] = useState("")
@@ -12265,6 +12497,147 @@ function CaretakerSummary({
       timeZone: "UTC",
     })
   }, [selectedWorkMonthKey])
+  const monthlyMetricsByMonthKey = useMemo(
+    () =>
+      new Map(
+        monthlyMetrics.map((metric) => [metric.month_start.slice(0, 7), metric]),
+      ),
+    [monthlyMetrics],
+  )
+  const selectedWorkMonthMetric =
+    monthlyMetricsByMonthKey.get(selectedWorkMonthKey) || null
+  const selectedWorkMonthHours = selectedWorkMonthMetric?.worked_hours || 0
+  const selectedWorkMonthTargetHours =
+    selectedWorkMonthMetric?.target_hours || 0
+  const selectedWorkMonthCarryOverHours =
+    selectedWorkMonthMetric?.carry_over_hours || 0
+  const selectedWorkMonthEffectiveTargetHours =
+    selectedWorkMonthMetric?.effective_target_hours || 0
+  const selectedWorkMonthRemainingHours =
+    selectedWorkMonthMetric?.remaining_hours || 0
+
+  const resetMonthlyGoalForm = () => {
+    setEditingMonthlyGoal(null)
+    setGoalFormMonth(selectedWorkMonthKey)
+    setGoalFormHours("")
+  }
+
+  const handleOpenMonthlyGoalsModal = () => {
+    resetMonthlyGoalForm()
+    setShowMonthlyGoalsModal(true)
+  }
+
+  const handleEditMonthlyGoal = (goal: CaretakerMonthlyGoalRecord) => {
+    setEditingMonthlyGoal(goal)
+    setGoalFormMonth(goal.month_start.slice(0, 7))
+    setGoalFormHours(String(goal.target_hours))
+  }
+
+  const saveMonthlyGoalMutation = useMutation({
+    mutationFn: async ({
+      goalId,
+      month,
+      targetHours,
+    }: {
+      goalId?: EntityId
+      month: string
+      targetHours: number
+    }) =>
+      goalId
+        ? apiCall(`/api/v1/acess/caretaker/work-time/goals/${goalId}`, {
+            method: "PATCH",
+            body: {
+              month_start: `${month}-01`,
+              target_hours: targetHours,
+            },
+          })
+        : apiCall("/api/v1/acess/caretaker/work-time/goals", {
+            method: "POST",
+            body: {
+              month_start: `${month}-01`,
+              target_hours: targetHours,
+            },
+          }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ["acess", "caretaker", "work-time", "goals"],
+      })
+      await queryClient.invalidateQueries({
+        queryKey: ["acess", "caretaker", "work-time", "monthly-metrics"],
+      })
+      showSuccessToast(
+        editingMonthlyGoal
+          ? "Monthly goal updated successfully"
+          : "Monthly goal created successfully",
+      )
+      resetMonthlyGoalForm()
+    },
+    onError: (error) => {
+      const message =
+        error instanceof Error ? error.message : "Failed to save monthly goal"
+      showErrorToast(message)
+    },
+  })
+
+  const handleSaveMonthlyGoal = () => {
+    if (!goalFormMonth) {
+      showErrorToast("Month is required")
+      return
+    }
+
+    const parsedHours = Number(goalFormHours)
+    if (Number.isNaN(parsedHours) || parsedHours < 0) {
+      showErrorToast("Invalid target hours")
+      return
+    }
+
+    saveMonthlyGoalMutation.mutate({
+      goalId: editingMonthlyGoal?.id,
+      month: goalFormMonth,
+      targetHours: parsedHours,
+    })
+  }
+
+  const handleDeleteMonthlyGoal = async (goal: CaretakerMonthlyGoalRecord) => {
+    const confirmed =
+      typeof window === "undefined"
+        ? true
+        : window.confirm(
+            `Delete the monthly goal for ${new Date(`${goal.month_start}T00:00:00Z`).toLocaleDateString(
+              "en-GB",
+              {
+                month: "long",
+                year: "numeric",
+                timeZone: "UTC",
+              },
+            )}?`,
+          )
+
+    if (!confirmed) return
+
+    try {
+      setDeletingMonthlyGoalId(goal.id)
+      await apiCall(`/api/v1/acess/caretaker/work-time/goals/${goal.id}`, {
+        method: "DELETE",
+      })
+      await queryClient.invalidateQueries({
+        queryKey: ["acess", "caretaker", "work-time", "goals"],
+      })
+      await queryClient.invalidateQueries({
+        queryKey: ["acess", "caretaker", "work-time", "monthly-metrics"],
+      })
+      if (editingMonthlyGoal?.id === goal.id) {
+        resetMonthlyGoalForm()
+      }
+      showSuccessToast("Monthly goal deleted successfully")
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to delete monthly goal"
+      showErrorToast(message)
+    } finally {
+      setDeletingMonthlyGoalId(null)
+    }
+  }
 
   const workTimeDayHours = useMemo(() => {
     let totalMinutes = 0
@@ -12315,27 +12688,6 @@ function CaretakerSummary({
     () => Math.max(20 - workTimeWeekHours, 0),
     [workTimeWeekHours],
   )
-  const workTimeMonthHours = useMemo(() => {
-    let totalMinutes = 0
-    workTimeSessionsGrouped.forEach((session) => {
-      const sessionDate = toDateKey(
-        session.inRecord?.data || session.outRecord?.data,
-      )
-      if (!sessionDate.startsWith(`${selectedWorkMonthKey}-`)) return
-
-      totalMinutes += getDurationMinutes(
-        session.inRecord?.data,
-        session.outRecord?.data,
-        false,
-      )
-    })
-    return Number((totalMinutes / 60).toFixed(2))
-  }, [
-    getDurationMinutes,
-    selectedWorkMonthKey,
-    workTimeSessionsGrouped,
-    toDateKey,
-  ])
 
   const binSessionsGrouped = useMemo(() => {
     const sorted = [...binSessions]
@@ -13029,17 +13381,47 @@ function CaretakerSummary({
                 </p>
               </div>
               <div className="lg:border-l lg:border-[#e5e0dc] lg:px-6">
-                <p className="text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]">
-                  Monthly Hours
-                </p>
-                <div className="mt-2 flex flex-wrap items-end gap-3">
-                  <span className="font-['Nunito',sans-serif] text-4xl font-bold text-[#55311c]">
-                    {workTimeMonthHours.toFixed(2)}h
-                  </span>
-                  <span className="pb-1 text-sm text-[rgba(85,49,28,0.72)]">
-                    {selectedWorkMonthLabel}
-                  </span>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]">
+                      Monthly Hours
+                    </p>
+                    <div className="mt-2 flex flex-wrap items-end gap-3">
+                      <span className="font-['Nunito',sans-serif] text-4xl font-bold text-[#55311c]">
+                        {selectedWorkMonthHours.toFixed(2)}h
+                      </span>
+                      <span className="pb-1 text-sm text-[rgba(85,49,28,0.72)]">
+                        {selectedWorkMonthLabel}
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleOpenMonthlyGoalsModal}
+                    className="rounded-lg border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+                  >
+                    Monthly goals
+                  </button>
                 </div>
+                <div className="mt-3 flex flex-wrap items-start gap-2 text-sm text-[rgba(85,49,28,0.78)]">
+                  <span className="font-semibold text-[#55311c]">
+                    Target {selectedWorkMonthTargetHours.toFixed(2)}h
+                  </span>
+                  {selectedWorkMonthCarryOverHours > 0 && (
+                    <sup className="text-xs font-semibold text-[#8a3d1b]">
+                      +{selectedWorkMonthCarryOverHours.toFixed(2)} hours
+                    </sup>
+                  )}
+                </div>
+                <p className="mt-2 text-sm text-[rgba(85,49,28,0.72)]">
+                  {isLoadingMonthlyMetrics
+                    ? "Loading monthly target..."
+                    : monthlyMetricsError
+                      ? "Failed to load monthly target."
+                    : selectedWorkMonthEffectiveTargetHours > 0
+                      ? `${selectedWorkMonthRemainingHours.toFixed(2)}h left to reach ${selectedWorkMonthEffectiveTargetHours.toFixed(2)}h`
+                      : "No monthly goal defined for this month."}
+                </p>
               </div>
               <div className="flex flex-col gap-2 lg:border-l lg:border-[#e5e0dc] lg:items-end lg:pl-6">
                 <span className="text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]">
@@ -13637,6 +14019,178 @@ function CaretakerSummary({
               {isSavingCaretakerManualAction ? "Saving..." : "Save"}
             </button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={showMonthlyGoalsModal}
+        onOpenChange={(open) => {
+          setShowMonthlyGoalsModal(open)
+          if (!open) resetMonthlyGoalForm()
+        }}
+      >
+        <DialogContent className="border-[#e5e0dc] bg-white text-[#55311c] sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-[#55311c]">
+              Caretaker monthly goals
+            </DialogTitle>
+            <DialogDescription className="text-[rgba(0,0,0,0.7)]">
+              Define the monthly hour targets used by the caretaker summary.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-4">
+            <div className="grid gap-3 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4 md:grid-cols-[minmax(0,180px)_minmax(0,1fr)_auto] md:items-end">
+              <div>
+                <label
+                  htmlFor="caretaker-goal-month"
+                  className="block text-sm font-semibold text-[#55311c]"
+                >
+                  Month
+                </label>
+                <input
+                  id="caretaker-goal-month"
+                  type="month"
+                  value={goalFormMonth}
+                  onChange={(event) => setGoalFormMonth(event.target.value)}
+                  className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="caretaker-goal-hours"
+                  className="block text-sm font-semibold text-[#55311c]"
+                >
+                  Target hours
+                </label>
+                <input
+                  id="caretaker-goal-hours"
+                  type="number"
+                  min="0"
+                  step="0.25"
+                  value={goalFormHours}
+                  onChange={(event) => setGoalFormHours(event.target.value)}
+                  className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                  placeholder="0"
+                />
+              </div>
+              <div className="flex gap-2 md:justify-end">
+                {editingMonthlyGoal && (
+                  <button
+                    type="button"
+                    onClick={resetMonthlyGoalForm}
+                    className="rounded-lg border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+                  >
+                    Cancel
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={handleSaveMonthlyGoal}
+                  disabled={saveMonthlyGoalMutation.isPending}
+                  className="rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {saveMonthlyGoalMutation.isPending
+                    ? "Saving..."
+                    : editingMonthlyGoal
+                      ? "Update"
+                      : "Save"}
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto rounded-lg border border-[#e5e0dc]">
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr className="bg-[#f3ede8]">
+                    <th className="px-4 py-3 text-left text-sm font-semibold text-[#55311c]">
+                      Month
+                    </th>
+                    <th className="px-4 py-3 text-left text-sm font-semibold text-[#55311c]">
+                      Target
+                    </th>
+                    <th className="px-4 py-3 text-right text-sm font-semibold text-[#55311c]">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {isLoadingMonthlyGoals && (
+                    <tr>
+                      <td
+                        colSpan={3}
+                        className="px-4 py-4 text-center text-sm text-[rgba(0,0,0,0.65)]"
+                      >
+                        Loading goals...
+                      </td>
+                    </tr>
+                  )}
+                  {!isLoadingMonthlyGoals && monthlyGoalsError && (
+                    <tr>
+                      <td
+                        colSpan={3}
+                        className="px-4 py-4 text-center text-sm text-[#8a3d1b]"
+                      >
+                        {monthlyGoalsError instanceof Error
+                          ? monthlyGoalsError.message
+                          : "Failed to load monthly goals."}
+                      </td>
+                    </tr>
+                  )}
+                  {!isLoadingMonthlyGoals &&
+                    !monthlyGoalsError &&
+                    monthlyGoals.length === 0 && (
+                    <tr>
+                      <td
+                        colSpan={3}
+                        className="px-4 py-4 text-center text-sm text-[rgba(0,0,0,0.65)]"
+                      >
+                        No monthly goals defined.
+                      </td>
+                    </tr>
+                    )}
+                  {monthlyGoals.map((goal) => (
+                    <tr key={goal.id} className="border-t border-[#eee7e2]">
+                      <td className="px-4 py-3 text-sm text-[#55311c]">
+                        {new Date(`${goal.month_start}T00:00:00Z`).toLocaleDateString(
+                          "en-GB",
+                          {
+                            month: "long",
+                            year: "numeric",
+                            timeZone: "UTC",
+                          },
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-[#55311c]">
+                        {goal.target_hours.toFixed(2)}h
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleEditMonthlyGoal(goal)}
+                            className="rounded-lg border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteMonthlyGoal(goal)}
+                            disabled={deletingMonthlyGoalId === goal.id}
+                            className="rounded-lg border border-[#d28a6f] px-3 py-2 text-sm font-semibold text-[#8a3d1b] transition-all duration-200 hover:bg-[#fff1ea] disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {deletingMonthlyGoalId === goal.id
+                              ? "Deleting..."
+                              : "Delete"}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
 

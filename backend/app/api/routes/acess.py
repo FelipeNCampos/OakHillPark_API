@@ -10,6 +10,7 @@ from sqlmodel import col, func, select
 
 from app.api.deps import CurrentUser, SessionDep, get_current_user, require_cargo
 from app.core.config import settings
+from app.core.db import ensure_caretaker_monthly_goal_schema
 from app.models import (
     Acess,
     AcessActiveStatus,
@@ -18,6 +19,13 @@ from app.models import (
     AcessPublic,
     AcessUpdate,
     Building,
+    CaretakerMonthlyGoal,
+    CaretakerMonthlyGoalCreate,
+    CaretakerMonthlyGoalPublic,
+    CaretakerMonthlyGoalsPublic,
+    CaretakerMonthlyGoalUpdate,
+    CaretakerMonthlyMetricPublic,
+    CaretakerMonthlyMetricsPublic,
     Funcionario,
     Message,
     User,
@@ -40,12 +48,19 @@ def _is_cleaner_supported_building_name(building_name: str | None) -> bool:
     return building_name.strip().lower() != "office"
 
 
-def get_default_funcionario(session: SessionDep, cargo: int) -> Funcionario | None:
+def get_default_funcionario(
+    session: SessionDep,
+    cargo: int,
+    condominio_id: uuid.UUID | None = None,
+) -> Funcionario | None:
+    conditions = [Funcionario.cargo == cargo, Funcionario.status]
+    if condominio_id:
+        conditions.append(Funcionario.condominio_id == condominio_id)
+
     funcionario = session.exec(
         select(Funcionario)
         .where(
-            Funcionario.cargo == cargo,
-            Funcionario.status,
+            *conditions,
             Funcionario.is_default,
         )
         .limit(1)
@@ -56,7 +71,7 @@ def get_default_funcionario(session: SessionDep, cargo: int) -> Funcionario | No
 
     return session.exec(
         select(Funcionario)
-        .where(Funcionario.cargo == cargo, Funcionario.status)
+        .where(*conditions)
         .limit(1)
     ).first()
 
@@ -180,6 +195,142 @@ def _send_staff_status_sms(body: str) -> None:
         send_sms_notification(phone_to=phone_to, body=body)
     except Exception:
         logger.exception("Failed to send staff status SMS", extra={"body": body})
+
+
+def _resolve_user_condominio_id(session: SessionDep, current_user: User) -> uuid.UUID | None:
+    if current_user.condominio_id:
+        return current_user.condominio_id
+
+    if current_user.is_superuser:
+        condominio_id = session.exec(select(Funcionario.condominio_id).limit(1)).first()
+        if condominio_id:
+            current_user.condominio_id = condominio_id
+            session.add(current_user)
+            session.commit()
+            session.refresh(current_user)
+            return condominio_id
+
+    return None
+
+
+def _to_month_start(value: datetime.date | datetime.datetime) -> datetime.date:
+    if isinstance(value, datetime.datetime):
+        if value.tzinfo is not None:
+            value = value.astimezone(datetime.timezone.utc).date()
+        else:
+            value = value.date()
+    return datetime.date(value.year, value.month, 1)
+
+
+def _iter_month_starts(
+    start_month: datetime.date, end_month: datetime.date
+) -> list[datetime.date]:
+    cursor = _to_month_start(start_month)
+    end = _to_month_start(end_month)
+    months: list[datetime.date] = []
+
+    while cursor <= end:
+        months.append(cursor)
+        if cursor.month == 12:
+            cursor = datetime.date(cursor.year + 1, 1, 1)
+        else:
+            cursor = datetime.date(cursor.year, cursor.month + 1, 1)
+
+    return months
+
+
+def _build_closed_work_time_pairs(
+    records: list[WorkTimeSession],
+) -> list[tuple[WorkTimeSession, WorkTimeSession]]:
+    sorted_records = sorted(
+        (record for record in records if record.data),
+        key=lambda record: (record.data, record.operacao),
+    )
+    pairs: list[tuple[WorkTimeSession, WorkTimeSession]] = []
+    open_record: WorkTimeSession | None = None
+
+    for record in sorted_records:
+        if record.operacao == 0:
+            if open_record is None:
+                open_record = record
+            continue
+
+        if open_record is not None:
+            pairs.append((open_record, record))
+            open_record = None
+
+    return pairs
+
+
+def _get_closed_session_hours(
+    in_record: WorkTimeSession, out_record: WorkTimeSession
+) -> float:
+    if not in_record.data or not out_record.data:
+        return 0
+
+    start = in_record.data
+    end = out_record.data
+    if end < start:
+        return 0
+
+    diff_hours = (end - start).total_seconds() / 3600
+    if diff_hours >= 24:
+        return 0
+    return diff_hours
+
+
+def _round_hours(value: float) -> float:
+    return round(value + 1e-9, 2)
+
+
+def _build_caretaker_monthly_metrics(
+    records: list[WorkTimeSession],
+    goals: list[CaretakerMonthlyGoal],
+) -> list[CaretakerMonthlyMetricPublic]:
+    worked_hours_by_month: dict[datetime.date, float] = {}
+    for in_record, out_record in _build_closed_work_time_pairs(records):
+        month_start = _to_month_start(in_record.data)
+        worked_hours_by_month[month_start] = (
+            worked_hours_by_month.get(month_start, 0) +
+            _get_closed_session_hours(in_record, out_record)
+        )
+
+    target_hours_by_month = {
+        _to_month_start(goal.month_start): goal.target_hours for goal in goals
+    }
+
+    current_month = _to_month_start(datetime.datetime.now(datetime.timezone.utc))
+    all_months = {
+        *worked_hours_by_month.keys(),
+        *target_hours_by_month.keys(),
+        current_month,
+    }
+    if not all_months:
+        return []
+
+    month_sequence = _iter_month_starts(min(all_months), max(all_months))
+    carry_over_hours = 0.0
+    metrics: list[CaretakerMonthlyMetricPublic] = []
+
+    for month_start in month_sequence:
+        target_hours = float(target_hours_by_month.get(month_start, 0))
+        worked_hours = float(worked_hours_by_month.get(month_start, 0))
+        effective_target_hours = target_hours + carry_over_hours
+        remaining_hours = max(effective_target_hours - worked_hours, 0)
+
+        metrics.append(
+            CaretakerMonthlyMetricPublic(
+                month_start=month_start,
+                worked_hours=_round_hours(worked_hours),
+                target_hours=_round_hours(target_hours),
+                carry_over_hours=_round_hours(carry_over_hours),
+                effective_target_hours=_round_hours(effective_target_hours),
+                remaining_hours=_round_hours(remaining_hours),
+            )
+        )
+        carry_over_hours = remaining_hours
+
+    return metrics
 
 
 @router.get("/active", response_model=AcessActiveStatus)
@@ -514,6 +665,209 @@ def read_caretaker_work_time(
         for item in rows
     ]
     return WorkTimeSessionsPublic(data=data, count=count)
+
+
+@router.get(
+    "/caretaker/work-time/goals",
+    response_model=CaretakerMonthlyGoalsPublic,
+    dependencies=[Depends(require_cargo(1))],
+)
+def read_caretaker_work_time_goals(
+    session: SessionDep,
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    ensure_caretaker_monthly_goal_schema(session)
+    condominio_id = _resolve_user_condominio_id(session, current_user)
+    if not condominio_id:
+        return CaretakerMonthlyGoalsPublic(data=[], count=0)
+
+    statement = (
+        select(CaretakerMonthlyGoal)
+        .where(CaretakerMonthlyGoal.condominio_id == condominio_id)
+        .order_by(CaretakerMonthlyGoal.month_start.asc())
+    )
+    rows = session.exec(statement).all()
+    data = [
+        CaretakerMonthlyGoalPublic(
+            id=item.id,
+            month_start=item.month_start,
+            target_hours=item.target_hours,
+            condominio_id=item.condominio_id,
+            created_at=item.created_at,
+            updated_at=item.updated_at,
+        )
+        for item in rows
+    ]
+    return CaretakerMonthlyGoalsPublic(data=data, count=len(data))
+
+
+@router.post(
+    "/caretaker/work-time/goals",
+    response_model=CaretakerMonthlyGoalPublic,
+    dependencies=[Depends(require_cargo(2))],
+)
+def upsert_caretaker_work_time_goal(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    payload: CaretakerMonthlyGoalCreate,
+) -> Any:
+    ensure_caretaker_monthly_goal_schema(session)
+    condominio_id = _resolve_user_condominio_id(session, current_user)
+    if not condominio_id:
+        raise HTTPException(status_code=400, detail="Condominio not found")
+
+    month_start = _to_month_start(payload.month_start)
+    existing = session.exec(
+        select(CaretakerMonthlyGoal).where(
+            CaretakerMonthlyGoal.condominio_id == condominio_id,
+            CaretakerMonthlyGoal.month_start == month_start,
+        )
+    ).first()
+
+    if existing:
+        existing.target_hours = payload.target_hours
+        existing.updated_at = datetime.datetime.now(datetime.timezone.utc)
+        session.add(existing)
+        session.commit()
+        session.refresh(existing)
+        item = existing
+    else:
+        item = CaretakerMonthlyGoal(
+            month_start=month_start,
+            target_hours=payload.target_hours,
+            condominio_id=condominio_id,
+        )
+        session.add(item)
+        session.commit()
+        session.refresh(item)
+
+    return CaretakerMonthlyGoalPublic(
+        id=item.id,
+        month_start=item.month_start,
+        target_hours=item.target_hours,
+        condominio_id=item.condominio_id,
+        created_at=item.created_at,
+        updated_at=item.updated_at,
+    )
+
+
+@router.patch(
+    "/caretaker/work-time/goals/{id}",
+    response_model=CaretakerMonthlyGoalPublic,
+    dependencies=[Depends(require_cargo(2))],
+)
+def update_caretaker_work_time_goal(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    payload: CaretakerMonthlyGoalUpdate,
+) -> Any:
+    ensure_caretaker_monthly_goal_schema(session)
+    item = session.get(CaretakerMonthlyGoal, id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Caretaker monthly goal not found")
+
+    condominio_id = _resolve_user_condominio_id(session, current_user)
+    if not current_user.is_superuser and item.condominio_id != condominio_id:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    update_dict = payload.model_dump(exclude_unset=True)
+    if not update_dict:
+        raise HTTPException(status_code=422, detail="No fields to update")
+
+    next_month_start = (
+        _to_month_start(payload.month_start)
+        if payload.month_start is not None
+        else item.month_start
+    )
+    duplicate = session.exec(
+        select(CaretakerMonthlyGoal).where(
+            CaretakerMonthlyGoal.condominio_id == item.condominio_id,
+            CaretakerMonthlyGoal.month_start == next_month_start,
+            CaretakerMonthlyGoal.id != item.id,
+        )
+    ).first()
+    if duplicate:
+        raise HTTPException(
+            status_code=400,
+            detail="A goal already exists for the selected month",
+        )
+
+    item.month_start = next_month_start
+    if payload.target_hours is not None:
+        item.target_hours = payload.target_hours
+    item.updated_at = datetime.datetime.now(datetime.timezone.utc)
+    session.add(item)
+    session.commit()
+    session.refresh(item)
+
+    return CaretakerMonthlyGoalPublic(
+        id=item.id,
+        month_start=item.month_start,
+        target_hours=item.target_hours,
+        condominio_id=item.condominio_id,
+        created_at=item.created_at,
+        updated_at=item.updated_at,
+    )
+
+
+@router.delete(
+    "/caretaker/work-time/goals/{id}",
+    response_model=Message,
+    dependencies=[Depends(require_cargo(2))],
+)
+def delete_caretaker_work_time_goal(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+) -> Message:
+    ensure_caretaker_monthly_goal_schema(session)
+    item = session.get(CaretakerMonthlyGoal, id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Caretaker monthly goal not found")
+
+    condominio_id = _resolve_user_condominio_id(session, current_user)
+    if not current_user.is_superuser and item.condominio_id != condominio_id:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    session.delete(item)
+    session.commit()
+    return Message(message="Caretaker monthly goal deleted successfully")
+
+
+@router.get(
+    "/caretaker/work-time/monthly-metrics",
+    response_model=CaretakerMonthlyMetricsPublic,
+    dependencies=[Depends(require_cargo(1))],
+)
+def read_caretaker_work_time_monthly_metrics(
+    session: SessionDep,
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    ensure_caretaker_monthly_goal_schema(session)
+    condominio_id = _resolve_user_condominio_id(session, current_user)
+    if not condominio_id:
+        return CaretakerMonthlyMetricsPublic(data=[], count=0)
+
+    caretaker = get_default_funcionario(session, 1, condominio_id)
+    if not caretaker or caretaker.condominio_id != condominio_id:
+        return CaretakerMonthlyMetricsPublic(data=[], count=0)
+
+    records = session.exec(
+        select(WorkTimeSession)
+        .where(WorkTimeSession.funcionario_id == caretaker.id)
+        .order_by(WorkTimeSession.data.asc())
+    ).all()
+    goals = session.exec(
+        select(CaretakerMonthlyGoal)
+        .where(CaretakerMonthlyGoal.condominio_id == condominio_id)
+        .order_by(CaretakerMonthlyGoal.month_start.asc())
+    ).all()
+
+    data = _build_caretaker_monthly_metrics(records, goals)
+    return CaretakerMonthlyMetricsPublic(data=data, count=len(data))
 
 
 @router.patch(

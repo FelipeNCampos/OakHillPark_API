@@ -10,6 +10,7 @@ from app.main import app
 from app.models import (
     Acess,
     Building,
+    CaretakerMonthlyGoal,
     Condominio,
     ContractorVisit,
     Flat,
@@ -20,6 +21,7 @@ from app.models import (
     Task,
     TaskMessage,
     User,
+    WorkTimeSession,
 )
 from tests.utils.user import authentication_token_from_email
 from tests.utils.utils import get_superuser_token_headers
@@ -52,6 +54,9 @@ def db() -> Generator[Session, None, None]:
             .join(Building, Acess.building_id == Building.id)
             .where(Building.nome.like("%Test%"))
         )
+        test_funcionario_ids = (
+            select(Funcionario.id).where(Funcionario.condominio_id.in_(test_condominio_ids))
+        )
 
         # Delete test buildings (those with "Test" in the name)
         session.exec(delete(Acess).where(Acess.id.in_(test_acess_ids)))
@@ -60,7 +65,17 @@ def db() -> Generator[Session, None, None]:
                 ContractorVisit.condominio_id.in_(test_condominio_ids)
             )
         )
+        session.exec(
+            delete(CaretakerMonthlyGoal).where(
+                CaretakerMonthlyGoal.condominio_id.in_(test_condominio_ids)
+            )
+        )
         session.exec(delete(Readings).where(Readings.building_id.in_(test_building_ids)))
+        session.exec(
+            delete(WorkTimeSession).where(
+                WorkTimeSession.funcionario_id.in_(test_funcionario_ids)
+            )
+        )
         session.exec(delete(Morador))  # All moradores are test data
         session.exec(delete(NotificationHistory))
         session.exec(delete(Flat).where(Flat.building_id.in_(test_building_ids)))

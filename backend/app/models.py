@@ -257,6 +257,23 @@ class WorkTimeSession(SQLModel, table=True):
     funcionario: Funcionario | None = Relationship(back_populates="work_time_sessions")
 
 
+class CaretakerMonthlyGoal(SQLModel, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    month_start: date = Field(index=True)
+    target_hours: float = Field(default=0, ge=0)
+    condominio_id: uuid.UUID = Field(
+        foreign_key="condominio.id", nullable=False, ondelete="CASCADE", index=True
+    )
+    created_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    updated_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+
+
 class ContractorVisit(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     name: str = Field(default="", max_length=255)
@@ -899,6 +916,44 @@ class WorkTimeSessionPublic(WorkTimeSessionBase):
 
 class WorkTimeSessionsPublic(SQLModel):
     data: list[WorkTimeSessionPublic]
+    count: int
+
+
+class CaretakerMonthlyGoalCreate(SQLModel):
+    month_start: date
+    target_hours: float = Field(ge=0)
+
+
+class CaretakerMonthlyGoalUpdate(SQLModel):
+    month_start: date | None = None
+    target_hours: float | None = Field(default=None, ge=0)
+
+
+class CaretakerMonthlyGoalPublic(SQLModel):
+    id: uuid.UUID
+    month_start: date
+    target_hours: float
+    condominio_id: uuid.UUID
+    created_at: datetime
+    updated_at: datetime
+
+
+class CaretakerMonthlyGoalsPublic(SQLModel):
+    data: list[CaretakerMonthlyGoalPublic]
+    count: int
+
+
+class CaretakerMonthlyMetricPublic(SQLModel):
+    month_start: date
+    worked_hours: float
+    target_hours: float
+    carry_over_hours: float
+    effective_target_hours: float
+    remaining_hours: float
+
+
+class CaretakerMonthlyMetricsPublic(SQLModel):
+    data: list[CaretakerMonthlyMetricPublic]
     count: int
 
 

@@ -12,11 +12,13 @@ from app.models import (
     Acess,
     Building,
     BuildingCreate,
+    CaretakerMonthlyGoal,
     Condominio,
     CondominioCreate,
     Funcionario,
     User,
     UserCreate,
+    WorkTimeSession,
 )
 from app.api.routes.acess import get_last_acess
 from tests.utils.user import user_authentication_headers
@@ -458,6 +460,28 @@ def _create_caretaker_sms_scenario(db: Session) -> Funcionario:
     return caretaker
 
 
+def _create_caretaker_metrics_scenario(db: Session) -> Funcionario:
+    condominio = Condominio.model_validate(
+        CondominioCreate(nome="Test Caretaker Metrics Condominio")
+    )
+    db.add(condominio)
+    db.flush()
+
+    caretaker = Funcionario(
+        nome="Test Caretaker Metrics",
+        cargo=1,
+        status=True,
+        is_default=True,
+        mobile=0,
+        email=None,
+        condominio_id=condominio.id,
+    )
+    db.add(caretaker)
+    db.commit()
+    db.refresh(caretaker)
+    return caretaker
+
+
 @pytest.fixture
 def caretaker_sms_setup(db: Session) -> Funcionario:
     caretaker = _create_caretaker_sms_scenario(db)
@@ -659,3 +683,208 @@ def test_update_caretaker_work_time_requires_manager_permissions(
     )
 
     assert update_response.status_code == 403
+
+
+def test_caretaker_work_time_monthly_metrics_include_carry_over(
+    client: TestClient,
+    db: Session,
+) -> None:
+    caretaker = _create_caretaker_metrics_scenario(db)
+    manager_password = random_lower_string()
+    manager_email = random_email()
+    crud.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=manager_email,
+            password=manager_password,
+            is_active=True,
+            is_superuser=False,
+            cargo=2,
+            condominio_id=caretaker.condominio_id,
+        ),
+    )
+    manager_headers = user_authentication_headers(
+        client=client,
+        email=manager_email,
+        password=manager_password,
+    )
+
+    db.add(
+        CaretakerMonthlyGoal(
+            month_start=datetime(2026, 2, 1, tzinfo=timezone.utc).date(),
+            target_hours=40,
+            condominio_id=caretaker.condominio_id,
+        )
+    )
+    db.add(
+        CaretakerMonthlyGoal(
+            month_start=datetime(2026, 3, 1, tzinfo=timezone.utc).date(),
+            target_hours=20,
+            condominio_id=caretaker.condominio_id,
+        )
+    )
+    db.add(
+        WorkTimeSession(
+            status=True,
+            data=datetime(2026, 2, 10, 8, 0, tzinfo=timezone.utc),
+            operacao=0,
+            funcionario_id=caretaker.id,
+        )
+    )
+    db.add(
+        WorkTimeSession(
+            status=True,
+            data=datetime(2026, 2, 10, 18, 0, tzinfo=timezone.utc),
+            operacao=1,
+            funcionario_id=caretaker.id,
+        )
+    )
+    db.add(
+        WorkTimeSession(
+            status=True,
+            data=datetime(2026, 2, 11, 8, 0, tzinfo=timezone.utc),
+            operacao=0,
+            funcionario_id=caretaker.id,
+        )
+    )
+    db.add(
+        WorkTimeSession(
+            status=True,
+            data=datetime(2026, 2, 11, 18, 0, tzinfo=timezone.utc),
+            operacao=1,
+            funcionario_id=caretaker.id,
+        )
+    )
+    db.add(
+        WorkTimeSession(
+            status=True,
+            data=datetime(2026, 2, 12, 8, 0, tzinfo=timezone.utc),
+            operacao=0,
+            funcionario_id=caretaker.id,
+        )
+    )
+    db.add(
+        WorkTimeSession(
+            status=True,
+            data=datetime(2026, 2, 12, 18, 0, tzinfo=timezone.utc),
+            operacao=1,
+            funcionario_id=caretaker.id,
+        )
+    )
+    db.add(
+        WorkTimeSession(
+            status=True,
+            data=datetime(2026, 3, 5, 8, 0, tzinfo=timezone.utc),
+            operacao=0,
+            funcionario_id=caretaker.id,
+        )
+    )
+    db.add(
+        WorkTimeSession(
+            status=True,
+            data=datetime(2026, 3, 5, 18, 0, tzinfo=timezone.utc),
+            operacao=1,
+            funcionario_id=caretaker.id,
+        )
+    )
+    db.add(
+        WorkTimeSession(
+            status=True,
+            data=datetime(2026, 3, 6, 8, 0, tzinfo=timezone.utc),
+            operacao=0,
+            funcionario_id=caretaker.id,
+        )
+    )
+    db.add(
+        WorkTimeSession(
+            status=True,
+            data=datetime(2026, 3, 6, 13, 0, tzinfo=timezone.utc),
+            operacao=1,
+            funcionario_id=caretaker.id,
+        )
+    )
+    db.commit()
+
+    response = client.get(
+        f"{settings.API_V1_STR}/acess/caretaker/work-time/monthly-metrics",
+        headers=manager_headers,
+    )
+
+    assert response.status_code == 200
+    metrics_by_month = {
+        item["month_start"]: item for item in response.json()["data"]
+    }
+
+    february = metrics_by_month["2026-02-01"]
+    assert february["worked_hours"] == 30.0
+    assert february["target_hours"] == 40.0
+    assert february["carry_over_hours"] == 0.0
+    assert february["effective_target_hours"] == 40.0
+    assert february["remaining_hours"] == 10.0
+
+    march = metrics_by_month["2026-03-01"]
+    assert march["worked_hours"] == 15.0
+    assert march["target_hours"] == 20.0
+    assert march["carry_over_hours"] == 10.0
+    assert march["effective_target_hours"] == 30.0
+    assert march["remaining_hours"] == 15.0
+
+
+def test_caretaker_monthly_goal_crud(
+    client: TestClient,
+    db: Session,
+) -> None:
+    caretaker = _create_caretaker_metrics_scenario(db)
+    manager_password = random_lower_string()
+    manager_email = random_email()
+    crud.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=manager_email,
+            password=manager_password,
+            is_active=True,
+            is_superuser=False,
+            cargo=2,
+            condominio_id=caretaker.condominio_id,
+        ),
+    )
+    manager_headers = user_authentication_headers(
+        client=client,
+        email=manager_email,
+        password=manager_password,
+    )
+
+    create_response = client.post(
+        f"{settings.API_V1_STR}/acess/caretaker/work-time/goals",
+        headers=manager_headers,
+        json={"month_start": "2026-04-01", "target_hours": 32},
+    )
+
+    assert create_response.status_code == 200
+    created_goal = create_response.json()
+    assert created_goal["month_start"] == "2026-04-01"
+    assert created_goal["target_hours"] == 32.0
+
+    list_response = client.get(
+        f"{settings.API_V1_STR}/acess/caretaker/work-time/goals",
+        headers=manager_headers,
+    )
+    assert list_response.status_code == 200
+    assert any(
+        item["id"] == created_goal["id"] for item in list_response.json()["data"]
+    )
+
+    update_response = client.patch(
+        f"{settings.API_V1_STR}/acess/caretaker/work-time/goals/{created_goal['id']}",
+        headers=manager_headers,
+        json={"target_hours": 36},
+    )
+    assert update_response.status_code == 200
+    assert update_response.json()["target_hours"] == 36.0
+
+    delete_response = client.delete(
+        f"{settings.API_V1_STR}/acess/caretaker/work-time/goals/{created_goal['id']}",
+        headers=manager_headers,
+    )
+    assert delete_response.status_code == 200
+    assert delete_response.json()["message"] == "Caretaker monthly goal deleted successfully"

@@ -443,6 +443,57 @@ def ensure_contractor_history_schema(session: Session) -> None:
     session.commit()
 
 
+def ensure_caretaker_monthly_goal_schema(session: Session) -> None:
+    bind = session.get_bind()
+    inspector = inspect(bind)
+
+    if inspector.has_table("caretakermonthlygoal"):
+        session.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS "
+                "ix_caretakermonthlygoal_condominio_month_start "
+                "ON caretakermonthlygoal (condominio_id, month_start)"
+            )
+        )
+        session.commit()
+        return
+
+    session.execute(
+        text(
+            """
+            CREATE TABLE caretakermonthlygoal (
+                id UUID PRIMARY KEY,
+                month_start DATE NOT NULL,
+                target_hours DOUBLE PRECISION NOT NULL DEFAULT 0,
+                condominio_id UUID NOT NULL REFERENCES condominio (id) ON DELETE CASCADE,
+                created_at TIMESTAMPTZ NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL
+            )
+            """
+        )
+    )
+    session.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_caretakermonthlygoal_month_start "
+            "ON caretakermonthlygoal (month_start)"
+        )
+    )
+    session.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_caretakermonthlygoal_condominio_id "
+            "ON caretakermonthlygoal (condominio_id)"
+        )
+    )
+    session.execute(
+        text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS "
+            "ix_caretakermonthlygoal_condominio_month_start "
+            "ON caretakermonthlygoal (condominio_id, month_start)"
+        )
+    )
+    session.commit()
+
+
 # make sure all SQLModel models are imported (app.models) before initializing DB
 # otherwise, SQLModel might fail to initialize relationships properly
 # for more details: https://github.com/fastapi/full-stack-fastapi-template/issues/28
@@ -463,6 +514,7 @@ def init_db(session: Session) -> None:
     ensure_notification_history_schema(session)
     ensure_contractor_visit_schema(session)
     ensure_contractor_history_schema(session)
+    ensure_caretaker_monthly_goal_schema(session)
 
     user = session.exec(
         select(User).where(User.email == settings.FIRST_SUPERUSER)

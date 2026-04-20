@@ -20,6 +20,37 @@ from app.models import (
 router = APIRouter(prefix="/moradores", tags=["moradores"])
 
 
+def _normalize_car_value(value: str | None) -> str | None:
+    if value is None:
+        return None
+    stripped_value = value.strip()
+    return stripped_value or None
+
+
+def _build_morador_public(morador: Morador, flat: Flat | None = None) -> MoradorPublic:
+    return MoradorPublic(
+        id=morador.id,
+        cargo=morador.cargo,
+        nome=morador.nome,
+        email=morador.email if morador.email and morador.email.strip() else None,
+        mobile=morador.mobile,
+        receives_flat_reading_sms=morador.receives_flat_reading_sms,
+        receives_twilio_sms=morador.receives_twilio_sms,
+        flat_id=morador.flat_id,
+        car1=_normalize_car_value(flat.car1) if flat else None,
+        car2=_normalize_car_value(flat.car2) if flat else None,
+        car3=_normalize_car_value(flat.car3) if flat else None,
+    )
+
+
+def _sync_flat_cars(
+    flat: Flat, car1: str | None, car2: str | None, car3: str | None
+) -> None:
+    flat.car1 = _normalize_car_value(car1)
+    flat.car2 = _normalize_car_value(car2)
+    flat.car3 = _normalize_car_value(car3)
+
+
 @router.get(
     "/",
     response_model=MoradoresWithFlatPublic,
@@ -112,16 +143,27 @@ def read_morador(session: SessionDep, id: uuid.UUID) -> Any:
     morador = session.get(Morador, id)
     if not morador:
         raise HTTPException(status_code=404, detail="Morador not found")
-    return morador
+    flat = session.get(Flat, morador.flat_id)
+    return _build_morador_public(morador, flat)
 
 
 @router.post("/", response_model=MoradorPublic, dependencies=[Depends(require_cargo(2))])
 def create_morador(*, session: SessionDep, morador_in: MoradorCreate) -> Any:
-    morador = Morador.model_validate(morador_in)
+    flat = session.get(Flat, morador_in.flat_id)
+    if not flat:
+        raise HTTPException(status_code=404, detail="Flat not found")
+
+    morador_data = morador_in.model_dump(exclude={"car1", "car2", "car3"})
+    morador = Morador.model_validate(morador_data)
+    if {"car1", "car2", "car3"} & morador_in.model_fields_set:
+        _sync_flat_cars(flat, morador_in.car1, morador_in.car2, morador_in.car3)
+
+    session.add(flat)
     session.add(morador)
     session.commit()
+    session.refresh(flat)
     session.refresh(morador)
-    return morador
+    return _build_morador_public(morador, flat)
 
 
 @router.patch("/{id}", response_model=MoradorPublic, dependencies=[Depends(require_cargo(2))])
@@ -131,12 +173,26 @@ def update_morador(
     morador = session.get(Morador, id)
     if not morador:
         raise HTTPException(status_code=404, detail="Morador not found")
-    update_dict = morador_in.model_dump(exclude_unset=True)
+    target_flat_id = morador_in.flat_id or morador.flat_id
+    flat = session.get(Flat, target_flat_id)
+    if not flat:
+        raise HTTPException(status_code=404, detail="Flat not found")
+
+    update_dict = morador_in.model_dump(
+        exclude_unset=True,
+        exclude={"car1", "car2", "car3"},
+    )
     morador.sqlmodel_update(update_dict)
+
+    if {"car1", "car2", "car3"} & morador_in.model_fields_set:
+        _sync_flat_cars(flat, morador_in.car1, morador_in.car2, morador_in.car3)
+
+    session.add(flat)
     session.add(morador)
     session.commit()
+    session.refresh(flat)
     session.refresh(morador)
-    return morador
+    return _build_morador_public(morador, flat)
 
 
 @router.patch(

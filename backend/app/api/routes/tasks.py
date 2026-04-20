@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import uuid
 import re
 from typing import Any
 
@@ -9,11 +10,14 @@ from sqlmodel import func, select
 
 from app.api.deps import CurrentUser, SessionDep, require_cargo
 from app.models import (
+    Building,
     CaretakerPublic,
     CaretakersPublic,
     Condominio,
     Funcionario,
     Task,
+    TaskBoardMetadataPublic,
+    TaskBuildingOptionPublic,
     TaskCreate,
     TaskMessage,
     TaskMessageCreate,
@@ -27,7 +31,7 @@ from app.models import (
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
-TASK_ALLOWED_STATUSES = {"todo", "in_progress", "paused", "done"}
+TASK_ALLOWED_STATUSES = {"todo", "in_progress", "done"}
 STATUS_EVENT_PREFIX = "[STATUS]"
 COVER_IMAGE_PREFIX = "[COVER_IMAGE]"
 TASK_CODE_PATTERN = re.compile(r"^task-(\d+)$")
@@ -115,15 +119,38 @@ def _resolve_active_caretaker_user(
     return fallback_user
 
 
-def _task_to_public(session: SessionDep, task: Task) -> TaskPublic:
-    cover_image_data = _get_task_cover_image_data(session, task.id)
-    assigned_user = session.get(User, task.assigned_to_user_id)
-    assigned_name = (
-        assigned_user.full_name
-        or assigned_user.email
-        if assigned_user
-        else str(task.assigned_to_user_id)
-    )
+def _normalize_task_status(status: str) -> str:
+    if status == "paused":
+        return "in_progress"
+    return status
+
+
+def _task_to_public(
+    session: SessionDep,
+    task: Task,
+    *,
+    assigned_name: str | None = None,
+    building_label: str | None = None,
+    cover_image_data: str | None = None,
+) -> TaskPublic:
+    if cover_image_data is None:
+        cover_image_data = _get_task_cover_image_data(session, task.id)
+    if assigned_name is None:
+        assigned_user = session.get(User, task.assigned_to_user_id)
+        assigned_name = (
+            assigned_user.full_name
+            or assigned_user.email
+            if assigned_user
+            else str(task.assigned_to_user_id)
+        )
+    if building_label is None:
+        building = session.get(Building, task.building_id) if task.building_id else None
+        if building:
+            building_label = building.nome
+        else:
+            condominio = session.get(Condominio, task.condominio_id)
+            building_label = condominio.nome if condominio else "Common areas"
+
     return TaskPublic(
         id=task.id,
         code=task.code,
@@ -131,12 +158,14 @@ def _task_to_public(session: SessionDep, task: Task) -> TaskPublic:
         description=task.description,
         cover_image_data=cover_image_data,
         requires_completion_image=bool(cover_image_data),
-        status=task.status,
+        status=_normalize_task_status(task.status),
         condominio_id=task.condominio_id,
+        building_id=task.building_id,
+        building_label=str(building_label),
         created_by_user_id=task.created_by_user_id,
         assigned_to_user_id=task.assigned_to_user_id,
         assigned_to_name=str(assigned_name),
-        spent_seconds=_calculate_spent_seconds(session, task),
+        spent_seconds=0,
         created_at=task.created_at,
         updated_at=task.updated_at,
     )
@@ -198,7 +227,6 @@ def _status_label(status: str) -> str:
     labels = {
         "todo": "To Do",
         "in_progress": "In Progress",
-        "paused": "Paused",
         "done": "Done",
     }
     return labels.get(status, status)
@@ -208,7 +236,6 @@ def _status_from_label(label: str) -> str | None:
     mapping = {
         "To Do": "todo",
         "In Progress": "in_progress",
-        "Paused": "paused",
         "Done": "done",
     }
     return mapping.get(label.strip())
@@ -222,90 +249,6 @@ def _parse_status_event_next_status(text: str | None) -> str | None:
     if len(parts) != 2:
         return None
     return _status_from_label(parts[1])
-
-
-def _calculate_spent_seconds(session: SessionDep, task: Task) -> int:
-    statement = (
-        select(TaskMessage)
-        .where(
-            TaskMessage.task_id == task.id,
-            TaskMessage.text.is_not(None),
-            TaskMessage.text.like(f"{STATUS_EVENT_PREFIX}%"),
-        )
-        .order_by(TaskMessage.created_at.asc())
-    )
-    events = session.exec(statement).all()
-
-    current_status = "todo"
-    current_since = task.created_at
-    spent_seconds = 0
-
-    for event in events:
-        event_time = event.created_at
-        if current_status == "in_progress":
-            delta = int((event_time - current_since).total_seconds())
-            spent_seconds += max(delta, 0)
-
-        next_status = _parse_status_event_next_status(event.text)
-        if next_status in TASK_ALLOWED_STATUSES:
-            current_status = str(next_status)
-            current_since = event_time
-
-    if current_status == "in_progress":
-        delta = int((datetime.now(timezone.utc) - current_since).total_seconds())
-        spent_seconds += max(delta, 0)
-
-    return spent_seconds
-
-
-def _calculate_spent_seconds_map(
-    session: SessionDep, tasks: list[Task]
-) -> dict[Any, int]:
-    if not tasks:
-        return {}
-
-    task_ids = [task.id for task in tasks]
-    statement = (
-        select(TaskMessage)
-        .where(
-            TaskMessage.task_id.in_(task_ids),
-            TaskMessage.text.is_not(None),
-            TaskMessage.text.like(f"{STATUS_EVENT_PREFIX}%"),
-        )
-        .order_by(TaskMessage.task_id.asc(), TaskMessage.created_at.asc())
-    )
-    events = session.exec(statement).all()
-
-    events_by_task: dict[Any, list[TaskMessage]] = {}
-    for event in events:
-        events_by_task.setdefault(event.task_id, []).append(event)
-
-    now = datetime.now(timezone.utc)
-    spent_map: dict[Any, int] = {}
-
-    for task in tasks:
-        current_status = "todo"
-        current_since = task.created_at
-        spent_seconds = 0
-
-        for event in events_by_task.get(task.id, []):
-            event_time = event.created_at
-            if current_status == "in_progress":
-                delta = int((event_time - current_since).total_seconds())
-                spent_seconds += max(delta, 0)
-
-            next_status = _parse_status_event_next_status(event.text)
-            if next_status in TASK_ALLOWED_STATUSES:
-                current_status = str(next_status)
-                current_since = event_time
-
-        if current_status == "in_progress":
-            delta = int((now - current_since).total_seconds())
-            spent_seconds += max(delta, 0)
-
-        spent_map[task.id] = spent_seconds
-
-    return spent_map
 
 
 @router.get("/caretakers", response_model=CaretakersPublic)
@@ -358,6 +301,38 @@ def list_caretakers(
     return CaretakersPublic(data=data, count=count)
 
 
+@router.get(
+    "/metadata",
+    response_model=TaskBoardMetadataPublic,
+    dependencies=[Depends(require_cargo(1))],
+)
+def read_task_board_metadata(
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> TaskBoardMetadataPublic:
+    condominio_id = _resolve_user_condominio_id(session, current_user)
+    if not condominio_id:
+        raise HTTPException(status_code=400, detail="No condominio configured")
+
+    condominio = session.get(Condominio, condominio_id)
+    if not condominio:
+        raise HTTPException(status_code=404, detail="Condominio not found")
+
+    buildings = session.exec(
+        select(Building)
+        .where(Building.condominio_id == condominio_id)
+        .order_by(Building.nome.asc())
+    ).all()
+
+    return TaskBoardMetadataPublic(
+        common_area_label=condominio.nome,
+        buildings=[
+            TaskBuildingOptionPublic(id=building.id, name=building.nome)
+            for building in buildings
+        ],
+    )
+
+
 @router.post("/", response_model=TaskPublic, dependencies=[Depends(require_cargo(1))])
 def create_task(
     *, session: SessionDep, current_user: CurrentUser, payload: TaskCreate
@@ -391,6 +366,16 @@ def create_task(
     if caretaker.condominio_id != condominio_id:
         raise HTTPException(status_code=400, detail="Caretaker outside this condominio")
 
+    building_id = payload.building_id
+    if building_id is not None:
+        building = session.get(Building, building_id)
+        if not building:
+            raise HTTPException(status_code=404, detail="Building not found")
+        if building.condominio_id != condominio_id:
+            raise HTTPException(
+                status_code=400, detail="Building outside this condominio"
+            )
+
     cover_image_data = payload.image_data.strip() if payload.image_data else None
 
     for _attempt in range(3):
@@ -401,6 +386,7 @@ def create_task(
             description=payload.description.strip(),
             status="todo",
             condominio_id=condominio_id,
+            building_id=building_id,
             created_by_user_id=current_user.id,
             assigned_to_user_id=assigned_to_user_id,
             created_at=now,
@@ -472,25 +458,55 @@ def read_tasks(
     count = session.exec(count_statement).one()
     tasks = session.exec(statement).all()
 
+    task_ids = [task.id for task in tasks]
+    cover_image_map: dict[Any, str] = {}
+    if task_ids:
+        cover_images = session.exec(
+            select(TaskMessage.task_id, TaskMessage.image_data)
+            .where(
+                TaskMessage.task_id.in_(task_ids),
+                TaskMessage.text.is_not(None),
+                TaskMessage.text.like(f"{COVER_IMAGE_PREFIX}%"),
+                TaskMessage.image_data.is_not(None),
+            )
+            .order_by(TaskMessage.task_id.asc(), TaskMessage.created_at.asc())
+        ).all()
+        for task_id, image_data in cover_images:
+            if task_id not in cover_image_map and image_data:
+                cover_image_map[task_id] = image_data
+
     assigned_user_ids = list({task.assigned_to_user_id for task in tasks})
     assigned_user_map: dict[Any, User] = {}
     if assigned_user_ids:
-        assigned_users = session.exec(
-            select(User).where(User.id.in_(assigned_user_ids))
-        ).all()
+        assigned_users = session.exec(select(User).where(User.id.in_(assigned_user_ids))).all()
         assigned_user_map = {user.id: user for user in assigned_users}
 
-    spent_seconds_map = _calculate_spent_seconds_map(session, tasks)
+    building_ids = [task.building_id for task in tasks if task.building_id is not None]
+    building_map: dict[Any, Building] = {}
+    if building_ids:
+        buildings = session.exec(select(Building).where(Building.id.in_(building_ids))).all()
+        building_map = {building.id: building for building in buildings}
 
-    data = []
+    condominio_ids = list({task.condominio_id for task in tasks})
+    condominio_map: dict[Any, Condominio] = {}
+    if condominio_ids:
+        condominios = session.exec(
+            select(Condominio).where(Condominio.id.in_(condominio_ids))
+        ).all()
+        condominio_map = {condominio.id: condominio for condominio in condominios}
+
+    data: list[TaskPublic] = []
     for task in tasks:
-        cover_image_data = _get_task_cover_image_data(session, task.id)
         assigned_user = assigned_user_map.get(task.assigned_to_user_id)
         assigned_name = (
-            assigned_user.full_name
-            or assigned_user.email
+            assigned_user.full_name or assigned_user.email
             if assigned_user
             else str(task.assigned_to_user_id)
+        )
+        building = building_map.get(task.building_id) if task.building_id else None
+        condominio = condominio_map.get(task.condominio_id)
+        building_label = building.nome if building else (
+            condominio.nome if condominio else "Common areas"
         )
         data.append(
             TaskPublic(
@@ -498,14 +514,16 @@ def read_tasks(
                 code=task.code,
                 title=task.title,
                 description=task.description,
-                cover_image_data=cover_image_data,
-                requires_completion_image=bool(cover_image_data),
-                status=task.status,
+                cover_image_data=cover_image_map.get(task.id),
+                requires_completion_image=bool(cover_image_map.get(task.id)),
+                status=_normalize_task_status(task.status),
                 condominio_id=task.condominio_id,
+                building_id=task.building_id,
+                building_label=building_label,
                 created_by_user_id=task.created_by_user_id,
                 assigned_to_user_id=task.assigned_to_user_id,
                 assigned_to_name=str(assigned_name),
-                spent_seconds=spent_seconds_map.get(task.id, 0),
+                spent_seconds=0,
                 created_at=task.created_at,
                 updated_at=task.updated_at,
             )
@@ -522,8 +540,6 @@ def update_task_status(
     *, session: SessionDep, current_user: CurrentUser, task_id: str, payload: TaskStatusUpdate
 ) -> TaskPublic:
     try:
-        import uuid
-
         task_uuid = uuid.UUID(task_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Invalid task id") from exc
@@ -589,8 +605,6 @@ def read_task_messages(
     *, session: SessionDep, current_user: CurrentUser, task_id: str, skip: int = 0, limit: int = 200
 ) -> Any:
     try:
-        import uuid
-
         task_uuid = uuid.UUID(task_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Invalid task id") from exc
@@ -642,8 +656,6 @@ def create_task_message(
     *, session: SessionDep, current_user: CurrentUser, task_id: str, payload: TaskMessageCreate
 ) -> TaskMessagePublic:
     try:
-        import uuid
-
         task_uuid = uuid.UUID(task_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Invalid task id") from exc

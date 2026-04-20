@@ -4,22 +4,29 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { OpenAPI } from "@/client"
 import useCustomToast from "@/hooks/useCustomToast"
 
-type TaskStatus = "todo" | "in_progress" | "paused" | "done"
+type TaskStatus = "todo" | "in_progress" | "done"
+type ApiTaskStatus = TaskStatus | "paused"
 type BoardMode = "manager" | "caretaker"
 
-type Task = {
+type ApiTask = {
   id: string
   code: string
   title: string
   description: string
   cover_image_data?: string | null
   requires_completion_image: boolean
-  status: TaskStatus
+  status: ApiTaskStatus
   assigned_to_user_id: string
   assigned_to_name: string
+  building_id?: string | null
+  building_label: string
   spent_seconds: number
   created_at: string
   updated_at: string
+}
+
+type Task = Omit<ApiTask, "status"> & {
+  status: TaskStatus
 }
 
 type TaskMessage = {
@@ -34,13 +41,21 @@ type TaskMessage = {
 }
 
 type TaskListResponse = {
-  data: Task[]
+  data: ApiTask[]
   count: number
 }
 
 type TaskMessageListResponse = {
   data: TaskMessage[]
   count: number
+}
+
+type TaskBoardMetadata = {
+  common_area_label: string
+  buildings: Array<{
+    id: string
+    name: string
+  }>
 }
 
 const apiCall = async (
@@ -97,20 +112,14 @@ const apiCall = async (
 const statusLabel: Record<TaskStatus, string> = {
   todo: "To Do",
   in_progress: "In Progress",
-  paused: "Paused",
   done: "Done",
 }
 
 const STATUS_EVENT_PREFIX = "[STATUS]"
 const COVER_IMAGE_PREFIX = "[COVER_IMAGE]"
 
-const formatSpentTime = (seconds: number) => {
-  const safeSeconds = Math.max(0, Math.floor(seconds || 0))
-  const hours = Math.floor(safeSeconds / 3600)
-  const minutes = Math.floor((safeSeconds % 3600) / 60)
-  if (hours > 0) return `${hours}h ${minutes}m`
-  return `${minutes}m`
-}
+const normalizeTaskStatus = (status: ApiTaskStatus): TaskStatus =>
+  status === "paused" ? "in_progress" : status
 
 export function TasksBoard({ mode }: { mode: BoardMode }) {
   const { showErrorToast, showSuccessToast } = useCustomToast()
@@ -119,6 +128,8 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null)
   const [newTitle, setNewTitle] = useState("")
   const [newImageData, setNewImageData] = useState<string | null>(null)
+  const [newBuildingId, setNewBuildingId] = useState("common_area")
+  const [buildingFilter, setBuildingFilter] = useState("all")
   const [chatText, setChatText] = useState("")
   const [chatImageData, setChatImageData] = useState<string | null>(null)
   const [showCompletionPhotoPrompt, setShowCompletionPhotoPrompt] =
@@ -135,8 +146,31 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
       refetchInterval: selectedTaskId ? 10000 : 15000,
     })
 
-  const tasks = tasksData?.data || []
+  const { data: taskBoardMetadata } = useQuery<TaskBoardMetadata>({
+    queryKey: ["tasks-metadata", mode],
+    queryFn: () => apiCall("/api/v1/tasks/metadata"),
+    enabled: isManager,
+    staleTime: 60000,
+  })
+
+  const tasks = useMemo(
+    () =>
+      (tasksData?.data || []).map((task) => ({
+        ...task,
+        status: normalizeTaskStatus(task.status as ApiTaskStatus),
+      })),
+    [tasksData],
+  )
   const selectedTask = tasks.find((t) => t.id === selectedTaskId) || null
+  const commonAreaLabel = taskBoardMetadata?.common_area_label || "Common areas"
+  const buildingOptions = taskBoardMetadata?.buildings || []
+  const filteredTasks = useMemo(() => {
+    if (buildingFilter === "all") return tasks
+    if (buildingFilter === "common_area") {
+      return tasks.filter((task) => !task.building_id)
+    }
+    return tasks.filter((task) => task.building_id === buildingFilter)
+  }, [buildingFilter, tasks])
 
   const { data: messagesData, isLoading: messagesLoading } =
     useQuery<TaskMessageListResponse>({
@@ -150,14 +184,13 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
     const groups: Record<TaskStatus, Task[]> = {
       todo: [],
       in_progress: [],
-      paused: [],
       done: [],
     }
-    tasks.forEach((task) => {
+    filteredTasks.forEach((task) => {
       groups[task.status].push(task)
     })
     return groups
-  }, [tasks])
+  }, [filteredTasks])
 
   const allMessages = messagesData?.data || []
 
@@ -188,12 +221,15 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
           title: newTitle.trim(),
           description: "",
           image_data: newImageData,
+          building_id:
+            newBuildingId === "common_area" ? null : newBuildingId || null,
         },
       }),
     onSuccess: () => {
       showSuccessToast("Task created")
       setNewTitle("")
       setNewImageData(null)
+      setNewBuildingId("common_area")
       queryClient.invalidateQueries({ queryKey: ["tasks"] })
     },
     onError: (error: unknown) => {
@@ -367,8 +403,7 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
   }
 
   const canMarkTaskAsDone = (task: Task) =>
-    task.status !== "done" &&
-    (isManager || task.status === "in_progress" || task.status === "paused")
+    task.status !== "done" && (isManager || task.status === "in_progress")
 
   const isCaretakerTaskLocked = Boolean(
     selectedTask && !isManager && selectedTask.status === "done",
@@ -391,18 +426,6 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
             Start
           </button>
         )}
-        {task.status === "in_progress" && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              moveTaskToStatus(task, "paused")
-            }}
-            className="rounded bg-amber-600 px-2 py-1 text-xs font-semibold text-white hover:bg-amber-700"
-          >
-            Pause
-          </button>
-        )}
         {canMarkTaskAsDone(task) && (
           <button
             type="button"
@@ -422,21 +445,63 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
   return (
     <div className="mx-auto w-full max-w-7xl space-y-4 sm:space-y-6">
       <div className="rounded-lg bg-white p-4 shadow-md sm:p-6">
-        <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
-          Tasks
-        </h2>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
+            Tasks
+          </h2>
+          {isManager && (
+            <div className="w-full sm:w-72">
+              <label
+                htmlFor="tasks-building-filter"
+                className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+              >
+                Building filter
+              </label>
+              <select
+                id="tasks-building-filter"
+                value={buildingFilter}
+                onChange={(e) => setBuildingFilter(e.target.value)}
+                className="w-full rounded border border-[#ddd] px-3 py-2 text-sm text-black"
+              >
+                <option value="all">All buildings</option>
+                <option value="common_area">
+                  {commonAreaLabel} (Common areas)
+                </option>
+                {buildingOptions.map((building) => (
+                  <option key={building.id} value={building.id}>
+                    {building.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
       </div>
 
       {isManager && (
         <div className="rounded-lg bg-white p-4 shadow-md sm:p-6">
           <h3 className="mb-3 text-lg font-bold text-[#55311c]">Create task</h3>
-          <div className="grid gap-3 md:grid-cols-2">
+          <div className="grid gap-3 md:grid-cols-3">
             <input
               value={newTitle}
               onChange={(e) => setNewTitle(e.target.value)}
               placeholder="Title"
               className="rounded border border-[#ddd] px-3 py-2 text-black"
             />
+            <select
+              value={newBuildingId}
+              onChange={(e) => setNewBuildingId(e.target.value)}
+              className="rounded border border-[#ddd] px-3 py-2 text-sm text-black"
+            >
+              <option value="common_area">
+                {commonAreaLabel} (Common areas)
+              </option>
+              {buildingOptions.map((building) => (
+                <option key={building.id} value={building.id}>
+                  {building.name}
+                </option>
+              ))}
+            </select>
             <div className="rounded border border-[#ddd] px-3 py-2">
               <input
                 id="task-create-image-input"
@@ -485,7 +550,7 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
         </div>
       )}
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {(Object.keys(groupedTasks) as TaskStatus[]).map((status) => (
           <div
             key={status}
@@ -537,12 +602,12 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
                     />
                   )}
                   <p className="text-[11px] font-semibold uppercase tracking-wide text-[#8c7569]">
-                    Spent: {formatSpentTime(task.spent_seconds)}
-                  </p>
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-[#8c7569]">
                     {task.code}
                   </p>
                   <p className="font-semibold text-[#55311c]">{task.title}</p>
+                  <p className="mt-1 text-xs text-[#8c7569]">
+                    Building: {task.building_label}
+                  </p>
                   {!task.cover_image_data && (
                     <p className="mt-1 line-clamp-2 text-xs text-[rgba(0,0,0,0.65)]">
                       {task.description || "No description"}
@@ -581,6 +646,9 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
                     {selectedTask.description || "No description"}
                   </p>
                 )}
+                <p className="mt-2 text-sm font-semibold text-[#8c7569]">
+                  Building: {selectedTask.building_label}
+                </p>
               </div>
               <button
                 type="button"

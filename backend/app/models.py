@@ -374,9 +374,12 @@ class Task(SQLModel, table=True):
     code: str = Field(max_length=32, index=True)
     title: str = Field(max_length=255)
     description: str = Field(default="")
-    status: str = Field(default="todo", max_length=20)  # todo | in_progress | paused | done
+    status: str = Field(default="todo", max_length=20)  # todo | in_progress | done
     condominio_id: uuid.UUID = Field(
         foreign_key="condominio.id", nullable=False, ondelete="CASCADE"
+    )
+    building_id: uuid.UUID | None = Field(
+        default=None, foreign_key="building.id", ondelete="SET NULL"
     )
     created_by_user_id: uuid.UUID = Field(foreign_key="user.id", nullable=False)
     assigned_to_user_id: uuid.UUID = Field(foreign_key="user.id", nullable=False)
@@ -733,7 +736,9 @@ class MoradorBase(SQLModel):
 
 
 class MoradorCreate(MoradorBase):
-    pass
+    car1: str | None = Field(default=None, max_length=50)
+    car2: str | None = Field(default=None, max_length=50)
+    car3: str | None = Field(default=None, max_length=50)
 
 
 class MoradorUpdate(SQLModel):
@@ -743,11 +748,17 @@ class MoradorUpdate(SQLModel):
     mobile: str | None = Field(default=None, max_length=20)
     receives_flat_reading_sms: bool | None = None
     receives_twilio_sms: bool | None = None
+    car1: str | None = Field(default=None, max_length=50)
+    car2: str | None = Field(default=None, max_length=50)
+    car3: str | None = Field(default=None, max_length=50)
     flat_id: uuid.UUID | None = None
 
 
 class MoradorPublic(MoradorBase):
     id: uuid.UUID
+    car1: str | None = None
+    car2: str | None = None
+    car3: str | None = None
 
 
 class MoradoresPublic(SQLModel):
@@ -1156,10 +1167,11 @@ class TaskCreate(SQLModel):
     description: str = Field(default="")
     image_data: str | None = None
     assigned_to_user_id: uuid.UUID | None = None
+    building_id: uuid.UUID | None = None
 
 
 class TaskStatusUpdate(SQLModel):
-    status: str = Field(min_length=1, max_length=20)  # todo | in_progress | paused | done
+    status: str = Field(min_length=1, max_length=20)  # todo | in_progress | done
     image_data: str | None = None
 
 
@@ -1172,6 +1184,8 @@ class TaskPublic(SQLModel):
     requires_completion_image: bool = False
     status: str
     condominio_id: uuid.UUID
+    building_id: uuid.UUID | None = None
+    building_label: str
     created_by_user_id: uuid.UUID
     assigned_to_user_id: uuid.UUID
     assigned_to_name: str
@@ -1183,6 +1197,16 @@ class TaskPublic(SQLModel):
 class TasksPublic(SQLModel):
     data: list[TaskPublic]
     count: int
+
+
+class TaskBuildingOptionPublic(SQLModel):
+    id: uuid.UUID
+    name: str
+
+
+class TaskBoardMetadataPublic(SQLModel):
+    common_area_label: str
+    buildings: list[TaskBuildingOptionPublic]
 
 
 class TaskMessageCreate(SQLModel):

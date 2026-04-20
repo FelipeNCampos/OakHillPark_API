@@ -5,6 +5,8 @@ import re
 from app import crud
 from app.core.config import settings
 from app.models import (
+    Building,
+    BuildingCreate,
     Condominio,
     CondominioCreate,
     User,
@@ -46,6 +48,16 @@ def _ensure_condominio_and_users(db: Session) -> tuple[Condominio, User, User]:
     return condominio, manager, caretaker
 
 
+def _create_test_building(db: Session, condominio_id) -> Building:
+    building = Building.model_validate(
+        BuildingCreate(nome="Test Tasks Building", condominio_id=condominio_id)
+    )
+    db.add(building)
+    db.commit()
+    db.refresh(building)
+    return building
+
+
 def test_caretaker_login_only(client: TestClient, db: Session) -> None:
     condominio, _, caretaker = _ensure_condominio_and_users(db)
     assert condominio.id
@@ -65,7 +77,8 @@ def test_caretaker_login_only(client: TestClient, db: Session) -> None:
 
 
 def test_tasks_lifecycle(client: TestClient, db: Session) -> None:
-    _, _, caretaker = _ensure_condominio_and_users(db)
+    condominio, _, caretaker = _ensure_condominio_and_users(db)
+    building = _create_test_building(db, condominio.id)
 
     manager_headers = user_authentication_headers(
         client=client,
@@ -77,6 +90,7 @@ def test_tasks_lifecycle(client: TestClient, db: Session) -> None:
         "title": "Check water leak",
         "description": "Block B - flat 12",
         "assigned_to_user_id": str(caretaker.id),
+        "building_id": str(building.id),
     }
     create_task = client.post(
         f"{settings.API_V1_STR}/tasks/",
@@ -87,6 +101,8 @@ def test_tasks_lifecycle(client: TestClient, db: Session) -> None:
     task = create_task.json()
     task_id = task["id"]
     assert re.fullmatch(r"task-\d{3,}", task["code"])
+    assert task["building_id"] == str(building.id)
+    assert task["building_label"] == building.nome
 
     caretaker_password = random_lower_string()
     caretaker = crud.update_user(
@@ -128,7 +144,7 @@ def test_tasks_lifecycle(client: TestClient, db: Session) -> None:
 def test_manager_creates_task_without_assigned_user(
     client: TestClient, db: Session
 ) -> None:
-    _, _, caretaker = _ensure_condominio_and_users(db)
+    condominio, _, caretaker = _ensure_condominio_and_users(db)
 
     manager_headers = user_authentication_headers(
         client=client,
@@ -151,6 +167,8 @@ def test_manager_creates_task_without_assigned_user(
     assert assigned_user.cargo == 1
     assert assigned_user.condominio_id == caretaker.condominio_id
     assert re.fullmatch(r"task-\d{3,}", payload["code"])
+    assert payload["building_id"] is None
+    assert payload["building_label"] == condominio.nome
 
 
 def test_task_code_auto_increment(client: TestClient, db: Session) -> None:
@@ -257,7 +275,7 @@ def test_task_with_creation_photo_requires_completion_photo(
     reopen_after_done = client.patch(
         f"{settings.API_V1_STR}/tasks/{payload['id']}/status",
         headers=caretaker_headers,
-        json={"status": "paused"},
+        json={"status": "in_progress"},
     )
     assert reopen_after_done.status_code == 400
     assert (
@@ -286,3 +304,26 @@ def test_task_with_creation_photo_requires_completion_photo(
         and "Done" in (message.get("text") or "")
         for message in messages_response.json()["data"]
     )
+
+
+def test_task_board_metadata_returns_buildings_and_common_area_label(
+    client: TestClient, db: Session
+) -> None:
+    condominio, _, _ = _ensure_condominio_and_users(db)
+    building = _create_test_building(db, condominio.id)
+
+    manager_headers = user_authentication_headers(
+        client=client,
+        email=settings.FIRST_SUPERUSER,
+        password=settings.FIRST_SUPERUSER_PASSWORD,
+    )
+
+    response = client.get(
+        f"{settings.API_V1_STR}/tasks/metadata",
+        headers=manager_headers,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["common_area_label"] == condominio.nome
+    assert any(item["id"] == str(building.id) for item in payload["buildings"])

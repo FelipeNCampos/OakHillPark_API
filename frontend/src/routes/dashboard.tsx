@@ -325,6 +325,9 @@ type FlatResidentRow = {
   flat_numero: number
   flat_label?: string | null
   reading_types: number
+  car1?: string | null
+  car2?: string | null
+  car3?: string | null
   owner_1?: Morador
   owner_2?: Morador
   tenant?: Morador
@@ -12452,6 +12455,17 @@ function CaretakerSummary({
     return diffMinutes
   }
 
+  const formatDecimalHours = (hoursValue: number) => {
+    if (!Number.isFinite(hoursValue)) return "0m"
+    const totalMinutes = Math.round(hoursValue * 60)
+    const hours = Math.floor(totalMinutes / 60)
+    const minutes = totalMinutes % 60
+
+    if (hours === 0) return `${minutes}m`
+    if (minutes === 0) return `${hours}h`
+    return `${hours}h ${minutes}m`
+  }
+
   const toDateKey = (dateValue?: string | null) => {
     if (!dateValue) return ""
     const date = new Date(dateValue)
@@ -12657,11 +12671,6 @@ function CaretakerSummary({
     return Number((totalMinutes / 60).toFixed(2))
   }, [workTimeSessionsGrouped, selectedWorkDate, getDurationMinutes, toDateKey])
 
-  const workTimeChartData = useMemo(
-    () => [{ label: "WORK TIME", hours: workTimeDayHours }],
-    [workTimeDayHours],
-  )
-
   const workTimeWeekHours = useMemo(() => {
     let totalMinutes = 0
     workTimeSessionsGrouped.forEach((session) => {
@@ -12687,6 +12696,20 @@ function CaretakerSummary({
   const remainingWeeklyTargetHours = useMemo(
     () => Math.max(20 - workTimeWeekHours, 0),
     [workTimeWeekHours],
+  )
+
+  const workTimeChartData = useMemo(
+    () => [
+      { label: "Worktime day", hours: workTimeDayHours },
+      { label: "Worktime week", hours: workTimeWeekHours },
+      { label: "Worktime monthly", hours: selectedWorkMonthHours },
+    ],
+    [selectedWorkMonthHours, workTimeDayHours, workTimeWeekHours],
+  )
+
+  const hasWorkTimeChartData = useMemo(
+    () => workTimeChartData.some((item) => item.hours > 0),
+    [workTimeChartData],
   )
 
   const binSessionsGrouped = useMemo(() => {
@@ -13370,14 +13393,14 @@ function CaretakerSummary({
                 </p>
                 <div className="mt-2 flex flex-wrap items-end gap-3">
                   <span className="font-['Nunito',sans-serif] text-4xl font-bold text-[#55311c]">
-                    {workTimeWeekHours.toFixed(2)}h
+                    {formatDecimalHours(workTimeWeekHours)}
                   </span>
                   <span className="pb-1 text-sm text-[rgba(85,49,28,0.72)]">
                     {weekRangeLabel}
                   </span>
                 </div>
                 <p className="mt-2 text-sm text-[rgba(85,49,28,0.72)]">
-                  {remainingWeeklyTargetHours.toFixed(2)}h left to reach 20h
+                  {formatDecimalHours(remainingWeeklyTargetHours)} left to reach 20h
                 </p>
               </div>
               <div className="lg:border-l lg:border-[#e5e0dc] lg:px-6">
@@ -13388,7 +13411,7 @@ function CaretakerSummary({
                     </p>
                     <div className="mt-2 flex flex-wrap items-end gap-3">
                       <span className="font-['Nunito',sans-serif] text-4xl font-bold text-[#55311c]">
-                        {selectedWorkMonthHours.toFixed(2)}h
+                        {formatDecimalHours(selectedWorkMonthHours)}
                       </span>
                       <span className="pb-1 text-sm text-[rgba(85,49,28,0.72)]">
                         {selectedWorkMonthLabel}
@@ -13405,11 +13428,11 @@ function CaretakerSummary({
                 </div>
                 <div className="mt-3 flex flex-wrap items-start gap-2 text-sm text-[rgba(85,49,28,0.78)]">
                   <span className="font-semibold text-[#55311c]">
-                    Target {selectedWorkMonthTargetHours.toFixed(2)}h
+                    Target {formatDecimalHours(selectedWorkMonthTargetHours)}
                   </span>
                   {selectedWorkMonthCarryOverHours > 0 && (
                     <sup className="text-xs font-semibold text-[#8a3d1b]">
-                      +{selectedWorkMonthCarryOverHours.toFixed(2)} hours
+                      +{formatDecimalHours(selectedWorkMonthCarryOverHours)}
                     </sup>
                   )}
                 </div>
@@ -13419,7 +13442,7 @@ function CaretakerSummary({
                     : monthlyMetricsError
                       ? "Failed to load monthly target."
                     : selectedWorkMonthEffectiveTargetHours > 0
-                      ? `${selectedWorkMonthRemainingHours.toFixed(2)}h left to reach ${selectedWorkMonthEffectiveTargetHours.toFixed(2)}h`
+                      ? `${formatDecimalHours(selectedWorkMonthRemainingHours)} left to reach ${formatDecimalHours(selectedWorkMonthEffectiveTargetHours)}`
                       : "No monthly goal defined for this month."}
                 </p>
               </div>
@@ -13485,26 +13508,25 @@ function CaretakerSummary({
             </div>
             <div className="h-48 w-full">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart
-                  data={workTimeChartData}
-                  layout="vertical"
-                  margin={{ left: 10, right: 20 }}
-                >
+                <BarChart data={workTimeChartData} margin={{ left: 10, right: 20 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#d9d0ca" />
                   <XAxis
-                    type="number"
+                    type="category"
+                    dataKey="label"
                     stroke="#55311c"
                     tick={{ fill: "#55311c", fontSize: 12 }}
                   />
                   <YAxis
-                    type="category"
-                    dataKey="label"
-                    width={90}
+                    type="number"
                     stroke="#55311c"
                     tick={{ fill: "#55311c", fontSize: 12 }}
+                    tickFormatter={(value: number) => formatDecimalHours(value)}
                   />
                   <Tooltip
-                    formatter={(value: number) => [`${value}h`, "Hours"]}
+                    formatter={(value: number) => [
+                      formatDecimalHours(Number(value)),
+                      "Hours",
+                    ]}
                     contentStyle={{
                       borderRadius: "10px",
                       border: "1px solid #e5e0dc",
@@ -13514,15 +13536,15 @@ function CaretakerSummary({
                   <Bar
                     dataKey="hours"
                     fill="#8c7569"
-                    radius={[0, 8, 8, 0]}
-                    maxBarSize={36}
+                    radius={[8, 8, 0, 0]}
+                    maxBarSize={56}
                   />
                 </BarChart>
               </ResponsiveContainer>
             </div>
-            {!isLoadingWorkTime && workTimeDayHours === 0 && (
+            {!isLoadingWorkTime && !hasWorkTimeChartData && (
               <p className="mt-3 text-sm text-[rgba(0,0,0,0.6)]">
-                No WORK TIME sessions on the selected day.
+                No WORK TIME sessions in the selected day, week or month.
               </p>
             )}
           </div>
@@ -14162,7 +14184,7 @@ function CaretakerSummary({
                         )}
                       </td>
                       <td className="px-4 py-3 text-sm text-[#55311c]">
-                        {goal.target_hours.toFixed(2)}h
+                        {formatDecimalHours(goal.target_hours)}
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex justify-end gap-2">
@@ -14715,6 +14737,9 @@ function ResidentsContent() {
         flat_numero: morador.flat_numero,
         flat_label: morador.flat_label,
         reading_types: morador.reading_types,
+        car1: morador.car1,
+        car2: morador.car2,
+        car3: morador.car3,
         edit_target_id: null,
       }
 
@@ -14723,6 +14748,9 @@ function ResidentsContent() {
       if (morador.cargo === 2 && !current.tenant) current.tenant = morador
       if (morador.cargo === 3 && !current.agent) current.agent = morador
       current.reading_types = morador.reading_types
+      current.car1 = current.car1 ?? morador.car1
+      current.car2 = current.car2 ?? morador.car2
+      current.car3 = current.car3 ?? morador.car3
       current.edit_target_id =
         current.owner_1?.id ??
         current.owner_2?.id ??
@@ -14871,10 +14899,14 @@ function ResidentsContent() {
     if (!morador)
       return <span className="text-xs text-[rgba(85,49,28,0.55)]">-</span>
     return (
-      <label className="mt-2 inline-flex items-center gap-2 text-xs font-semibold text-[#55311c]">
+      <label
+        className="mt-2 inline-flex items-center gap-2 text-xs font-semibold text-[#55311c]"
+        onClick={(event) => event.stopPropagation()}
+      >
         <input
           type="checkbox"
           checked={morador.receives_flat_reading_sms}
+          onClick={(event) => event.stopPropagation()}
           onChange={(event) =>
             handleReadingSmsToggle(morador.id, event.target.checked)
           }
@@ -14890,10 +14922,14 @@ function ResidentsContent() {
     if (!morador)
       return <span className="text-xs text-[rgba(85,49,28,0.55)]">-</span>
     return (
-      <label className="mt-2 inline-flex items-center gap-2 text-xs font-semibold text-[#55311c]">
+      <label
+        className="mt-2 inline-flex items-center gap-2 text-xs font-semibold text-[#55311c]"
+        onClick={(event) => event.stopPropagation()}
+      >
         <input
           type="checkbox"
           checked={morador.receives_twilio_sms}
+          onClick={(event) => event.stopPropagation()}
           onChange={(event) =>
             handleTwilioSmsToggle(morador.id, event.target.checked)
           }
@@ -14909,11 +14945,29 @@ function ResidentsContent() {
     if (!morador) return "-"
 
     return (
-      <div className="flex flex-col">
-        <span>{morador.nome}</span>
-        <span className="text-xs text-[rgba(85,49,28,0.72)]">
+      <div className="flex min-w-0 flex-col leading-tight">
+        <span className="break-words">{morador.nome}</span>
+        <span className="break-words text-[10px] text-[rgba(85,49,28,0.72)]">
           {morador.email || "no email"}
         </span>
+      </div>
+    )
+  }
+
+  const renderFlatPlates = (row: FlatResidentRow) => {
+    const plates = [row.car1, row.car2, row.car3].filter(
+      (plate): plate is string => Boolean(plate?.trim()),
+    )
+
+    if (plates.length === 0) return "-"
+
+    return (
+      <div className="flex min-w-0 flex-col leading-tight">
+        {plates.map((plate) => (
+          <span key={plate} className="break-words">
+            {plate}
+          </span>
+        ))}
       </div>
     )
   }
@@ -14926,6 +14980,15 @@ function ResidentsContent() {
   const handleResidentTypeFilterChange = (value: ResidentTypeFilter) => {
     setResidentTypeFilter(value)
     setCurrentPage(0)
+  }
+
+  const openResidentEdit = (
+    residentId: EntityId,
+    context?: ResidentEditContext,
+  ) => {
+    setEditingId(residentId)
+    setEditContext(context || null)
+    setShowForm(true)
   }
 
   if (isLoading && Residents.length === 0) {
@@ -15062,7 +15125,7 @@ function ResidentsContent() {
         ) : (
           <>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-full border-collapse rounded-lg bg-white text-[13px] whitespace-nowrap [&_th]:px-3 [&_th]:py-2 [&_td]:px-3 [&_td]:py-2">
+              <table className="w-full min-w-full border-collapse rounded-lg bg-white text-[11px] md:text-xs [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-[10px] [&_th]:leading-tight [&_th]:whitespace-normal [&_td]:px-2 [&_td]:py-1.5 [&_td]:align-top [&_td]:leading-tight [&_td]:whitespace-normal">
                 {isAllTypeView ? (
                   <>
                     <thead>
@@ -15072,6 +15135,9 @@ function ResidentsContent() {
                         </th>
                         <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
                           Number
+                        </th>
+                        <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
+                          Plates
                         </th>
                         <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
                           Owner 1
@@ -15097,19 +15163,40 @@ function ResidentsContent() {
                         <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
                           Phone
                         </th>
-                        <th className="border border-gray-400 px-4 py-3 text-center font-['Nunito',sans-serif] font-semibold text-white">
-                          Actions
-                        </th>
                       </tr>
                     </thead>
                     <tbody>
                       {paginatedFlatRows.map((row) => (
-                        <tr key={row.key} className="hover:bg-[#f5f1ee]">
+                        <tr
+                          key={row.key}
+                          className="cursor-pointer hover:bg-[#f5f1ee]"
+                          onClick={() => {
+                            if (row.edit_target_id === null) return
+                            const targetResident =
+                              row.owner_1 ??
+                              row.owner_2 ??
+                              row.tenant ??
+                              row.agent ??
+                              null
+                            openResidentEdit(row.edit_target_id, {
+                              editTitle: `Edit ${getResidentRoleEditToken(targetResident?.cargo ?? -1)}`,
+                              flatResidents: {
+                                owner_1: row.owner_1,
+                                owner_2: row.owner_2,
+                                tenant: row.tenant,
+                                agent: row.agent,
+                              },
+                            })
+                          }}
+                        >
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
                             {row.building_nome}
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
                             {formatFlatNumber(row.flat_numero, row.flat_label)}
+                          </td>
+                          <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
+                            {renderFlatPlates(row)}
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
                             {renderResidentIdentity(row.owner_1)}
@@ -15151,35 +15238,6 @@ function ResidentsContent() {
                               {renderTwilioSmsToggle(row.agent)}
                             </div>
                           </td>
-                          <td className="border border-gray-400 px-4 py-3 text-center">
-                            <button
-                              onClick={() => {
-                                if (row.edit_target_id === null) return
-                                const targetResident =
-                                  row.owner_1 ??
-                                  row.owner_2 ??
-                                  row.tenant ??
-                                  row.agent ??
-                                  null
-                                setEditingId(row.edit_target_id)
-                                setEditContext({
-                                  editTitle: `Edit ${getResidentRoleEditToken(targetResident?.cargo ?? -1)}`,
-                                  flatResidents: {
-                                    owner_1: row.owner_1,
-                                    owner_2: row.owner_2,
-                                    tenant: row.tenant,
-                                    agent: row.agent,
-                                  },
-                                })
-                                setShowForm(true)
-                              }}
-                              className="mr-2 rounded-lg bg-[#8c7569] px-3 py-1 font-['Nunito',sans-serif] text-xs font-semibold text-white transition-all duration-300 hover:bg-[#55311c] disabled:opacity-50"
-                              type="button"
-                              disabled={row.edit_target_id === null}
-                            >
-                              Edit
-                            </button>
-                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -15212,14 +15270,19 @@ function ResidentsContent() {
                         <th className="border border-gray-400 px-4 py-3 text-center font-['Nunito',sans-serif] font-semibold text-white">
                           Gas
                         </th>
-                        <th className="border border-gray-400 px-4 py-3 text-center font-['Nunito',sans-serif] font-semibold text-white">
-                          Actions
-                        </th>
                       </tr>
                     </thead>
                     <tbody>
                       {paginatedResidents.map((morador) => (
-                        <tr key={morador.id} className="hover:bg-[#f5f1ee]">
+                        <tr
+                          key={morador.id}
+                          className="cursor-pointer hover:bg-[#f5f1ee]"
+                          onClick={() =>
+                            openResidentEdit(morador.id, {
+                              editTitle: `Edit ${getResidentRoleEditToken(morador.cargo)}`,
+                            })
+                          }
+                        >
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
                             {morador.building_nome}
                           </td>
@@ -15239,6 +15302,7 @@ function ResidentsContent() {
                             <input
                               type="checkbox"
                               checked={morador.receives_flat_reading_sms}
+                              onClick={(event) => event.stopPropagation()}
                               onChange={(event) =>
                                 handleReadingSmsToggle(
                                   morador.id,
@@ -15253,6 +15317,7 @@ function ResidentsContent() {
                             <input
                               type="checkbox"
                               checked={morador.receives_twilio_sms}
+                              onClick={(event) => event.stopPropagation()}
                               onChange={(event) =>
                                 handleTwilioSmsToggle(
                                   morador.id,
@@ -15267,6 +15332,7 @@ function ResidentsContent() {
                             <input
                               type="checkbox"
                               checked={(morador.reading_types & 2) !== 0}
+                              onClick={(event) => event.stopPropagation()}
                               onChange={() =>
                                 handleCheckboxChange(
                                   morador.id,
@@ -15282,6 +15348,7 @@ function ResidentsContent() {
                             <input
                               type="checkbox"
                               checked={(morador.reading_types & 4) !== 0}
+                              onClick={(event) => event.stopPropagation()}
                               onChange={() =>
                                 handleCheckboxChange(
                                   morador.id,
@@ -15292,21 +15359,6 @@ function ResidentsContent() {
                               disabled={updateReadingTypesMutation.isPending}
                               className="h-4 w-4 cursor-pointer"
                             />
-                          </td>
-                          <td className="border border-gray-400 px-4 py-3 text-center">
-                            <button
-                              onClick={() => {
-                                setEditingId(morador.id)
-                                setEditContext({
-                                  editTitle: `Edit ${getResidentRoleEditToken(morador.cargo)}`,
-                                })
-                                setShowForm(true)
-                              }}
-                              className="mr-2 rounded-lg bg-[#8c7569] px-3 py-1 font-['Nunito',sans-serif] text-xs font-semibold text-white transition-all duration-300 hover:bg-[#55311c]"
-                              type="button"
-                            >
-                              Edit
-                            </button>
                           </td>
                         </tr>
                       ))}

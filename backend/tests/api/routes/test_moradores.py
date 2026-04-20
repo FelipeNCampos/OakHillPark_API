@@ -52,7 +52,6 @@ def _create_test_morador(db: Session, flat_id: uuid.UUID) -> Morador:
         email=random_email(),
         mobile="1234567890",
         receives_flat_reading_sms=False,
-        car1="ABC1234",
         flat_id=flat_id
     )
     morador = Morador.model_validate(morador_in)
@@ -92,6 +91,10 @@ def test_read_morador_by_id(
 ) -> None:
     """Test reading a specific morador by ID."""
     _, _, flat = _create_test_condominio_flat(db)
+    flat.car1 = "ABC1234"
+    db.add(flat)
+    db.commit()
+    db.refresh(flat)
     morador = _create_test_morador(db, flat.id)
 
     r = client.get(
@@ -107,6 +110,7 @@ def test_read_morador_by_id(
     assert data["flat_id"] == str(morador.flat_id)
     assert data["receives_flat_reading_sms"] is False
     assert data["receives_twilio_sms"] is False
+    assert data["car1"] == "ABC1234"
 
 
 def test_read_nonexistent_morador(
@@ -149,6 +153,9 @@ def test_create_morador(
     assert created_morador["email"] == data["email"]
     assert created_morador["receives_flat_reading_sms"] is False
     assert created_morador["receives_twilio_sms"] is False
+    assert created_morador["car1"] == data["car1"]
+    db.refresh(flat)
+    assert flat.car1 == data["car1"]
 
 
 def test_create_morador_without_permission(
@@ -198,6 +205,35 @@ def test_update_morador(
     assert updated_morador["nome"] == update_data["nome"]
     assert updated_morador["cargo"] == update_data["cargo"]
     assert updated_morador["email"] == update_data["email"]
+    assert updated_morador["car1"] == update_data["car1"]
+    db.refresh(flat)
+    assert flat.car1 == update_data["car1"]
+
+
+def test_read_moradores_returns_flat_car_plates(
+    client: TestClient, superuser_token_headers: dict[str, str], db: Session
+) -> None:
+    _, _, flat = _create_test_condominio_flat(db)
+    flat.car1 = "PLATE101"
+    flat.car2 = "PLATE202"
+    db.add(flat)
+    db.commit()
+    db.refresh(flat)
+    morador = _create_test_morador(db, flat.id)
+
+    response = client.get(
+        f"{settings.API_V1_STR}/moradores/",
+        headers=superuser_token_headers,
+    )
+
+    assert response.status_code == 200
+    listed = next(
+        item
+        for item in response.json()["data"]
+        if item["id"] == str(morador.id)
+    )
+    assert listed["car1"] == "PLATE101"
+    assert listed["car2"] == "PLATE202"
 
 
 def test_update_morador_sms_preference(

@@ -8,6 +8,7 @@ import { createFileRoute, redirect } from "@tanstack/react-router"
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
 import QRCode from "qrcode"
+import type { KeyboardEvent } from "react"
 import { useDeferredValue, useEffect, useMemo, useState } from "react"
 import {
   Bar,
@@ -145,6 +146,13 @@ interface CaretakerRecordEditState {
   originalIso: string
   label: "Time IN" | "Time OUT"
   recordType: "work-time" | "bins"
+  rowKey?: string
+  buildingLabel?: string
+  dateValue?: string | null
+  inRecordId?: EntityId | null
+  inOriginalIso?: string | null
+  outRecordId?: EntityId | null
+  outOriginalIso?: string | null
 }
 
 interface CaretakerManualActionState {
@@ -12350,8 +12358,16 @@ function CaretakerSummary({
   const [editingCaretakerRecord, setEditingCaretakerRecord] =
     useState<CaretakerRecordEditState | null>(null)
   const [editedCaretakerTimeValue, setEditedCaretakerTimeValue] = useState("")
+  const [editedCaretakerInTimeValue, setEditedCaretakerInTimeValue] =
+    useState("")
+  const [editedCaretakerOutTimeValue, setEditedCaretakerOutTimeValue] =
+    useState("")
   const [isSavingCaretakerRecordEdit, setIsSavingCaretakerRecordEdit] =
     useState(false)
+  const [
+    isConfirmingCaretakerRecordDelete,
+    setIsConfirmingCaretakerRecordDelete,
+  ] = useState(false)
   const [showMonthlyGoalsModal, setShowMonthlyGoalsModal] = useState(false)
   const [goalFormMonth, setGoalFormMonth] = useState("")
   const [goalFormHours, setGoalFormHours] = useState("")
@@ -13116,6 +13132,15 @@ function CaretakerSummary({
     isoValue: string | null,
     label: "Time IN" | "Time OUT",
     recordType: "work-time" | "bins",
+    rowContext?: {
+      rowKey: string
+      buildingLabel: string
+      dateValue: string | null
+      inRecordId: EntityId | null
+      inValue: string | null
+      outRecordId: EntityId | null
+      outValue: string | null
+    },
   ) => {
     if (!recordId || !isoValue) return
     setEditingCaretakerRecord({
@@ -13123,43 +13148,33 @@ function CaretakerSummary({
       originalIso: isoValue,
       label,
       recordType,
+      rowKey: rowContext?.rowKey,
+      buildingLabel: rowContext?.buildingLabel,
+      dateValue: rowContext?.dateValue,
+      inRecordId: rowContext?.inRecordId,
+      inOriginalIso: rowContext?.inValue,
+      outRecordId: rowContext?.outRecordId,
+      outOriginalIso: rowContext?.outValue,
     })
     setEditedCaretakerTimeValue(toTimeInputValue(isoValue))
+    setEditedCaretakerInTimeValue(toTimeInputValue(rowContext?.inValue))
+    setEditedCaretakerOutTimeValue(toTimeInputValue(rowContext?.outValue))
+    setIsConfirmingCaretakerRecordDelete(false)
+  }
+
+  const handleCaretakerEditCellKeyDown = (
+    event: KeyboardEvent<HTMLElement>,
+    openEdit: () => void,
+  ) => {
+    if (event.key !== "Enter" && event.key !== " ") return
+    event.preventDefault()
+    openEdit()
   }
 
   const handleSaveCaretakerRecordEdit = async () => {
     if (!editingCaretakerRecord) return
-    if (!editedCaretakerTimeValue) {
-      showErrorToast("Time is required")
-      return
-    }
-
-    const [hoursRaw, minutesRaw] = editedCaretakerTimeValue.split(":")
-    const hours = Number(hoursRaw)
-    const minutes = Number(minutesRaw)
-    if (
-      Number.isNaN(hours) ||
-      Number.isNaN(minutes) ||
-      hours < 0 ||
-      hours > 23 ||
-      minutes < 0 ||
-      minutes > 59
-    ) {
-      showErrorToast("Invalid time")
-      return
-    }
-
-    const nextDate = new Date(editingCaretakerRecord.originalIso)
-    if (Number.isNaN(nextDate.getTime())) {
-      showErrorToast("Invalid original record date")
-      return
-    }
-    nextDate.setHours(hours, minutes, 0, 0)
 
     const isWorkTimeEdit = editingCaretakerRecord.recordType === "work-time"
-    const apiPath = isWorkTimeEdit
-      ? `/api/v1/acess/caretaker/work-time/${editingCaretakerRecord.recordId}`
-      : `/api/v1/bins/sessions/${editingCaretakerRecord.recordId}`
     const queryKey = isWorkTimeEdit
       ? ["acess", "caretaker", "work-time"]
       : ["bins", "sessions", "caretaker-summary"]
@@ -13172,14 +13187,142 @@ function CaretakerSummary({
 
     try {
       setIsSavingCaretakerRecordEdit(true)
-      await apiCall(apiPath, {
-        method: "PATCH",
-        body: { data: nextDate.toISOString() },
-      })
+
+      if (isWorkTimeEdit) {
+        if (!editedCaretakerTimeValue) {
+          showErrorToast("Time is required")
+          return
+        }
+
+        const [hoursRaw, minutesRaw] = editedCaretakerTimeValue.split(":")
+        const hours = Number(hoursRaw)
+        const minutes = Number(minutesRaw)
+        if (
+          Number.isNaN(hours) ||
+          Number.isNaN(minutes) ||
+          hours < 0 ||
+          hours > 23 ||
+          minutes < 0 ||
+          minutes > 59
+        ) {
+          showErrorToast("Invalid time")
+          return
+        }
+
+        const nextDate = new Date(editingCaretakerRecord.originalIso)
+        if (Number.isNaN(nextDate.getTime())) {
+          showErrorToast("Invalid original record date")
+          return
+        }
+        nextDate.setHours(hours, minutes, 0, 0)
+
+        await apiCall(
+          `/api/v1/acess/caretaker/work-time/${editingCaretakerRecord.recordId}`,
+          {
+            method: "PATCH",
+            body: { data: nextDate.toISOString() },
+          },
+        )
+      } else {
+        const updates: Promise<unknown>[] = []
+
+        if (
+          editingCaretakerRecord.inRecordId &&
+          editingCaretakerRecord.inOriginalIso
+        ) {
+          if (!editedCaretakerInTimeValue) {
+            showErrorToast("Time IN is required")
+            return
+          }
+
+          const [hoursRaw, minutesRaw] = editedCaretakerInTimeValue.split(":")
+          const hours = Number(hoursRaw)
+          const minutes = Number(minutesRaw)
+          if (
+            Number.isNaN(hours) ||
+            Number.isNaN(minutes) ||
+            hours < 0 ||
+            hours > 23 ||
+            minutes < 0 ||
+            minutes > 59
+          ) {
+            showErrorToast("Invalid Time IN")
+            return
+          }
+
+          const nextInDate = new Date(editingCaretakerRecord.inOriginalIso)
+          if (Number.isNaN(nextInDate.getTime())) {
+            showErrorToast("Invalid Time IN record date")
+            return
+          }
+          nextInDate.setHours(hours, minutes, 0, 0)
+
+          updates.push(
+            apiCall(
+              `/api/v1/bins/sessions/${editingCaretakerRecord.inRecordId}`,
+              {
+                method: "PATCH",
+                body: { data: nextInDate.toISOString() },
+              },
+            ),
+          )
+        }
+
+        if (
+          editingCaretakerRecord.outRecordId &&
+          editingCaretakerRecord.outOriginalIso
+        ) {
+          if (!editedCaretakerOutTimeValue) {
+            showErrorToast("Time OUT is required")
+            return
+          }
+
+          const [hoursRaw, minutesRaw] = editedCaretakerOutTimeValue.split(":")
+          const hours = Number(hoursRaw)
+          const minutes = Number(minutesRaw)
+          if (
+            Number.isNaN(hours) ||
+            Number.isNaN(minutes) ||
+            hours < 0 ||
+            hours > 23 ||
+            minutes < 0 ||
+            minutes > 59
+          ) {
+            showErrorToast("Invalid Time OUT")
+            return
+          }
+
+          const nextOutDate = new Date(editingCaretakerRecord.outOriginalIso)
+          if (Number.isNaN(nextOutDate.getTime())) {
+            showErrorToast("Invalid Time OUT record date")
+            return
+          }
+          nextOutDate.setHours(hours, minutes, 0, 0)
+
+          updates.push(
+            apiCall(
+              `/api/v1/bins/sessions/${editingCaretakerRecord.outRecordId}`,
+              {
+                method: "PATCH",
+                body: { data: nextOutDate.toISOString() },
+              },
+            ),
+          )
+        }
+
+        if (updates.length === 0) {
+          showErrorToast("No bin session records to update")
+          return
+        }
+
+        await Promise.all(updates)
+      }
+
       await queryClient.invalidateQueries({
         queryKey,
       })
       setEditingCaretakerRecord(null)
+      setIsConfirmingCaretakerRecordDelete(false)
       showSuccessToast(successMessage)
     } catch (error) {
       const message = error instanceof Error ? error.message : errorFallback
@@ -13325,29 +13468,15 @@ function CaretakerSummary({
     rowKey,
     inRecordId,
     outRecordId,
-    buildingLabel,
-    dateValue,
   }: {
     rowKey: string
     inRecordId: EntityId | null
     outRecordId: EntityId | null
-    buildingLabel: string
-    dateValue: string | null
-  }) => {
+  }): Promise<boolean> => {
     const recordIds = [inRecordId, outRecordId].filter(
       (value): value is EntityId => Boolean(value),
     )
-    if (recordIds.length === 0) return
-
-    const dateLabel = formatDate(dateValue)
-    const confirmed =
-      typeof window === "undefined"
-        ? true
-        : window.confirm(
-            `Delete the bins record for ${buildingLabel} on ${dateLabel}?`,
-          )
-
-    if (!confirmed) return
+    if (recordIds.length === 0) return false
 
     try {
       setDeletingBinsRowKey(rowKey)
@@ -13360,12 +13489,37 @@ function CaretakerSummary({
         queryKey: ["bins", "sessions", "caretaker-summary"],
       })
       showSuccessToast("Bin record deleted successfully")
+      return true
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Failed to delete bin record"
       showErrorToast(message)
+      return false
     } finally {
       setDeletingBinsRowKey(null)
+    }
+  }
+
+  const handleDeleteEditingCaretakerRecord = async () => {
+    if (!editingCaretakerRecord || editingCaretakerRecord.recordType !== "bins")
+      return
+
+    if (!isConfirmingCaretakerRecordDelete) {
+      setIsConfirmingCaretakerRecordDelete(true)
+      return
+    }
+
+    if (!editingCaretakerRecord.rowKey) return
+
+    const deleted = await handleDeleteBinsHistoryRow({
+      rowKey: editingCaretakerRecord.rowKey,
+      inRecordId: editingCaretakerRecord.inRecordId || null,
+      outRecordId: editingCaretakerRecord.outRecordId || null,
+    })
+
+    if (deleted) {
+      setEditingCaretakerRecord(null)
+      setIsConfirmingCaretakerRecordDelete(false)
     }
   }
 
@@ -13769,11 +13923,6 @@ function CaretakerSummary({
               <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700">
                 Used
               </th>
-              {activeTab === "bins" && (
-                <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700">
-                  Action
-                </th>
-              )}
             </tr>
           </thead>
           <tbody>
@@ -13782,7 +13931,7 @@ function CaretakerSummary({
               <tr>
                 <td
                   className="border border-gray-400 px-3 py-3 text-center text-sm text-gray-600"
-                  colSpan={activeTab === "bins" ? 6 : 5}
+                  colSpan={5}
                 >
                   Loading...
                 </td>
@@ -13794,7 +13943,7 @@ function CaretakerSummary({
                 <tr>
                   <td
                     className="border border-gray-400 px-3 py-3 text-center text-sm text-gray-600"
-                    colSpan={activeTab === "bins" ? 6 : 5}
+                    colSpan={5}
                   >
                     No records found.
                   </td>
@@ -13804,75 +13953,165 @@ function CaretakerSummary({
               const dateLabel = formatDate(row.inValue || row.outValue)
               const canCheckIn = Boolean(!row.inValue && row.outValue)
               const canCheckOut = Boolean(row.inValue && !row.outValue)
+              const canEditIn = Boolean(row.inValue && row.inRecordId)
+              const canEditOut = Boolean(row.outValue && row.outRecordId)
+              const rowEditContext = {
+                rowKey: row.key,
+                buildingLabel: row.buildingLabel,
+                dateValue: row.inValue || row.outValue,
+                inRecordId: row.inRecordId,
+                inValue: row.inValue,
+                outRecordId: row.outRecordId,
+                outValue: row.outValue,
+              }
+              const openInEdit = () =>
+                handleOpenCaretakerRecordEdit(
+                  row.inRecordId,
+                  row.inValue,
+                  "Time IN",
+                  row.kind,
+                  row.kind === "bins" ? rowEditContext : undefined,
+                )
+              const openOutEdit = () =>
+                handleOpenCaretakerRecordEdit(
+                  row.outRecordId,
+                  row.outValue,
+                  "Time OUT",
+                  row.kind,
+                  row.kind === "bins" ? rowEditContext : undefined,
+                )
+              const canEditBinsRow =
+                activeTab === "bins" &&
+                row.kind === "bins" &&
+                (canEditIn || canEditOut)
+              const openBinsRowEdit = () => {
+                if (!canEditBinsRow) return
+                if (row.inRecordId && row.inValue) {
+                  handleOpenCaretakerRecordEdit(
+                    row.inRecordId,
+                    row.inValue,
+                    "Time IN",
+                    row.kind,
+                    rowEditContext,
+                  )
+                  return
+                }
+                handleOpenCaretakerRecordEdit(
+                  row.outRecordId,
+                  row.outValue,
+                  "Time OUT",
+                  row.kind,
+                  rowEditContext,
+                )
+              }
 
               return (
-                <tr key={row.key} className="bg-white hover:bg-gray-50">
+                <tr
+                  key={row.key}
+                  className={`bg-white hover:bg-gray-50 ${
+                    canEditBinsRow ? "cursor-pointer" : ""
+                  }`}
+                  onClick={canEditBinsRow ? openBinsRowEdit : undefined}
+                  onKeyDown={
+                    canEditBinsRow
+                      ? (event) =>
+                          handleCaretakerEditCellKeyDown(event, openBinsRowEdit)
+                      : undefined
+                  }
+                  role={canEditBinsRow ? "button" : undefined}
+                  tabIndex={canEditBinsRow ? 0 : undefined}
+                  title={canEditBinsRow ? "Edit bins record" : undefined}
+                >
                   <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
                     {dateLabel}
                   </td>
                   <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
                     {row.buildingLabel}
                   </td>
-                  <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
+                  <td
+                    className={`border border-gray-400 px-3 py-2 text-sm text-gray-700 ${
+                      canEditIn
+                        ? "cursor-pointer transition-colors duration-200 hover:bg-[#f0ebe7] focus:outline-none focus:ring-2 focus:ring-inset focus:ring-[#8c7569]"
+                        : ""
+                    }`}
+                    onClick={
+                      canEditIn
+                        ? (event) => {
+                            event.stopPropagation()
+                            openInEdit()
+                          }
+                        : undefined
+                    }
+                    onKeyDown={
+                      canEditIn
+                        ? (event) => {
+                            event.stopPropagation()
+                            handleCaretakerEditCellKeyDown(event, openInEdit)
+                          }
+                        : undefined
+                    }
+                    role={canEditIn ? "button" : undefined}
+                    tabIndex={canEditIn ? 0 : undefined}
+                    title={canEditIn ? "Edit Time IN" : undefined}
+                  >
                     <div className="flex items-center justify-between gap-2">
-                      {row.inValue ? <span>{formatTime(row.inValue)}</span> : null}
+                      {row.inValue ? (
+                        <span>{formatTime(row.inValue)}</span>
+                      ) : null}
                       {canCheckIn && (
                         <button
                           type="button"
-                          onClick={() =>
+                          onClick={(event) => {
+                            event.stopPropagation()
                             handleOpenCaretakerManualAction(row, "checkin")
-                          }
+                          }}
                           className="rounded border border-[#8c7569] px-2 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
                         >
                           Check in
                         </button>
                       )}
-                      {!canCheckIn && row.inValue && row.inRecordId && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleOpenCaretakerRecordEdit(
-                              row.inRecordId,
-                              row.inValue,
-                              "Time IN",
-                              row.kind,
-                            )
-                          }
-                          className="rounded border border-[#8c7569] px-2 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
-                        >
-                          Edit
-                        </button>
-                      )}
                     </div>
                   </td>
-                  <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
+                  <td
+                    className={`border border-gray-400 px-3 py-2 text-sm text-gray-700 ${
+                      canEditOut
+                        ? "cursor-pointer transition-colors duration-200 hover:bg-[#f0ebe7] focus:outline-none focus:ring-2 focus:ring-inset focus:ring-[#8c7569]"
+                        : ""
+                    }`}
+                    onClick={
+                      canEditOut
+                        ? (event) => {
+                            event.stopPropagation()
+                            openOutEdit()
+                          }
+                        : undefined
+                    }
+                    onKeyDown={
+                      canEditOut
+                        ? (event) => {
+                            event.stopPropagation()
+                            handleCaretakerEditCellKeyDown(event, openOutEdit)
+                          }
+                        : undefined
+                    }
+                    role={canEditOut ? "button" : undefined}
+                    tabIndex={canEditOut ? 0 : undefined}
+                    title={canEditOut ? "Edit Time OUT" : undefined}
+                  >
                     <div className="flex items-center justify-between gap-2">
-                      {row.outValue ? <span>{formatTime(row.outValue)}</span> : null}
+                      {row.outValue ? (
+                        <span>{formatTime(row.outValue)}</span>
+                      ) : null}
                       {canCheckOut && (
                         <button
                           type="button"
-                          onClick={() =>
+                          onClick={(event) => {
+                            event.stopPropagation()
                             handleOpenCaretakerManualAction(row, "checkout")
-                          }
+                          }}
                           className="rounded border border-[#8c7569] px-2 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
                         >
                           Check out
-                        </button>
-                      )}
-                      {!canCheckOut && row.outValue && row.outRecordId && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleOpenCaretakerRecordEdit(
-                              row.outRecordId,
-                              row.outValue,
-                              "Time OUT",
-                              row.kind,
-                            )
-                          }
-                          className="rounded border border-[#8c7569] px-2 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
-                        >
-                          Edit
                         </button>
                       )}
                     </div>
@@ -13880,31 +14119,6 @@ function CaretakerSummary({
                   <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
                     {formatUsed(row.inValue, row.outValue)}
                   </td>
-                  {activeTab === "bins" && row.kind === "bins" && (
-                    <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleDeleteBinsHistoryRow({
-                            rowKey: row.key,
-                            inRecordId: row.inRecordId,
-                            outRecordId: row.outRecordId,
-                            buildingLabel: row.buildingLabel,
-                            dateValue: row.inValue || row.outValue,
-                          })
-                        }
-                        disabled={
-                          deletingBinsRowKey === row.key ||
-                          (!row.inRecordId && !row.outRecordId)
-                        }
-                        className="rounded border border-red-300 px-3 py-1 text-xs font-semibold text-red-700 transition-all duration-200 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {deletingBinsRowKey === row.key
-                          ? "Deleting..."
-                          : "Delete"}
-                      </button>
-                    </td>
-                  )}
                 </tr>
               )
             })}
@@ -14302,52 +14516,141 @@ function CaretakerSummary({
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-3 sm:items-center sm:px-4">
           <div className="w-full max-w-md rounded-2xl bg-white p-4 shadow-xl sm:p-6">
             <h3 className="text-lg font-bold text-[#55311c]">
-              Edit caretaker record
+              {editingCaretakerRecord.recordType === "bins"
+                ? "Edit bins record"
+                : "Edit caretaker record"}
             </h3>
             <p className="mt-1 text-sm text-[rgba(0,0,0,0.7)]">
-              Update the {editingCaretakerRecord.label.toLowerCase()} for this{" "}
-              {editingCaretakerRecord.recordType === "work-time"
-                ? "work time"
-                : "bins"}{" "}
-              record.
+              {editingCaretakerRecord.recordType === "bins" ? (
+                <>
+                  Update this bins record
+                  {editingCaretakerRecord.buildingLabel
+                    ? ` for ${editingCaretakerRecord.buildingLabel}`
+                    : ""}
+                  {editingCaretakerRecord.dateValue
+                    ? ` on ${formatDate(editingCaretakerRecord.dateValue)}`
+                    : ""}
+                  .
+                </>
+              ) : (
+                <>
+                  Update the {editingCaretakerRecord.label.toLowerCase()} for
+                  this work time record.
+                </>
+              )}
             </p>
 
             <div className="mt-4 grid gap-4">
-              <div>
-                <label
-                  className="block text-sm font-semibold text-[#55311c]"
-                  htmlFor="caretaker-edit-time"
-                >
-                  {editingCaretakerRecord.label}
-                </label>
-                <input
-                  id="caretaker-edit-time"
-                  type="time"
-                  value={editedCaretakerTimeValue}
-                  onChange={(event) =>
-                    setEditedCaretakerTimeValue(event.target.value)
-                  }
-                  className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
-                />
-              </div>
+              {editingCaretakerRecord.recordType === "bins" ? (
+                <>
+                  {editingCaretakerRecord.inRecordId &&
+                    editingCaretakerRecord.inOriginalIso && (
+                      <div>
+                        <label
+                          className="block text-sm font-semibold text-[#55311c]"
+                          htmlFor="caretaker-edit-time-in"
+                        >
+                          Time IN
+                        </label>
+                        <input
+                          id="caretaker-edit-time-in"
+                          type="time"
+                          value={editedCaretakerInTimeValue}
+                          onChange={(event) => {
+                            setEditedCaretakerInTimeValue(event.target.value)
+                            setIsConfirmingCaretakerRecordDelete(false)
+                          }}
+                          className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                        />
+                      </div>
+                    )}
+                  {editingCaretakerRecord.outRecordId &&
+                    editingCaretakerRecord.outOriginalIso && (
+                      <div>
+                        <label
+                          className="block text-sm font-semibold text-[#55311c]"
+                          htmlFor="caretaker-edit-time-out"
+                        >
+                          Time OUT
+                        </label>
+                        <input
+                          id="caretaker-edit-time-out"
+                          type="time"
+                          value={editedCaretakerOutTimeValue}
+                          onChange={(event) => {
+                            setEditedCaretakerOutTimeValue(event.target.value)
+                            setIsConfirmingCaretakerRecordDelete(false)
+                          }}
+                          className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                        />
+                      </div>
+                    )}
+                </>
+              ) : (
+                <div>
+                  <label
+                    className="block text-sm font-semibold text-[#55311c]"
+                    htmlFor="caretaker-edit-time"
+                  >
+                    {editingCaretakerRecord.label}
+                  </label>
+                  <input
+                    id="caretaker-edit-time"
+                    type="time"
+                    value={editedCaretakerTimeValue}
+                    onChange={(event) =>
+                      setEditedCaretakerTimeValue(event.target.value)
+                    }
+                    className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                  />
+                </div>
+              )}
             </div>
 
-            <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end">
-              <button
-                type="button"
-                onClick={() => setEditingCaretakerRecord(null)}
-                className="w-full rounded-lg border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] sm:w-auto"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveCaretakerRecordEdit}
-                disabled={isSavingCaretakerRecordEdit}
-                className="w-full rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
-              >
-                {isSavingCaretakerRecordEdit ? "Saving..." : "Save"}
-              </button>
+            <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              {editingCaretakerRecord.recordType === "bins" && (
+                <button
+                  type="button"
+                  onClick={handleDeleteEditingCaretakerRecord}
+                  disabled={
+                    isSavingCaretakerRecordEdit ||
+                    deletingBinsRowKey === editingCaretakerRecord.rowKey
+                  }
+                  className="w-full rounded-lg border border-red-300 px-4 py-2 text-sm font-semibold text-red-700 transition-all duration-200 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+                >
+                  {deletingBinsRowKey === editingCaretakerRecord.rowKey
+                    ? "Deleting..."
+                    : isConfirmingCaretakerRecordDelete
+                      ? "Confirm?"
+                      : "Delete"}
+                </button>
+              )}
+              <div className="flex flex-col gap-2 sm:ml-auto sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingCaretakerRecord(null)
+                    setIsConfirmingCaretakerRecordDelete(false)
+                  }}
+                  disabled={
+                    deletingBinsRowKey === editingCaretakerRecord.rowKey
+                  }
+                  className="w-full rounded-lg border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveCaretakerRecordEdit}
+                  disabled={
+                    isSavingCaretakerRecordEdit ||
+                    deletingBinsRowKey === editingCaretakerRecord.rowKey
+                  }
+                  className="w-full rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+                >
+                  {isSavingCaretakerRecordEdit ? "Saving..." : "Save"}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -15137,7 +15440,7 @@ function ResidentsContent() {
                           Number
                         </th>
                         <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
-                          Plates
+                          Car Reg
                         </th>
                         <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
                           Owner 1

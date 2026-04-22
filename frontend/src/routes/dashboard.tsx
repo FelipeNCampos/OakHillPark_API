@@ -2250,13 +2250,13 @@ function OverviewContent({
           <h4 className="mb-3 text-sm font-bold uppercase tracking-wide text-[rgba(85,49,28,0.72)]">
             Menu
           </h4>
-          <div className="flex flex-wrap gap-2">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
             {standaloneShortcuts.map((item) => (
               <button
                 key={item.tabId}
                 type="button"
                 onClick={() => onNavigate(item.tabId)}
-                className="rounded-full border border-[#d9d0ca] bg-white px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:-translate-y-0.5 hover:border-[#8c7569] hover:bg-[#f0ebe7]"
+                className="w-full rounded-full border border-[#d9d0ca] bg-white px-3 py-2 text-center text-sm font-semibold text-[#55311c] transition-all duration-200 hover:-translate-y-0.5 hover:border-[#8c7569] hover:bg-[#f0ebe7]"
               >
                 {item.label}
               </button>

@@ -6816,12 +6816,27 @@ function BinsQrCodesContent() {
 
 function BinsContent() {
   const { showErrorToast, showSuccessToast } = useCustomToast()
+  const queryClient = useQueryClient()
   const [page, setPage] = useState(0)
   const [typeFilter, setTypeFilter] = useState<"" | "general" | "recycle">("")
   const [statusFilter, setStatusFilter] = useState<"" | "miss" | "late">("")
   const [dateFrom, setDateFrom] = useState("")
   const [dateTo, setDateTo] = useState("")
   const [isDownloadingReport, setIsDownloadingReport] = useState(false)
+  const [editingBinRecord, setEditingBinRecord] =
+    useState<BinMissCollectionRecord | null>(null)
+  const [editedBinDate, setEditedBinDate] = useState("")
+  const [editedBinTime, setEditedBinTime] = useState("")
+  const [editedBinType, setEditedBinType] = useState<"general" | "recycle">(
+    "general",
+  )
+  const [editedBinStatus, setEditedBinStatus] = useState<"miss" | "late">(
+    "miss",
+  )
+  const [isSavingBinRecord, setIsSavingBinRecord] = useState(false)
+  const [deletingBinRecordId, setDeletingBinRecordId] =
+    useState<EntityId | null>(null)
+  const [isConfirmingBinDelete, setIsConfirmingBinDelete] = useState(false)
   const pageSize = 20
 
   const filterParams = useMemo(
@@ -6872,6 +6887,23 @@ function BinsContent() {
     const dt = new Date(value)
     if (Number.isNaN(dt.getTime())) return "-"
     return dt.toLocaleTimeString("en-GB")
+  }
+
+  const toDateInputValue = (value: string) => {
+    const dt = new Date(value)
+    if (Number.isNaN(dt.getTime())) return ""
+    const year = dt.getFullYear()
+    const month = String(dt.getMonth() + 1).padStart(2, "0")
+    const day = String(dt.getDate()).padStart(2, "0")
+    return `${year}-${month}-${day}`
+  }
+
+  const toTimeInputValue = (value: string) => {
+    const dt = new Date(value)
+    if (Number.isNaN(dt.getTime())) return ""
+    const hours = String(dt.getHours()).padStart(2, "0")
+    const minutes = String(dt.getMinutes()).padStart(2, "0")
+    return `${hours}:${minutes}`
   }
 
   const formatCsvValue = (value: string | number | boolean) => {
@@ -6965,6 +6997,91 @@ function BinsContent() {
       showErrorToast("Failed to generate report.")
     } finally {
       setIsDownloadingReport(false)
+    }
+  }
+
+  const invalidateBinsRecords = async () => {
+    await queryClient.invalidateQueries({ queryKey: ["bins"] })
+  }
+
+  const handleOpenBinRecordEdit = (item: BinMissCollectionRecord) => {
+    setEditingBinRecord(item)
+    setEditedBinDate(toDateInputValue(item.data))
+    setEditedBinTime(toTimeInputValue(item.data))
+    setEditedBinType(item.collection_type === "recycle" ? "recycle" : "general")
+    setEditedBinStatus(item.collection_status === "late" ? "late" : "miss")
+    setIsConfirmingBinDelete(false)
+  }
+
+  const handleBinRecordKeyDown = (
+    event: KeyboardEvent<HTMLTableRowElement>,
+    item: BinMissCollectionRecord,
+  ) => {
+    if (event.key !== "Enter" && event.key !== " ") return
+    event.preventDefault()
+    handleOpenBinRecordEdit(item)
+  }
+
+  const handleSaveBinRecordEdit = async () => {
+    if (!editingBinRecord) return
+    if (!editedBinDate || !editedBinTime) {
+      showErrorToast("Date and time are required")
+      return
+    }
+
+    const nextDate = new Date(`${editedBinDate}T${editedBinTime}:00`)
+    if (Number.isNaN(nextDate.getTime())) {
+      showErrorToast("Invalid date or time")
+      return
+    }
+
+    try {
+      setIsSavingBinRecord(true)
+      await apiCall(`/api/v1/bins/${editingBinRecord.id}`, {
+        method: "PATCH",
+        body: {
+          data: nextDate.toISOString(),
+          collection_type: editedBinType,
+          collection_status: editedBinStatus,
+          miss_collection: editedBinStatus === "miss",
+        },
+      })
+      await invalidateBinsRecords()
+      setEditingBinRecord(null)
+      setIsConfirmingBinDelete(false)
+      showSuccessToast("Bin record updated successfully")
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to update bin record"
+      showErrorToast(message)
+    } finally {
+      setIsSavingBinRecord(false)
+    }
+  }
+
+  const handleDeleteBinRecordEdit = async () => {
+    if (!editingBinRecord) return
+
+    if (!isConfirmingBinDelete) {
+      setIsConfirmingBinDelete(true)
+      return
+    }
+
+    try {
+      setDeletingBinRecordId(editingBinRecord.id)
+      await apiCall(`/api/v1/bins/${editingBinRecord.id}`, {
+        method: "DELETE",
+      })
+      await invalidateBinsRecords()
+      setEditingBinRecord(null)
+      setIsConfirmingBinDelete(false)
+      showSuccessToast("Bin record deleted successfully")
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to delete bin record"
+      showErrorToast(message)
+    } finally {
+      setDeletingBinRecordId(null)
     }
   }
 
@@ -7134,7 +7251,15 @@ function BinsContent() {
             </thead>
             <tbody>
               {items.map((item) => (
-                <tr key={String(item.id)} className="hover:bg-[#f5f1ee]">
+                <tr
+                  key={String(item.id)}
+                  className="cursor-pointer hover:bg-[#f5f1ee] focus:outline-none focus:ring-2 focus:ring-inset focus:ring-[#8c7569]"
+                  onClick={() => handleOpenBinRecordEdit(item)}
+                  onKeyDown={(event) => handleBinRecordKeyDown(event, item)}
+                  role="button"
+                  tabIndex={0}
+                  title="Edit bin record"
+                >
                   <td className="border border-gray-300 px-4 py-3 text-[#55311c]">
                     {formatDate(item.data)}
                   </td>
@@ -7192,6 +7317,154 @@ function BinsContent() {
           </div>
         </div>
       </div>
+
+      {editingBinRecord && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-3 sm:items-center sm:px-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-4 shadow-xl sm:p-6">
+            <h3 className="text-lg font-bold text-[#55311c]">
+              Edit bin record
+            </h3>
+            <p className="mt-1 text-sm text-[rgba(0,0,0,0.7)]">
+              Update the collection record
+              {editingBinRecord.building_nome
+                ? ` for ${editingBinRecord.building_nome}`
+                : ""}
+              .
+            </p>
+
+            <div className="mt-4 grid gap-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label
+                    className="block text-sm font-semibold text-[#55311c]"
+                    htmlFor="bins-edit-date"
+                  >
+                    Date
+                  </label>
+                  <input
+                    id="bins-edit-date"
+                    type="date"
+                    value={editedBinDate}
+                    onChange={(event) => {
+                      setEditedBinDate(event.target.value)
+                      setIsConfirmingBinDelete(false)
+                    }}
+                    className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                  />
+                </div>
+                <div>
+                  <label
+                    className="block text-sm font-semibold text-[#55311c]"
+                    htmlFor="bins-edit-time"
+                  >
+                    Time
+                  </label>
+                  <input
+                    id="bins-edit-time"
+                    type="time"
+                    value={editedBinTime}
+                    onChange={(event) => {
+                      setEditedBinTime(event.target.value)
+                      setIsConfirmingBinDelete(false)
+                    }}
+                    className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label
+                  className="block text-sm font-semibold text-[#55311c]"
+                  htmlFor="bins-edit-type"
+                >
+                  Type
+                </label>
+                <select
+                  id="bins-edit-type"
+                  value={editedBinType}
+                  onChange={(event) => {
+                    setEditedBinType(
+                      event.target.value === "recycle"
+                        ? "recycle"
+                        : "general",
+                    )
+                    setIsConfirmingBinDelete(false)
+                  }}
+                  className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                >
+                  <option value="general">General</option>
+                  <option value="recycle">Recycle</option>
+                </select>
+              </div>
+
+              <div>
+                <label
+                  className="block text-sm font-semibold text-[#55311c]"
+                  htmlFor="bins-edit-status"
+                >
+                  Status
+                </label>
+                <select
+                  id="bins-edit-status"
+                  value={editedBinStatus}
+                  onChange={(event) => {
+                    setEditedBinStatus(
+                      event.target.value === "late" ? "late" : "miss",
+                    )
+                    setIsConfirmingBinDelete(false)
+                  }}
+                  className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                >
+                  <option value="miss">Miss Collection</option>
+                  <option value="late">Collected</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <button
+                type="button"
+                onClick={handleDeleteBinRecordEdit}
+                disabled={
+                  isSavingBinRecord ||
+                  deletingBinRecordId === editingBinRecord.id
+                }
+                className="w-full rounded-lg border border-red-300 px-4 py-2 text-sm font-semibold text-red-700 transition-all duration-200 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+              >
+                {deletingBinRecordId === editingBinRecord.id
+                  ? "Deleting..."
+                  : isConfirmingBinDelete
+                    ? "Confirm?"
+                    : "Delete"}
+              </button>
+              <div className="flex flex-col gap-2 sm:ml-auto sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingBinRecord(null)
+                    setIsConfirmingBinDelete(false)
+                  }}
+                  disabled={deletingBinRecordId === editingBinRecord.id}
+                  className="w-full rounded-lg border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveBinRecordEdit}
+                  disabled={
+                    isSavingBinRecord ||
+                    deletingBinRecordId === editingBinRecord.id
+                  }
+                  className="w-full rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+                >
+                  {isSavingBinRecord ? "Saving..." : "Save"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

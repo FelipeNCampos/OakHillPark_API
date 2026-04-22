@@ -859,6 +859,13 @@ class BinMissCollectionCreate(SQLModel):
     collection_status: str = Field(default="miss", max_length=20)
 
 
+class BinMissCollectionUpdate(SQLModel):
+    data: datetime | None = None
+    miss_collection: bool | None = None
+    collection_type: str | None = Field(default=None, max_length=20)
+    collection_status: str | None = Field(default=None, max_length=20)
+
+
 class BinMissCollectionPublic(SQLModel):
     id: uuid.UUID
     data: datetime

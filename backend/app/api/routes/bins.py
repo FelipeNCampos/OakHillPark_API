@@ -12,6 +12,7 @@ from app.models import (
     BinMissCollectionCreate,
     BinMissCollectionPublic,
     BinMissCollectionsPublic,
+    BinMissCollectionUpdate,
     BinSession,
     BinSessionCreate,
     BinSessionPublic,
@@ -352,3 +353,97 @@ def read_bin_miss_collections(
         for item, building in rows
     ]
     return BinMissCollectionsPublic(data=data, count=count)
+
+
+@router.patch(
+    "/{id}",
+    response_model=BinMissCollectionPublic,
+    dependencies=[Depends(require_cargo(2))],
+)
+def update_bin_miss_collection(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    payload: BinMissCollectionUpdate,
+) -> Any:
+    item = session.get(BinMissCollection, id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Bins collection record not found")
+
+    building = session.get(Building, item.building_id)
+    if not building:
+        raise HTTPException(status_code=404, detail="Building not found")
+
+    if not current_user.is_superuser and (
+        current_user.condominio_id != building.condominio_id
+    ):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    update_dict = payload.model_dump(exclude_unset=True)
+    if not update_dict:
+        raise HTTPException(status_code=422, detail="No fields to update")
+
+    if "collection_type" in update_dict and update_dict["collection_type"] is not None:
+        normalized_type = update_dict["collection_type"].strip().lower()
+        if normalized_type not in {"general", "recycle"}:
+            raise HTTPException(status_code=422, detail="Invalid collection_type")
+        update_dict["collection_type"] = normalized_type
+
+    if (
+        "collection_status" in update_dict
+        and update_dict["collection_status"] is not None
+    ):
+        normalized_status = update_dict["collection_status"].strip().lower()
+        if normalized_status not in {"miss", "late"}:
+            raise HTTPException(status_code=422, detail="Invalid collection_status")
+        update_dict["collection_status"] = normalized_status
+        update_dict["miss_collection"] = normalized_status == "miss"
+    elif "miss_collection" in update_dict and update_dict["miss_collection"] is not None:
+        update_dict["collection_status"] = (
+            "miss" if update_dict["miss_collection"] else "late"
+        )
+
+    item.sqlmodel_update(update_dict)
+    session.add(item)
+    session.commit()
+    session.refresh(item)
+
+    return BinMissCollectionPublic(
+        id=item.id,
+        data=item.data,
+        miss_collection=item.miss_collection,
+        collection_type=item.collection_type,
+        collection_status=item.collection_status,
+        building_id=item.building_id,
+        building_nome=building.nome,
+    )
+
+
+@router.delete(
+    "/{id}",
+    response_model=Message,
+    dependencies=[Depends(require_cargo(2))],
+)
+def delete_bin_miss_collection(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+) -> Message:
+    item = session.get(BinMissCollection, id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Bins collection record not found")
+
+    building = session.get(Building, item.building_id)
+    if not building:
+        raise HTTPException(status_code=404, detail="Building not found")
+
+    if not current_user.is_superuser and (
+        current_user.condominio_id != building.condominio_id
+    ):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    session.delete(item)
+    session.commit()
+    return Message(message="Bins collection record deleted successfully")

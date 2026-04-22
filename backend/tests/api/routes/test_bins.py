@@ -190,6 +190,95 @@ def test_read_bin_miss_collections_filters(
     assert by_date.json()["count"] == 0
 
 
+def test_update_bin_miss_collection_record(
+    client: TestClient,
+    db: Session,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    building = _create_test_condominio_and_building(db)
+
+    superuser = db.exec(
+        select(User).where(User.email == settings.FIRST_SUPERUSER)
+    ).first()
+    assert superuser is not None
+    superuser.condominio_id = building.condominio_id
+    db.add(superuser)
+    db.commit()
+
+    create_response = client.post(
+        f"{settings.API_V1_STR}/bins/",
+        json={
+            "building_id": str(building.id),
+            "miss_collection": True,
+            "collection_type": "general",
+            "collection_status": "miss",
+        },
+    )
+    assert create_response.status_code == 201
+
+    record = db.exec(
+        select(BinMissCollection).where(BinMissCollection.building_id == building.id)
+    ).first()
+    assert record is not None
+
+    update_response = client.patch(
+        f"{settings.API_V1_STR}/bins/{record.id}",
+        headers=superuser_token_headers,
+        json={
+            "data": "2026-03-15T09:30:00Z",
+            "collection_type": "recycle",
+            "collection_status": "late",
+        },
+    )
+
+    assert update_response.status_code == 200
+    payload = update_response.json()
+    assert payload["id"] == str(record.id)
+    assert payload["collection_type"] == "recycle"
+    assert payload["collection_status"] == "late"
+    assert payload["miss_collection"] is False
+    updated_at = datetime.fromisoformat(payload["data"])
+    assert updated_at.astimezone(timezone.utc) == datetime(
+        2026, 3, 15, 9, 30, tzinfo=timezone.utc
+    )
+
+
+def test_delete_bin_miss_collection_record(
+    client: TestClient,
+    db: Session,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    building = _create_test_condominio_and_building(db)
+
+    superuser = db.exec(
+        select(User).where(User.email == settings.FIRST_SUPERUSER)
+    ).first()
+    assert superuser is not None
+    superuser.condominio_id = building.condominio_id
+    db.add(superuser)
+    db.commit()
+
+    item = BinMissCollection(
+        building_id=building.id,
+        miss_collection=True,
+        collection_type="general",
+        collection_status="miss",
+    )
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    item_id = item.id
+
+    response = client.delete(
+        f"{settings.API_V1_STR}/bins/{item_id}",
+        headers=superuser_token_headers,
+    )
+
+    assert response.status_code == 200
+    db.expire_all()
+    assert db.get(BinMissCollection, item_id) is None
+
+
 def test_update_caretaker_bin_session_record(
     client: TestClient,
     db: Session,

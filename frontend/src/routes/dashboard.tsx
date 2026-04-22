@@ -2163,14 +2163,43 @@ function OverviewContent({
   user: UserProfile
   onNavigate: (tabId: string) => void
 }) {
-  const shortcutCards = [
+  const groupedShortcuts = [
+    {
+      title: "Readings",
+      items: [
+        { label: "Buildings", tabId: "buildings" },
+        { label: "Flats", tabId: "flats" },
+      ],
+    },
+    {
+      title: "QR Codes",
+      items: [
+        { label: "Cleaner", tabId: "qr-cleaner" },
+        { label: "Contractor", tabId: "qr-contractor" },
+        { label: "Caretaker", tabId: "qr-caretaker" },
+        { label: "Bin Report", tabId: "qr-bins" },
+      ],
+    },
+    {
+      title: "Schedules",
+      items: [
+        { label: "Alarm schedule", tabId: "schedule-alarm" },
+        { label: "Lift schedule", tabId: "schedule-lift" },
+        { label: "Emergency light", tabId: "schedule-light" },
+      ],
+    },
+  ]
+
+  const standaloneShortcuts = [
+    { label: "Tasks", tabId: "tasks" },
+    { label: "Reminders", tabId: "reminds" },
     { label: "Residents", tabId: "residents" },
-    { label: "Caretaker", tabId: "caretaker" },
+    { label: "Contractors", tabId: "contractors" },
+    { label: "History", tabId: "history" },
     { label: "Cleaner", tabId: "cleaner" },
+    { label: "Caretaker", tabId: "caretaker" },
     { label: "Bins", tabId: "bins" },
     { label: "Twilio", tabId: "twillio" },
-    { label: "Fire alarm", tabId: "schedule-alarm" },
-    { label: "Contractor", tabId: "contractors" },
   ]
 
   return (
@@ -2182,19 +2211,58 @@ function OverviewContent({
         </h2>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {shortcutCards.map((card) => (
-          <button
-            key={card.tabId}
-            type="button"
-            onClick={() => onNavigate(card.tabId)}
-            className="flex min-h-28 items-center justify-center rounded-lg bg-white px-4 py-5 text-center shadow-md transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
-          >
-            <span className="font-['Nunito',sans-serif] text-xl font-bold text-[#55311c]">
-              {card.label}
-            </span>
-          </button>
-        ))}
+      <div className="rounded-2xl border border-[#e5e0dc] bg-white p-5 shadow-md sm:p-6">
+        <div className="mb-5 flex flex-col gap-1">
+          <h3 className="font-['Nunito',sans-serif] text-xl font-bold text-[#55311c]">
+            Shortcuts
+          </h3>
+          <p className="text-sm text-[rgba(0,0,0,0.65)]">
+            Jump directly to the dashboard sections.
+          </p>
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-3">
+          {groupedShortcuts.map((group) => (
+            <section
+              key={group.title}
+              className="rounded-xl border border-[#eadfd8] bg-[#faf8f6] p-4"
+            >
+              <h4 className="mb-3 text-sm font-bold uppercase tracking-wide text-[rgba(85,49,28,0.72)]">
+                {group.title}
+              </h4>
+              <div className="flex flex-wrap gap-2">
+                {group.items.map((item) => (
+                  <button
+                    key={item.tabId}
+                    type="button"
+                    onClick={() => onNavigate(item.tabId)}
+                    className="rounded-full border border-[#d9d0ca] bg-white px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:-translate-y-0.5 hover:border-[#8c7569] hover:bg-[#f0ebe7]"
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
+
+        <div className="mt-5 border-t border-[#eee7e2] pt-5">
+          <h4 className="mb-3 text-sm font-bold uppercase tracking-wide text-[rgba(85,49,28,0.72)]">
+            Menu
+          </h4>
+          <div className="flex flex-wrap gap-2">
+            {standaloneShortcuts.map((item) => (
+              <button
+                key={item.tabId}
+                type="button"
+                onClick={() => onNavigate(item.tabId)}
+                className="rounded-full border border-[#d9d0ca] bg-white px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:-translate-y-0.5 hover:border-[#8c7569] hover:bg-[#f0ebe7]"
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   )

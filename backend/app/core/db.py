@@ -5,7 +5,12 @@ from app import crud
 from app.core.config import settings
 from app.models import Building, Condominio, Flat, User, UserCreate
 
-engine = create_engine(str(settings.SQLALCHEMY_DATABASE_URI))
+engine = create_engine(
+    str(settings.SQLALCHEMY_DATABASE_URI),
+    pool_pre_ping=True,
+    pool_recycle=300,
+    connect_args={"connect_timeout": 5},
+)
 
 
 def _ensure_flat_label_schema(session: Session) -> None:

@@ -14,7 +14,40 @@ import "./index.css"
 import { routeTree } from "./routeTree.gen"
 import { clearAuthSession, isAuthSessionError } from "./utils"
 
-OpenAPI.BASE = import.meta.env.VITE_API_URL
+const normalizeApiBase = (value?: string) => {
+  const trimmedValue = value?.trim()
+  if (!trimmedValue) return ""
+  return trimmedValue.replace(/\/$/, "")
+}
+
+const resolveApiBase = () => {
+  const configuredApiUrl = normalizeApiBase(import.meta.env.VITE_API_URL)
+  if (configuredApiUrl) {
+    return configuredApiUrl
+  }
+
+  if (typeof window !== "undefined") {
+    const { protocol, hostname } = window.location
+
+    if (hostname === "localhost" || hostname === "127.0.0.1") {
+      return "http://localhost:8000"
+    }
+
+    if (hostname.startsWith("dashboard.")) {
+      return `${protocol}//api.${hostname.slice("dashboard.".length)}`
+    }
+
+    if (hostname.startsWith("www.")) {
+      return `${protocol}//api.${hostname.slice("www.".length)}`
+    }
+
+    return `${protocol}//api.${hostname}`
+  }
+
+  return "http://localhost:8000"
+}
+
+OpenAPI.BASE = resolveApiBase()
 OpenAPI.TOKEN = async () => {
   return localStorage.getItem("access_token") || ""
 }

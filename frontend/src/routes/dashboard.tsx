@@ -7712,14 +7712,13 @@ function BinsContent() {
       })) as ApiListResponse<BinMissCollectionRecord>
 
       const lines = [
-        ["Date", "Time", "Type", "Status", "Building"].join(","),
+        ["Date", "Time", "Type", "Status"].join(","),
         ...fullResult.data.map((item) =>
           [
             formatCsvValue(formatDate(item.data)),
             formatCsvValue(formatTime(item.data)),
             formatCsvValue(item.collection_type),
             formatCsvValue(item.collection_status),
-            formatCsvValue(item.building_nome),
           ].join(","),
         ),
       ]

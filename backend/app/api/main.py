@@ -4,6 +4,7 @@ from app.api.routes import (
     acess,
     bins,
     buildings,
+    cash_flow,
     condominios,
     contractor_access,
     fire_alarm_external_certificates,
@@ -35,6 +36,7 @@ api_router.include_router(acess.router)
 api_router.include_router(contractor_access.router)
 api_router.include_router(fire_alarm_external_certificates.router)
 api_router.include_router(bins.router)
+api_router.include_router(cash_flow.router)
 api_router.include_router(readings.router)
 api_router.include_router(flat_readings.router)
 api_router.include_router(tasks.router)

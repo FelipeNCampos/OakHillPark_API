@@ -79,6 +79,36 @@ export type ReadingsPublic = {
   building_id: string
 }
 
+export type CashFlowRecordPublic = {
+  id: string
+  payment_number: number
+  has_invoice: boolean
+  invoice_media_name?: string | null
+  invoice_media_data?: string | null
+  record_date: string
+  amount: number
+  description: string
+  flat: string
+  condominio_id: string
+  created_by_user_id: string
+  created_at: string
+}
+
+export type CashFlowRecordsPublic = ListResponse<CashFlowRecordPublic> & {
+  balance: number
+  next_payment_number: number
+}
+
+export type CashFlowRecordCreate = {
+  has_invoice: boolean
+  invoice_media_name?: string | null
+  invoice_media_data?: string | null
+  record_date: string
+  amount: number
+  description: string
+  flat: string
+}
+
 export const CondominiosService = {
   readCondominios: (data: { skip?: number; limit?: number } = {}): CancelablePromise<ListResponse<CondominioPublic>> =>
     __request(OpenAPI, {
@@ -293,6 +323,42 @@ export const ReadingsService = {
     __request(OpenAPI, {
       method: "DELETE",
       url: "/api/v1/readings/{id}",
+      path: { id: data.id },
+    }),
+}
+
+export const CashFlowService = {
+  readRecords: (data: {
+    skip?: number
+    limit?: number
+    date_from?: string
+    date_to?: string
+    search?: string
+  } = {}): CancelablePromise<CashFlowRecordsPublic> =>
+    __request(OpenAPI, {
+      method: "GET",
+      url: "/api/v1/cash-flow/",
+      query: {
+        skip: data.skip,
+        limit: data.limit,
+        date_from: data.date_from,
+        date_to: data.date_to,
+        search: data.search,
+      },
+    }),
+  createRecord: (data: {
+    requestBody: CashFlowRecordCreate
+  }): CancelablePromise<CashFlowRecordPublic> =>
+    __request(OpenAPI, {
+      method: "POST",
+      url: "/api/v1/cash-flow/",
+      body: data.requestBody,
+      mediaType: "application/json",
+    }),
+  deleteRecord: (data: { id: string }): CancelablePromise<{ message: string }> =>
+    __request(OpenAPI, {
+      method: "DELETE",
+      url: "/api/v1/cash-flow/{id}",
       path: { id: data.id },
     }),
 }

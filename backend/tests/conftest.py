@@ -11,6 +11,7 @@ from app.models import (
     Acess,
     Building,
     CaretakerMonthlyGoal,
+    CashFlowRecord,
     Condominio,
     ContractorVisit,
     Flat,
@@ -33,7 +34,7 @@ def db() -> Generator[Session, None, None]:
     with Session(engine) as session:
         init_db(session)
         yield session
-        
+
         # Clean up only test data at the end of test session
         test_condominio_ids = session.exec(
             select(Condominio.id).where(Condominio.nome.like("%Test%"))
@@ -68,6 +69,11 @@ def db() -> Generator[Session, None, None]:
         session.exec(
             delete(CaretakerMonthlyGoal).where(
                 CaretakerMonthlyGoal.condominio_id.in_(test_condominio_ids)
+            )
+        )
+        session.exec(
+            delete(CashFlowRecord).where(
+                CashFlowRecord.condominio_id.in_(test_condominio_ids)
             )
         )
         session.exec(delete(Readings).where(Readings.building_id.in_(test_building_ids)))

@@ -494,6 +494,59 @@ def ensure_caretaker_monthly_goal_schema(session: Session) -> None:
     session.commit()
 
 
+def ensure_cash_flow_record_schema(session: Session) -> None:
+    bind = session.get_bind()
+    inspector = inspect(bind)
+    if inspector.has_table("cash_flow_record"):
+        return
+
+    session.execute(
+        text(
+            """
+            CREATE TABLE cash_flow_record (
+                id UUID PRIMARY KEY,
+                payment_number INTEGER NOT NULL,
+                has_invoice BOOLEAN NOT NULL DEFAULT FALSE,
+                invoice_media_name VARCHAR(255),
+                invoice_media_data TEXT,
+                record_date DATE NOT NULL,
+                amount DOUBLE PRECISION NOT NULL DEFAULT 0,
+                description VARCHAR(500) NOT NULL DEFAULT '',
+                flat VARCHAR(100) NOT NULL DEFAULT '',
+                condominio_id UUID NOT NULL REFERENCES condominio (id) ON DELETE CASCADE,
+                created_by_user_id UUID NOT NULL REFERENCES "user" (id),
+                created_at TIMESTAMPTZ NOT NULL
+            )
+            """
+        )
+    )
+    session.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_cash_flow_record_condominio_id "
+            "ON cash_flow_record (condominio_id)"
+        )
+    )
+    session.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_cash_flow_record_payment_number "
+            "ON cash_flow_record (payment_number)"
+        )
+    )
+    session.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_cash_flow_record_record_date "
+            "ON cash_flow_record (record_date)"
+        )
+    )
+    session.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_cash_flow_record_flat "
+            "ON cash_flow_record (flat)"
+        )
+    )
+    session.commit()
+
+
 # make sure all SQLModel models are imported (app.models) before initializing DB
 # otherwise, SQLModel might fail to initialize relationships properly
 # for more details: https://github.com/fastapi/full-stack-fastapi-template/issues/28
@@ -515,6 +568,7 @@ def init_db(session: Session) -> None:
     ensure_contractor_visit_schema(session)
     ensure_contractor_history_schema(session)
     ensure_caretaker_monthly_goal_schema(session)
+    ensure_cash_flow_record_schema(session)
 
     user = session.exec(
         select(User).where(User.email == settings.FIRST_SUPERUSER)

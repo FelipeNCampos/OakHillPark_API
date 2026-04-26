@@ -1,0 +1,176 @@
+import uuid
+from datetime import date
+
+from fastapi.testclient import TestClient
+from sqlmodel import Session, select
+
+from app.core.config import settings
+from app.models import CashFlowRecord, Condominio, CondominioCreate, User
+
+
+def _create_test_condominio(db: Session) -> Condominio:
+    condominio = Condominio.model_validate(
+        CondominioCreate(nome="Test Cash Flow Condominio")
+    )
+    db.add(condominio)
+    db.commit()
+    db.refresh(condominio)
+    return condominio
+
+
+def _assign_superuser_to_condominio(db: Session, condominio: Condominio) -> None:
+    superuser = db.exec(
+        select(User).where(User.email == settings.FIRST_SUPERUSER)
+    ).first()
+    assert superuser is not None
+    superuser.condominio_id = condominio.id
+    db.add(superuser)
+    db.commit()
+
+
+def test_create_and_read_cash_flow_records(
+    client: TestClient,
+    db: Session,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    condominio = _create_test_condominio(db)
+    _assign_superuser_to_condominio(db, condominio)
+
+    response_a = client.post(
+        f"{settings.API_V1_STR}/cash-flow/",
+        headers=superuser_token_headers,
+        json={
+            "has_invoice": True,
+            "invoice_media_name": "invoice.png",
+            "invoice_media_data": "data:image/png;base64,aGVsbG8=",
+            "record_date": "2026-03-01",
+            "amount": -610,
+            "description": "Admin fees",
+            "flat": "Pent",
+        },
+    )
+    response_b = client.post(
+        f"{settings.API_V1_STR}/cash-flow/",
+        headers=superuser_token_headers,
+        json={
+            "has_invoice": False,
+            "record_date": "2026-03-09",
+            "amount": 125,
+            "description": "Refund",
+            "flat": "Flat 51",
+        },
+    )
+
+    assert response_a.status_code == 201
+    assert response_a.json()["payment_number"] == 1
+    assert response_a.json()["invoice_media_name"] == "invoice.png"
+    assert response_b.status_code == 201
+    assert response_b.json()["payment_number"] == 2
+
+    read_response = client.get(
+        f"{settings.API_V1_STR}/cash-flow/",
+        headers=superuser_token_headers,
+        params={"date_from": "2026-03-01", "date_to": "2026-03-31"},
+    )
+
+    assert read_response.status_code == 200
+    body = read_response.json()
+    assert body["count"] == 2
+    assert body["balance"] == -485
+    assert body["next_payment_number"] == 3
+    assert [record["payment_number"] for record in body["data"]] == [1, 2]
+
+
+def test_cash_flow_records_are_scoped_to_condominio(
+    client: TestClient,
+    db: Session,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    condominio_a = _create_test_condominio(db)
+    condominio_b = Condominio.model_validate(
+        CondominioCreate(nome="Test Cash Flow Other Condominio")
+    )
+    db.add(condominio_b)
+    db.commit()
+    db.refresh(condominio_b)
+
+    _assign_superuser_to_condominio(db, condominio_a)
+    visible = CashFlowRecord(
+        payment_number=1,
+        record_date=date(2026, 3, 1),
+        amount=-10,
+        description="Visible",
+        flat="Flat 51",
+        condominio_id=condominio_a.id,
+        created_by_user_id=db.exec(
+            select(User).where(User.email == settings.FIRST_SUPERUSER)
+        ).one().id,
+    )
+    hidden = CashFlowRecord(
+        payment_number=1,
+        record_date=date(2026, 3, 1),
+        amount=-99,
+        description="Hidden",
+        flat="Pent",
+        condominio_id=condominio_b.id,
+        created_by_user_id=visible.created_by_user_id,
+    )
+    db.add(visible)
+    db.add(hidden)
+    db.commit()
+
+    response = client.get(
+        f"{settings.API_V1_STR}/cash-flow/",
+        headers=superuser_token_headers,
+        params={"date_from": "2026-03-01", "date_to": "2026-03-31"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["count"] == 1
+    assert body["data"][0]["description"] == "Visible"
+    assert body["balance"] == -10
+
+
+def test_delete_cash_flow_record(
+    client: TestClient,
+    db: Session,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    condominio = _create_test_condominio(db)
+    _assign_superuser_to_condominio(db, condominio)
+
+    create_response = client.post(
+        f"{settings.API_V1_STR}/cash-flow/",
+        headers=superuser_token_headers,
+        json={
+            "has_invoice": False,
+            "record_date": "2026-03-15",
+            "amount": -42.5,
+            "description": "Cleaner",
+            "flat": "Flat 51",
+        },
+    )
+    assert create_response.status_code == 201
+    record_id = create_response.json()["id"]
+
+    delete_response = client.delete(
+        f"{settings.API_V1_STR}/cash-flow/{record_id}",
+        headers=superuser_token_headers,
+    )
+
+    assert delete_response.status_code == 200
+    db.expire_all()
+    assert db.get(CashFlowRecord, uuid.UUID(record_id)) is None
+
+
+def test_cash_flow_requires_manager_permissions(
+    client: TestClient,
+    normal_user_token_headers: dict[str, str],
+) -> None:
+    response = client.get(
+        f"{settings.API_V1_STR}/cash-flow/",
+        headers=normal_user_token_headers,
+    )
+
+    assert response.status_code == 403

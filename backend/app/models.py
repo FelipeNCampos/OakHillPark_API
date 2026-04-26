@@ -96,6 +96,9 @@ class Condominio(SQLModel, table=True):
     contractor_histories: list["ContractorHistory"] = Relationship(
         back_populates="condominio", cascade_delete=True
     )
+    cash_flow_records: list["CashFlowRecord"] = Relationship(
+        back_populates="condominio", cascade_delete=True
+    )
 
 
 class Building(SQLModel, table=True):
@@ -489,6 +492,29 @@ class FireAlarmExternalCertificate(SQLModel, table=True):
         default_factory=get_datetime_utc,
         sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
     )
+
+
+class CashFlowRecord(SQLModel, table=True):
+    __tablename__ = "cash_flow_record"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    payment_number: int = Field(index=True)
+    has_invoice: bool = Field(default=False)
+    invoice_media_name: str | None = Field(default=None, max_length=255)
+    invoice_media_data: str | None = Field(default=None)
+    record_date: date = Field(index=True)
+    amount: float = Field(default=0)
+    description: str = Field(default="", max_length=500)
+    flat: str = Field(default="", max_length=100, index=True)
+    condominio_id: uuid.UUID = Field(
+        foreign_key="condominio.id", nullable=False, ondelete="CASCADE", index=True
+    )
+    created_by_user_id: uuid.UUID = Field(foreign_key="user.id", nullable=False)
+    created_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    condominio: Condominio | None = Relationship(back_populates="cash_flow_records")
 
 
 class Readings(SQLModel, table=True):
@@ -1156,6 +1182,48 @@ class FireAlarmExternalCertificatePublic(SQLModel):
 class FireAlarmExternalCertificatesPublic(SQLModel):
     data: list[FireAlarmExternalCertificatePublic]
     count: int
+
+
+class CashFlowRecordCreate(SQLModel):
+    has_invoice: bool = False
+    invoice_media_name: str | None = Field(default=None, max_length=255)
+    invoice_media_data: str | None = None
+    record_date: date
+    amount: float
+    description: str = Field(min_length=1, max_length=500)
+    flat: str = Field(default="", max_length=100)
+
+
+class CashFlowRecordUpdate(SQLModel):
+    has_invoice: bool | None = None
+    invoice_media_name: str | None = Field(default=None, max_length=255)
+    invoice_media_data: str | None = None
+    record_date: date | None = None
+    amount: float | None = None
+    description: str | None = Field(default=None, min_length=1, max_length=500)
+    flat: str | None = Field(default=None, max_length=100)
+
+
+class CashFlowRecordPublic(SQLModel):
+    id: uuid.UUID
+    payment_number: int
+    has_invoice: bool
+    invoice_media_name: str | None
+    invoice_media_data: str | None
+    record_date: date
+    amount: float
+    description: str
+    flat: str
+    condominio_id: uuid.UUID
+    created_by_user_id: uuid.UUID
+    created_at: datetime
+
+
+class CashFlowRecordsPublic(SQLModel):
+    data: list[CashFlowRecordPublic]
+    count: int
+    balance: float
+    next_payment_number: int
 
 
 class CaretakerPublic(SQLModel):

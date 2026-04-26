@@ -8,7 +8,7 @@ import { createFileRoute, redirect } from "@tanstack/react-router"
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
 import QRCode from "qrcode"
-import type { KeyboardEvent } from "react"
+import type { ChangeEvent, KeyboardEvent } from "react"
 import { useDeferredValue, useEffect, useMemo, useState } from "react"
 import {
   Bar,
@@ -139,6 +139,37 @@ interface CaretakerMonthlyMetricRecord {
   carry_over_hours: number
   effective_target_hours: number
   remaining_hours: number
+}
+
+interface CashFlowRecord {
+  id: EntityId
+  payment_number: number
+  has_invoice: boolean
+  invoice_media_name?: string | null
+  invoice_media_data?: string | null
+  record_date: string
+  amount: number
+  description: string
+  flat: string
+  created_at: string
+}
+
+interface CashFlowRecordsResponse {
+  data: CashFlowRecord[]
+  count: number
+  balance: number
+  next_payment_number: number
+}
+
+interface CashFlowFormState {
+  transactionType: "income" | "outcome"
+  hasInvoice: boolean
+  invoiceMediaName: string
+  invoiceMediaData: string | null
+  recordDate: string
+  amount: string
+  description: string
+  flat: string
 }
 
 interface CaretakerRecordEditState {
@@ -1541,6 +1572,44 @@ const formatDateToGb = (isoDate: string) => {
   return `${day}/${month}/${year}`
 }
 
+const formatCurrencyGbp = (value: number) =>
+  new Intl.NumberFormat("en-GB", {
+    style: "currency",
+    currency: "GBP",
+  }).format(value)
+
+const padDatePart = (value: number) => String(value).padStart(2, "0")
+
+const getTodayDateInputValue = () => {
+  const now = new Date()
+  return `${now.getFullYear()}-${padDatePart(now.getMonth() + 1)}-${padDatePart(now.getDate())}`
+}
+
+const getCurrentMonthInputValue = () => {
+  const now = new Date()
+  return `${now.getFullYear()}-${padDatePart(now.getMonth() + 1)}`
+}
+
+const getMonthDateRange = (monthValue: string) => {
+  const [year, month] = monthValue.split("-")
+  const lastDay = new Date(Number(year), Number(month), 0).getDate()
+  return {
+    dateFrom: `${year}-${month}-01`,
+    dateTo: `${year}-${month}-${padDatePart(lastDay)}`,
+  }
+}
+
+const getEmptyCashFlowForm = (): CashFlowFormState => ({
+  transactionType: "outcome",
+  hasInvoice: false,
+  invoiceMediaName: "",
+  invoiceMediaData: null,
+  recordDate: getTodayDateInputValue(),
+  amount: "",
+  description: "",
+  flat: "",
+})
+
 const readFileAsDataUrl = async (file: File) =>
   new Promise<string>((resolve, reject) => {
     const reader = new FileReader()
@@ -1918,6 +1987,7 @@ function ClientDashboard() {
     { label: "Cleaner", id: "cleaner" },
     { label: "Caretaker", id: "caretaker" },
     { label: "Bins", id: "bins" },
+    { label: "Cash Flow", id: "cash-flow" },
     { label: "Twilio", id: "twillio" },
   ]
 
@@ -1963,6 +2033,8 @@ function ClientDashboard() {
         return <CaretakerContent />
       case "bins":
         return <BinsContent />
+      case "cash-flow":
+        return <CashFlowContent />
       case "twillio":
         return <TwilioContent />
       default:
@@ -2199,6 +2271,7 @@ function OverviewContent({
     { label: "Cleaner", tabId: "cleaner" },
     { label: "Caretaker", tabId: "caretaker" },
     { label: "Bins", tabId: "bins" },
+    { label: "Cash Flow", tabId: "cash-flow" },
     { label: "Twilio", tabId: "twillio" },
   ]
 
@@ -2264,6 +2337,607 @@ function OverviewContent({
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+function CashFlowContent() {
+  const queryClient = useQueryClient()
+  const { showSuccessToast, showErrorToast } = useCustomToast()
+  const [selectedMonth, setSelectedMonth] = useState(getCurrentMonthInputValue)
+  const [search, setSearch] = useState("")
+  const [isDialogOpen, setIsDialogOpen] = useState(false)
+  const [invoicePreview, setInvoicePreview] = useState<CashFlowRecord | null>(
+    null,
+  )
+  const [form, setForm] = useState<CashFlowFormState>(getEmptyCashFlowForm)
+  const { dateFrom, dateTo } = useMemo(
+    () => getMonthDateRange(selectedMonth),
+    [selectedMonth],
+  )
+  const deferredSearch = useDeferredValue(search.trim())
+
+  const recordsQuery = useQuery<CashFlowRecordsResponse>({
+    queryKey: ["cash-flow", selectedMonth, deferredSearch],
+    queryFn: () =>
+      apiCall("/api/v1/cash-flow/", {
+        skip: 0,
+        limit: 500,
+        date_from: dateFrom,
+        date_to: dateTo,
+        search: deferredSearch || undefined,
+      }),
+    placeholderData: keepPreviousData,
+  })
+
+  const monthSummaryQuery = useQuery<CashFlowRecordsResponse>({
+    queryKey: ["cash-flow", selectedMonth, "summary"],
+    queryFn: () =>
+      apiCall("/api/v1/cash-flow/", {
+        skip: 0,
+        limit: 1,
+        date_from: dateFrom,
+        date_to: dateTo,
+      }),
+    placeholderData: keepPreviousData,
+  })
+
+  const records = recordsQuery.data?.data || []
+  const monthBalance = monthSummaryQuery.data?.balance || 0
+  const nextPaymentNumber = monthSummaryQuery.data?.next_payment_number || 1
+
+  const recordsWithBalance = useMemo(() => {
+    let runningBalance = 0
+    return records.map((record) => {
+      runningBalance += Number(record.amount)
+      return { ...record, balance: runningBalance }
+    })
+  }, [records])
+
+  const createCashFlowMutation = useMutation({
+    mutationFn: (payload: {
+      has_invoice: boolean
+      invoice_media_name?: string | null
+      invoice_media_data?: string | null
+      record_date: string
+      amount: number
+      description: string
+      flat: string
+    }) =>
+      apiCall("/api/v1/cash-flow/", {
+        method: "POST",
+        body: payload,
+      }),
+    onSuccess: () => {
+      showSuccessToast("Cash flow record saved")
+      setIsDialogOpen(false)
+      setForm(getEmptyCashFlowForm())
+      queryClient.invalidateQueries({ queryKey: ["cash-flow"] })
+    },
+    onError: (error: unknown) => {
+      showErrorToast(
+        error instanceof Error ? error.message : "Could not save record",
+      )
+    },
+  })
+
+  const deleteCashFlowMutation = useMutation({
+    mutationFn: (id: EntityId) =>
+      apiCall(`/api/v1/cash-flow/${id}`, {
+        method: "DELETE",
+      }),
+    onSuccess: () => {
+      showSuccessToast("Cash flow record deleted")
+      queryClient.invalidateQueries({ queryKey: ["cash-flow"] })
+    },
+    onError: (error: unknown) => {
+      showErrorToast(
+        error instanceof Error ? error.message : "Could not delete record",
+      )
+    },
+  })
+
+  const updateForm = <K extends keyof CashFlowFormState>(
+    key: K,
+    value: CashFlowFormState[K],
+  ) => {
+    setForm((previous) => ({ ...previous, [key]: value }))
+  }
+
+  const handleDialogChange = (open: boolean) => {
+    setIsDialogOpen(open)
+    if (!open) {
+      setForm(getEmptyCashFlowForm())
+    }
+  }
+
+  const handleInvoiceFileChange = async (
+    event: ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    try {
+      const dataUrl = await readFileAsDataUrl(file)
+      setForm((previous) => ({
+        ...previous,
+        invoiceMediaName: file.name,
+        invoiceMediaData: dataUrl,
+      }))
+    } catch (error) {
+      showErrorToast(
+        error instanceof Error ? error.message : "Could not read invoice media",
+      )
+    } finally {
+      event.target.value = ""
+    }
+  }
+
+  const handleSubmit = () => {
+    const rawAmount = Number(form.amount)
+    if (!form.recordDate) {
+      showErrorToast("Date is required")
+      return
+    }
+    if (!Number.isFinite(rawAmount) || rawAmount <= 0) {
+      showErrorToast("Amount must be a valid number")
+      return
+    }
+    if (!form.description.trim()) {
+      showErrorToast("Description is required")
+      return
+    }
+
+    const amount =
+      form.transactionType === "outcome"
+        ? -Math.abs(rawAmount)
+        : Math.abs(rawAmount)
+
+    createCashFlowMutation.mutate({
+      has_invoice: form.hasInvoice,
+      invoice_media_name: form.hasInvoice ? form.invoiceMediaName || null : null,
+      invoice_media_data: form.hasInvoice ? form.invoiceMediaData : null,
+      record_date: form.recordDate,
+      amount,
+      description: form.description.trim(),
+      flat: form.flat.trim(),
+    })
+  }
+
+  const handleDelete = (record: CashFlowRecord) => {
+    if (deleteCashFlowMutation.isPending) return
+
+    const confirmed =
+      typeof window === "undefined"
+        ? true
+        : window.confirm(
+            `Delete payment #${record.payment_number} from ${formatDateToGb(record.record_date)}?`,
+          )
+    if (!confirmed) return
+    deleteCashFlowMutation.mutate(record.id)
+  }
+
+  return (
+    <div className="mx-auto max-w-7xl space-y-6">
+      <div className="rounded-lg bg-white p-6 shadow-md">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
+              Cash Flow Control
+            </h2>
+            <p className="mt-1 text-[rgba(0,0,0,0.7)]">
+              Monthly register for payments, invoices and flat allocation.
+            </p>
+          </div>
+          <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] px-5 py-4">
+            <p className="text-xs font-bold uppercase tracking-wide text-[rgba(85,49,28,0.7)]">
+              Month balance
+            </p>
+            <p
+              className={`mt-1 font-mono text-2xl font-bold ${
+                monthBalance < 0 ? "text-[#b42318]" : "text-[#217a4b]"
+              }`}
+            >
+              {formatCurrencyGbp(monthBalance)}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-lg bg-white p-6 shadow-md">
+        <div className="grid gap-3 lg:grid-cols-[170px_minmax(220px,1fr)_auto] lg:items-end">
+          <div>
+            <label
+              htmlFor="cash-flow-month"
+              className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+            >
+              Month
+            </label>
+            <input
+              id="cash-flow-month"
+              type="month"
+              value={selectedMonth}
+              onChange={(event) => setSelectedMonth(event.target.value)}
+              className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+            />
+          </div>
+          <div>
+            <label
+              htmlFor="cash-flow-search"
+              className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+            >
+              Search
+            </label>
+            <input
+              id="cash-flow-search"
+              type="text"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Description or flat"
+              className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsDialogOpen(true)}
+            className="rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c]"
+          >
+            New record
+          </button>
+        </div>
+      </div>
+
+      <div className="rounded-lg bg-white p-6 shadow-md">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[980px] border-collapse">
+            <thead>
+              <tr className="bg-[#bdb7b2]">
+                <th className="border border-[#7e6a5f] px-3 py-2 text-center text-sm font-bold text-[#333]">
+                  Payment Number
+                </th>
+                <th className="border border-[#7e6a5f] px-3 py-2 text-center text-sm font-bold text-[#333]">
+                  Invoice
+                </th>
+                <th className="border border-[#7e6a5f] px-3 py-2 text-center text-sm font-bold text-[#333]">
+                  Date
+                </th>
+                <th className="border border-[#7e6a5f] px-3 py-2 text-right text-sm font-bold text-[#333]">
+                  Amount
+                </th>
+                <th className="border border-[#7e6a5f] px-3 py-2 text-center text-sm font-bold text-[#333]">
+                  Description
+                </th>
+                <th className="border border-[#7e6a5f] px-3 py-2 text-center text-sm font-bold text-[#333]">
+                  Flat
+                </th>
+                <th className="border border-[#7e6a5f] px-3 py-2 text-right text-sm font-bold text-[#333]">
+                  Balance
+                </th>
+                <th className="border border-[#7e6a5f] px-3 py-2 text-center text-sm font-bold text-[#333]">
+                  Action
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {recordsQuery.isLoading && (
+                <tr>
+                  <td
+                    colSpan={8}
+                    className="border border-[#e5e0dc] px-3 py-4 text-center text-sm text-[rgba(0,0,0,0.7)]"
+                  >
+                    Loading cash flow records...
+                  </td>
+                </tr>
+              )}
+              {!recordsQuery.isLoading && records.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={8}
+                    className="border border-[#e5e0dc] px-3 py-4 text-center text-sm text-[rgba(0,0,0,0.7)]"
+                  >
+                    No cash flow records found for this month.
+                  </td>
+                </tr>
+              )}
+              {!recordsQuery.isLoading &&
+                recordsWithBalance.map((record) => (
+                  <tr key={record.id} className="bg-white hover:bg-[#f8f5f3]">
+                    <td className="border border-[#e5e0dc] px-3 py-2 text-center font-mono text-sm text-[#55311c]">
+                      {record.payment_number}
+                    </td>
+                    <td className="border border-[#e5e0dc] px-3 py-2 text-center text-sm text-[#55311c]">
+                      {record.has_invoice ? (
+                        record.invoice_media_data ? (
+                          <button
+                            type="button"
+                            onClick={() => setInvoicePreview(record)}
+                            className="font-semibold text-[#8c7569] underline"
+                          >
+                            Yes
+                          </button>
+                        ) : (
+                          "Yes"
+                        )
+                      ) : (
+                        "-"
+                      )}
+                    </td>
+                    <td className="border border-[#e5e0dc] px-3 py-2 text-center text-sm text-[#55311c]">
+                      {formatDateToGb(record.record_date)}
+                    </td>
+                    <td
+                      className={`border border-[#e5e0dc] px-3 py-2 text-right font-mono text-sm font-bold ${
+                        record.amount < 0 ? "text-[#d92d20]" : "text-[#217a4b]"
+                      }`}
+                    >
+                      {formatCurrencyGbp(record.amount)}
+                    </td>
+                    <td className="border border-[#e5e0dc] px-3 py-2 text-center text-sm text-[#55311c]">
+                      {record.description}
+                    </td>
+                    <td className="border border-[#e5e0dc] px-3 py-2 text-center text-sm text-[#55311c]">
+                      {record.flat || "-"}
+                    </td>
+                    <td className="border border-[#e5e0dc] px-3 py-2 text-right font-mono text-sm font-bold text-[#55311c]">
+                      {formatCurrencyGbp(record.balance)}
+                    </td>
+                    <td className="border border-[#e5e0dc] px-3 py-2 text-center text-sm">
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(record)}
+                        disabled={deleteCashFlowMutation.isPending}
+                        className="rounded border border-[#8c7569] px-3 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+            {records.length > 0 && (
+              <tfoot>
+                <tr>
+                  <td
+                    colSpan={6}
+                    className="border border-[#7e6a5f] bg-[#bdb7b2] px-3 py-3 text-right text-sm font-bold text-[#333]"
+                  >
+                    Month total
+                  </td>
+                  <td className="border border-[#7e6a5f] bg-[#ffff00] px-3 py-3 text-right font-mono text-sm font-bold text-[#333]">
+                    {formatCurrencyGbp(monthBalance)}
+                  </td>
+                  <td className="border border-[#7e6a5f] bg-[#bdb7b2]" />
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+      </div>
+
+      <Dialog open={isDialogOpen} onOpenChange={handleDialogChange}>
+        <DialogContent className="border-[#e5e0dc] bg-white text-[#55311c] sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-[#55311c]">
+              New cash flow record
+            </DialogTitle>
+            <DialogDescription className="text-[rgba(0,0,0,0.7)]">
+              Payment number will be assigned automatically as #
+              {nextPaymentNumber}.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label
+                htmlFor="cash-flow-form-type"
+                className="mb-1 block text-sm font-semibold text-[#55311c]"
+              >
+                Type
+              </label>
+              <select
+                id="cash-flow-form-type"
+                value={form.transactionType}
+                onChange={(event) =>
+                  updateForm(
+                    "transactionType",
+                    event.target.value as CashFlowFormState["transactionType"],
+                  )
+                }
+                className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+              >
+                <option value="outcome">Outcome</option>
+                <option value="income">Income</option>
+              </select>
+            </div>
+            <div>
+              <label
+                htmlFor="cash-flow-form-date"
+                className="mb-1 block text-sm font-semibold text-[#55311c]"
+              >
+                Date
+              </label>
+              <input
+                id="cash-flow-form-date"
+                type="date"
+                value={form.recordDate}
+                onChange={(event) =>
+                  updateForm("recordDate", event.target.value)
+                }
+                className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="cash-flow-form-amount"
+                className="mb-1 block text-sm font-semibold text-[#55311c]"
+              >
+                Value
+              </label>
+              <input
+                id="cash-flow-form-amount"
+                type="number"
+                step="0.01"
+                min="0"
+                inputMode="decimal"
+                value={form.amount}
+                onChange={(event) => updateForm("amount", event.target.value)}
+                placeholder="610.00"
+                className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+              />
+              <p className="mt-1 text-xs text-[rgba(0,0,0,0.6)]">
+                Choose Income or Outcome above; the balance sign is applied automatically.
+              </p>
+            </div>
+            <div className="sm:col-span-2">
+              <label
+                htmlFor="cash-flow-form-description"
+                className="mb-1 block text-sm font-semibold text-[#55311c]"
+              >
+                Description
+              </label>
+              <textarea
+                id="cash-flow-form-description"
+                value={form.description}
+                onChange={(event) =>
+                  updateForm("description", event.target.value)
+                }
+                rows={3}
+                placeholder="Council tax control"
+                className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="cash-flow-form-flat"
+                className="mb-1 block text-sm font-semibold text-[#55311c]"
+              >
+                Flat
+              </label>
+              <input
+                id="cash-flow-form-flat"
+                type="text"
+                value={form.flat}
+                onChange={(event) => updateForm("flat", event.target.value)}
+                placeholder="Flat 51"
+                className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+              />
+            </div>
+            <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
+              <label className="flex items-center gap-2 text-sm font-semibold text-[#55311c]">
+                <input
+                  type="checkbox"
+                  checked={form.hasInvoice}
+                  onChange={(event) =>
+                    updateForm("hasInvoice", event.target.checked)
+                  }
+                  className="h-4 w-4 accent-[#8c7569]"
+                />
+                Invoice
+              </label>
+              {form.hasInvoice && (
+                <div className="mt-3 space-y-3">
+                  <input
+                    type="file"
+                    accept="image/*,application/pdf"
+                    onChange={handleInvoiceFileChange}
+                    className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c]"
+                  />
+                  {form.invoiceMediaData && (
+                    <div className="rounded border border-[#e5e0dc] bg-white p-2 text-xs text-[#55311c]">
+                      <p className="font-semibold">
+                        {form.invoiceMediaName || "Invoice media"}
+                      </p>
+                      {isImageDataUrl(form.invoiceMediaData) && (
+                        <img
+                          src={form.invoiceMediaData}
+                          alt="Invoice preview"
+                          className="mt-2 max-h-24 rounded border border-[#d9d0ca]"
+                        />
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <DialogFooter>
+            <button
+              type="button"
+              onClick={() => handleDialogChange(false)}
+              disabled={createCashFlowMutation.isPending}
+              className="rounded border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={createCashFlowMutation.isPending}
+              className="rounded bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {createCashFlowMutation.isPending ? "Saving..." : "Save record"}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(invoicePreview)}
+        onOpenChange={(open) => {
+          if (!open) setInvoicePreview(null)
+        }}
+      >
+        <DialogContent className="border-[#e5e0dc] bg-white text-[#55311c] sm:max-w-4xl">
+          <DialogHeader>
+            <DialogTitle className="text-[#55311c]">
+              Invoice #{invoicePreview?.payment_number}
+            </DialogTitle>
+            <DialogDescription className="text-[rgba(0,0,0,0.7)]">
+              {invoicePreview
+                ? `${invoicePreview.description} | ${formatDateToGb(invoicePreview.record_date)}`
+                : "Invoice media"}
+            </DialogDescription>
+          </DialogHeader>
+
+          {invoicePreview?.invoice_media_data && (
+            <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-3">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-semibold text-[#55311c]">
+                  {invoicePreview.invoice_media_name || "Invoice media"}
+                </p>
+                <a
+                  href={invoicePreview.invoice_media_data}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded border border-[#8c7569] bg-white px-3 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+                >
+                  Open in new tab
+                </a>
+              </div>
+
+              {isImageDataUrl(invoicePreview.invoice_media_data) ? (
+                <img
+                  src={invoicePreview.invoice_media_data}
+                  alt={invoicePreview.invoice_media_name || "Invoice media"}
+                  className="max-h-[70vh] w-full rounded border border-[#d9d0ca] bg-white object-contain"
+                />
+              ) : isPdfDataUrl(invoicePreview.invoice_media_data) ? (
+                <iframe
+                  title={invoicePreview.invoice_media_name || "Invoice PDF"}
+                  src={invoicePreview.invoice_media_data}
+                  className="h-[70vh] w-full rounded border border-[#d9d0ca] bg-white"
+                />
+              ) : (
+                <div className="rounded border border-[#d9d0ca] bg-white p-6 text-center text-sm text-[rgba(0,0,0,0.7)]">
+                  Preview is not available for this file type. Use Open in new
+                  tab to view the media.
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

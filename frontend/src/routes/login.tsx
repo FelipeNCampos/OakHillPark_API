@@ -124,13 +124,6 @@ function Login() {
           />
 
           <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <RouterLink
-              to="/recover-password"
-              className="text-sm text-[rgba(51,51,51,0.6)] hover:underline"
-            >
-              Forgot your password?
-            </RouterLink>
-            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
               <RouterLink
                 to={"/caretaker-login" as any}
                 className="text-sm text-[#8c7569] hover:underline"
@@ -144,7 +137,6 @@ function Login() {
               >
                 Log in
               </LoadingButton>
-            </div>
           </div>
 
           <p className="invisible mt-15 text-center text-sm">

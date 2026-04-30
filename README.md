@@ -1,233 +1,232 @@
-# Full Stack FastAPI Template
+# OakHill Park
 
-<a href="https://github.com/fastapi/full-stack-fastapi-template/actions?query=workflow%3A%22Test+Docker+Compose%22" target="_blank"><img src="https://github.com/fastapi/full-stack-fastapi-template/workflows/Test%20Docker%20Compose/badge.svg" alt="Test Docker Compose"></a>
-<a href="https://github.com/fastapi/full-stack-fastapi-template/actions?query=workflow%3A%22Test+Backend%22" target="_blank"><img src="https://github.com/fastapi/full-stack-fastapi-template/workflows/Test%20Backend/badge.svg" alt="Test Backend"></a>
-<a href="https://coverage-badge.samuelcolvin.workers.dev/redirect/fastapi/full-stack-fastapi-template" target="_blank"><img src="https://coverage-badge.samuelcolvin.workers.dev/fastapi/full-stack-fastapi-template.svg" alt="Coverage"></a>
+## Gestao condominial completa, centralizada e pronta para operar
 
-## Technology Stack and Features
+O OakHill Park e uma plataforma de gestao criada para condominios que precisam de mais controle, rastreabilidade e agilidade no dia a dia. O sistema concentra operacoes administrativas, rotina de equipe, controle de acessos, moradores, leituras, prestadores, alertas, documentos e financeiro em um unico ambiente.
 
-- ⚡ [**FastAPI**](https://fastapi.tiangolo.com) for the Python backend API.
-  - 🧰 [SQLModel](https://sqlmodel.tiangolo.com) for the Python SQL database interactions (ORM).
-  - 🔍 [Pydantic](https://docs.pydantic.dev), used by FastAPI, for the data validation and settings management.
-  - 💾 [PostgreSQL](https://www.postgresql.org) as the SQL database.
-- 🚀 [React](https://react.dev) for the frontend.
-  - 💃 Using TypeScript, hooks, [Vite](https://vitejs.dev), and other parts of a modern frontend stack.
-  - 🎨 [Tailwind CSS](https://tailwindcss.com) and [shadcn/ui](https://ui.shadcn.com) for the frontend components.
-  - 🤖 An automatically generated frontend client.
-  - 🧪 [Playwright](https://playwright.dev) for End-to-End testing.
-  - 🦇 Dark mode support.
-- 🐋 [Docker Compose](https://www.docker.com) for development and production.
-- 🔒 Secure password hashing by default.
-- 🔑 JWT (JSON Web Token) authentication.
-- 📫 Email based password recovery.
-- 📬 [Mailcatcher](https://mailcatcher.me) for local email testing during development.
-- ✅ Tests with [Pytest](https://pytest.org).
-- 📞 [Traefik](https://traefik.io) as a reverse proxy / load balancer.
-- 🚢 Deployment instructions using Docker Compose, including how to set up a frontend Traefik proxy to handle automatic HTTPS certificates.
-- 🏭 CI (continuous integration) and CD (continuous deployment) based on GitHub Actions.
+Mais do que registrar informacoes, o OakHill Park ajuda a administracao a tomar decisoes com dados confiaveis, reduzir falhas operacionais, organizar historicos e entregar uma experiencia mais profissional para moradores, funcionarios e fornecedores.
 
-### Dashboard Login
+## O que o software entrega
 
-[![API docs](img/login.png)](https://github.com/fastapi/full-stack-fastapi-template)
+- Visao centralizada da operacao do condominio.
+- Controle de moradores, unidades, edificios, veiculos e contatos.
+- Registro de leituras por edificio e por apartamento.
+- Comunicacao por SMS para avisos importantes e leituras.
+- Controle de acesso para cleaners, caretakers e contractors.
+- Registro de entrada e saida de prestadores.
+- Historico completo de servicos, visitas e recorrencias de contratados.
+- Gestao de tarefas com acompanhamento entre gestor e caretaker.
+- Controle de horas trabalhadas e metas mensais do caretaker.
+- Controle de bins, coletas perdidas, coletas atrasadas e rotinas por edificio.
+- Agenda operacional para alarmes, elevadores e luzes de emergencia.
+- Cadastro de certificados e evidencias externas.
+- Controle financeiro com comprovantes, faturas, saldo e relatorios.
+- Geracao e envio de relatorios profissionais por email.
+- Area administrativa com usuarios, permissoes e configuracoes essenciais.
 
-### Dashboard - Admin
+## Principais vantagens
 
-[![API docs](img/dashboard.png)](https://github.com/fastapi/full-stack-fastapi-template)
+### Mais controle para a administracao
 
-### Dashboard - Items
+O gestor acompanha tudo em um unico painel: moradores, leituras, acessos, prestadores, tarefas, financeiro, alertas, bins e rotinas de manutencao. Isso reduz dependencia de planilhas soltas, mensagens perdidas e registros manuais sem padrao.
 
-[![API docs](img/dashboard-items.png)](https://github.com/fastapi/full-stack-fastapi-template)
+### Mais transparencia nas rotinas
 
-### Dashboard - Dark Mode
+Cada atividade importante pode ser registrada com data, hora, responsavel, local e historico. A administracao ganha uma trilha clara para conferir o que foi feito, quando foi feito e quem esteve envolvido.
 
-[![API docs](img/dashboard-dark.png)](https://github.com/fastapi/full-stack-fastapi-template)
+### Menos retrabalho
 
-### Interactive API Documentation
+O sistema organiza informacoes recorrentes, contatos, unidades, relatorios, tarefas, lembretes e comprovantes. Isso diminui esquecimentos, evita duplicidade de controles e acelera respostas para moradores e fornecedores.
 
-[![API docs](img/docs.png)](https://github.com/fastapi/full-stack-fastapi-template)
+### Melhor comunicacao
+
+O OakHill Park permite enviar avisos por SMS, comunicar leituras aos moradores selecionados, disparar lembretes operacionais e encaminhar relatorios por email. A comunicacao fica mais rapida, objetiva e rastreavel.
 
-## How To Use It
+### Operacao mais profissional
 
-You can **just fork or clone** this repository and use it as is.
+Com relatatorios, registros de acesso, historico de prestadores, anexos, faturas e evidencias, o condominio passa a operar com padrao de auditoria e apresentacao profissional.
 
-✨ It just works. ✨
+## Funcionalidades por area
+
+### Dashboard operacional
+
+- Painel principal para navegar por todas as areas do sistema.
+- Indicadores e atalhos para rotinas administrativas.
+- Organizacao por modulos para facilitar o trabalho diario.
+- Visualizacao de registros recentes, historicos e controles ativos.
 
-### How to Use a Private Repository
-
-If you want to have a private repository, GitHub won't allow you to simply fork it as it doesn't allow changing the visibility of forks.
-
-But you can do the following:
-
-- Create a new GitHub repo, for example `my-full-stack`.
-- Clone this repository manually, set the name with the name of the project you want to use, for example `my-full-stack`:
-
-```bash
-git clone git@github.com:fastapi/full-stack-fastapi-template.git my-full-stack
-```
-
-- Enter into the new directory:
-
-```bash
-cd my-full-stack
-```
-
-- Set the new origin to your new repository, copy it from the GitHub interface, for example:
-
-```bash
-git remote set-url origin git@github.com:octocat/my-full-stack.git
-```
-
-- Add this repo as another "remote" to allow you to get updates later:
-
-```bash
-git remote add upstream git@github.com:fastapi/full-stack-fastapi-template.git
-```
-
-- Push the code to your new repository:
-
-```bash
-git push -u origin master
-```
-
-### Update From the Original Template
-
-After cloning the repository, and after doing changes, you might want to get the latest changes from this original template.
-
-- Make sure you added the original repository as a remote, you can check it with:
-
-```bash
-git remote -v
-
-origin    git@github.com:octocat/my-full-stack.git (fetch)
-origin    git@github.com:octocat/my-full-stack.git (push)
-upstream    git@github.com:fastapi/full-stack-fastapi-template.git (fetch)
-upstream    git@github.com:fastapi/full-stack-fastapi-template.git (push)
-```
-
-- Pull the latest changes without merging:
-
-```bash
-git pull --no-commit upstream master
-```
-
-This will download the latest changes from this template without committing them, that way you can check everything is right before committing.
-
-- If there are conflicts, solve them in your editor.
-
-- Once you are done, commit the changes:
-
-```bash
-git merge --continue
-```
-
-### Configure
-
-You can then update configs in the `.env` files to customize your configurations.
-
-Before deploying it, make sure you change at least the values for:
-
-- `SECRET_KEY`
-- `FIRST_SUPERUSER_PASSWORD`
-- `POSTGRES_PASSWORD`
-
-You can (and should) pass these as environment variables from secrets.
-
-Read the [deployment.md](./deployment.md) docs for more details.
-
-### Generate Secret Keys
-
-Some environment variables in the `.env` file have a default value of `changethis`.
-
-You have to change them with a secret key, to generate secret keys you can run the following command:
-
-```bash
-python -c "import secrets; print(secrets.token_urlsafe(32))"
-```
-
-Copy the content and use that as password / secret key. And run that again to generate another secure key.
-
-## How To Use It - Alternative With Copier
-
-This repository also supports generating a new project using [Copier](https://copier.readthedocs.io).
-
-It will copy all the files, ask you configuration questions, and update the `.env` files with your answers.
-
-### Install Copier
-
-You can install Copier with:
-
-```bash
-pip install copier
-```
-
-Or better, if you have [`pipx`](https://pipx.pypa.io/), you can run it with:
-
-```bash
-pipx install copier
-```
-
-**Note**: If you have `pipx`, installing copier is optional, you could run it directly.
-
-### Generate a Project With Copier
-
-Decide a name for your new project's directory, you will use it below. For example, `my-awesome-project`.
-
-Go to the directory that will be the parent of your project, and run the command with your project's name:
-
-```bash
-copier copy https://github.com/fastapi/full-stack-fastapi-template my-awesome-project --trust
-```
-
-If you have `pipx` and you didn't install `copier`, you can run it directly:
-
-```bash
-pipx run copier copy https://github.com/fastapi/full-stack-fastapi-template my-awesome-project --trust
-```
-
-**Note** the `--trust` option is necessary to be able to execute a [post-creation script](https://github.com/fastapi/full-stack-fastapi-template/blob/master/.copier/update_dotenv.py) that updates your `.env` files.
-
-### Input Variables
-
-Copier will ask you for some data, you might want to have at hand before generating the project.
-
-But don't worry, you can just update any of that in the `.env` files afterwards.
-
-The input variables, with their default values (some auto generated) are:
-
-- `project_name`: (default: `"FastAPI Project"`) The name of the project, shown to API users (in .env).
-- `stack_name`: (default: `"fastapi-project"`) The name of the stack used for Docker Compose labels and project name (no spaces, no periods) (in .env).
-- `secret_key`: (default: `"changethis"`) The secret key for the project, used for security, stored in .env, you can generate one with the method above.
-- `first_superuser`: (default: `"admin@example.com"`) The email of the first superuser (in .env).
-- `first_superuser_password`: (default: `"changethis"`) The password of the first superuser (in .env).
-- `smtp_host`: (default: "") The SMTP server host to send emails, you can set it later in .env.
-- `smtp_user`: (default: "") The SMTP server user to send emails, you can set it later in .env.
-- `smtp_password`: (default: "") The SMTP server password to send emails, you can set it later in .env.
-- `emails_from_email`: (default: `"info@example.com"`) The email account to send emails from, you can set it later in .env.
-- `postgres_password`: (default: `"changethis"`) The password for the PostgreSQL database, stored in .env, you can generate one with the method above.
-- `sentry_dsn`: (default: "") The DSN for Sentry, if you are using it, you can set it later in .env.
-
-## Backend Development
-
-Backend docs: [backend/README.md](./backend/README.md).
-
-## Frontend Development
-
-Frontend docs: [frontend/README.md](./frontend/README.md).
-
-## Deployment
-
-Deployment docs: [deployment.md](./deployment.md).
-
-## Development
-
-General development docs: [development.md](./development.md).
-
-This includes using Docker Compose, custom local domains, `.env` configurations, etc.
-
-## Release Notes
-
-Check the file [release-notes.md](./release-notes.md).
-
-## License
-
-The Full Stack FastAPI Template is licensed under the terms of the MIT license.
+### Gestao de condominios, edificios e apartamentos
+
+- Cadastro e organizacao de condominios.
+- Cadastro de edificios/blocos.
+- Cadastro de apartamentos/flats vinculados aos edificios.
+- Identificacao personalizada de unidades por numero ou etiqueta.
+- Registro de status da unidade.
+- Associacao de tipos de leitura por edificio e por apartamento.
+- Registro de numeros de serie de medidores.
+- Cadastro de veiculos vinculados as unidades.
+
+### Gestao de moradores
+
+- Cadastro completo de moradores por unidade.
+- Organizacao por perfis como proprietario, segundo proprietario, inquilino e agente.
+- Registro de nome, email, telefone e veiculos.
+- Busca e filtragem de moradores.
+- Visualizacao por edificio, apartamento e tipo de morador.
+- Preferencias individuais para recebimento de SMS.
+- Controle de quem recebe avisos gerais e quem recebe leituras por SMS.
+
+### Leituras de consumo
+
+- Registro de leituras por edificio.
+- Registro de leituras por apartamento.
+- Suporte a diferentes tipos de leitura, como normal, baixa e gas.
+- Historico de leituras com datas e valores.
+- Relatorios por periodo.
+- Envio de relatorios por email.
+- Aviso de leituras por SMS para moradores autorizados.
+- Organizacao das leituras por unidade, edificio e tipo de consumo.
+
+### Tarefas e acompanhamento do caretaker
+
+- Criacao de tarefas para o caretaker.
+- Atribuicao de tarefas a responsaveis.
+- Organizacao por status: a fazer, em andamento e concluido.
+- Codigo unico para cada tarefa.
+- Associacao de tarefas a edificios ou areas comuns.
+- Inclusao de descricao e imagens.
+- Conversa dentro da tarefa entre gestor e caretaker.
+- Historico de mensagens, imagens e mudancas de status.
+- Evidencia fotografica para conclusao quando necessario.
+- Area dedicada para o caretaker acompanhar e atualizar suas atividades.
+
+### Lembretes e automacoes operacionais
+
+- Cadastro de lembretes ativos ou inativos.
+- Agendamento diario, semanal ou mensal.
+- Lembretes por intervalo ou por datas/dias especificos.
+- Disparo de SMS para destinatarios definidos.
+- Criacao de tarefas automaticamente a partir de lembretes.
+- Historico de ultima execucao.
+- Controle de quantos lembretes foram verificados, executados e enviados.
+
+### Controle de cleaners
+
+- Registro de entrada e saida por edificio.
+- Controle de sessao aberta para evitar registros inconsistentes.
+- Historico de acessos por data e edificio.
+- Alertas de status para entrada e saida.
+- Suporte a registros manuais quando necessario.
+- Visao administrativa para conferir a rotina executada.
+
+### Controle de caretakers
+
+- Registro de entrada e saida do caretaker.
+- Controle de tempo trabalhado.
+- Historico de horas por periodo.
+- Metas mensais de horas.
+- Metricas de horas trabalhadas, meta e horas restantes.
+- Relatorios de horas por email.
+- Geracao de invoice de horas do caretaker.
+- Lancamento de invoice no controle financeiro.
+- Registro de atividades relacionadas a bins por edificio.
+
+### Controle de bins
+
+- Registro de inicio e fim de rotinas de bins.
+- Historico por edificio.
+- Controle de coletas gerais e reciclaveis.
+- Registro de coleta perdida ou atrasada.
+- Filtros por edificio, periodo, tipo e status.
+- Edicao e exclusao de registros administrativos.
+- Visao de horas dedicadas a bins por edificio.
+
+### Acesso de prestadores e contractors
+
+- Area publica para registro de entrada e saida de contractors.
+- Check-in com nome, empresa, telefone, edificio e descricao do servico.
+- Check-out de visitas abertas.
+- Visualizacao de contractors atualmente dentro do condominio.
+- Historico de visitas com busca e filtros por periodo.
+- Registro de anexos e evidencias da visita.
+- Controle de codigos de porta quando aplicavel.
+- QR Codes para facilitar acesso de contractors, cleaners, caretakers e bins.
+
+### Historico de contractors e servicos recorrentes
+
+- Cadastro de categorias de historico de contractors.
+- Vinculo de visitas a categorias de servico.
+- Registro manual de trabalhos antigos ou externos.
+- Planejamento de proxima execucao por semana ou mes.
+- Avisos de proximos servicos.
+- Historico pesquisavel por contractor, empresa, edificio, categoria e periodo.
+- Melhor previsibilidade para manutencoes recorrentes.
+
+### Agendas de manutencao e compliance
+
+- Agenda de testes de alarme de incendio.
+- Agenda de elevadores.
+- Agenda de luzes de emergencia.
+- Registro de horario, local, ponto de chamada, comentarios e necessidade de acao.
+- Relatorios por periodo.
+- Envio de relatorios por email.
+- Controle de certificados externos.
+- Anexos de certificados e documentos de suporte.
+- Organizacao por edificio e data.
+
+### Controle financeiro
+
+- Lancamento de entradas e saidas financeiras.
+- Numeracao sequencial de pagamentos.
+- Registro de data, valor, descricao e unidade relacionada.
+- Controle de saldo do periodo.
+- Anexo de invoice ou comprovante.
+- Visualizacao e atualizacao de invoices.
+- Busca por descricao ou unidade.
+- Relatorio de invoices por intervalo de meses.
+- Previa de relatorio antes do envio.
+- Envio de relatorio financeiro em PDF por email.
+
+### Comunicacao por SMS
+
+- SMS para moradores selecionados.
+- SMS de leituras por apartamento.
+- SMS para lembretes operacionais.
+- SMS de status de equipe.
+- Avisos de servicos recorrentes de contractors.
+- Preferencias individuais de recebimento.
+- Historico de notificacoes para acompanhamento administrativo.
+
+### Relatorios profissionais
+
+- Relatorios de leituras por edificio.
+- Relatorios de leituras por apartamento.
+- Relatorios de agendas de manutencao.
+- Relatorios de horas do caretaker.
+- Relatorios financeiros com invoices.
+- Envio direto por email.
+- Periodos configuraveis.
+- Conteudo organizado para prestacao de contas.
+
+### Administracao e usuarios
+
+- Cadastro e gerenciamento de usuarios.
+- Perfis de acesso por funcao.
+- Area administrativa para usuarios autorizados.
+- Login seguro.
+- Recuperacao de senha.
+- Atualizacao de dados do usuario.
+- Troca de senha.
+- Controle de conta e permissoes.
+
+## Para quem e ideal
+
+O OakHill Park e ideal para administradoras, sindicos, property managers e equipes operacionais que precisam controlar condominios com alto volume de rotinas, prestadores, moradores, manutencoes e comunicacoes.
+
+Ele e especialmente valioso para operacoes que precisam provar execucao, manter historicos organizados, reduzir esquecimentos e apresentar informacoes com clareza para moradores, fornecedores e gestores.
+
+## Resultado esperado
+
+Com o OakHill Park, o condominio ganha uma operacao mais organizada, auditavel e eficiente. A equipe trabalha com menos improviso, a administracao tem mais visibilidade e os moradores recebem um servico mais confiavel.
+
+O software transforma a gestao condominial em uma rotina mais simples, profissional e controlada.

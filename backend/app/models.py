@@ -1190,7 +1190,7 @@ class CashFlowRecordCreate(SQLModel):
     invoice_media_data: str | None = None
     record_date: date
     amount: float
-    description: str = Field(min_length=1, max_length=500)
+    description: str = Field(default="", max_length=500)
     flat: str = Field(default="", max_length=100)
 
 
@@ -1200,7 +1200,7 @@ class CashFlowRecordUpdate(SQLModel):
     invoice_media_data: str | None = None
     record_date: date | None = None
     amount: float | None = None
-    description: str | None = Field(default=None, min_length=1, max_length=500)
+    description: str | None = Field(default=None, max_length=500)
     flat: str | None = Field(default=None, max_length=100)
 
 

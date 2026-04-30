@@ -141,6 +141,7 @@ def _has_all_buildings_cleaner_in_and_out_for_day(
             select(Building.id).where(
                 Building.condominio_id == cleaner.condominio_id,
                 func.lower(func.trim(Building.nome)) != "office",
+                func.lower(func.trim(Building.nome)) != "general",
             )
         ).all()
     )
@@ -309,13 +310,12 @@ def _build_caretaker_monthly_metrics(
         return []
 
     month_sequence = _iter_month_starts(min(all_months), max(all_months))
-    carry_over_hours = 0.0
     metrics: list[CaretakerMonthlyMetricPublic] = []
 
     for month_start in month_sequence:
         target_hours = float(target_hours_by_month.get(month_start, 0))
         worked_hours = float(worked_hours_by_month.get(month_start, 0))
-        effective_target_hours = target_hours + carry_over_hours
+        effective_target_hours = target_hours
         remaining_hours = max(effective_target_hours - worked_hours, 0)
 
         metrics.append(
@@ -323,12 +323,11 @@ def _build_caretaker_monthly_metrics(
                 month_start=month_start,
                 worked_hours=_round_hours(worked_hours),
                 target_hours=_round_hours(target_hours),
-                carry_over_hours=_round_hours(carry_over_hours),
+                carry_over_hours=0,
                 effective_target_hours=_round_hours(effective_target_hours),
                 remaining_hours=_round_hours(remaining_hours),
             )
         )
-        carry_over_hours = remaining_hours
 
     return metrics
 

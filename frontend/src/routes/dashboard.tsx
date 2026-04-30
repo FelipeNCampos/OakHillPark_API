@@ -141,6 +141,15 @@ interface CaretakerMonthlyMetricRecord {
   remaining_hours: number
 }
 
+interface WorkerInvoiceHourEntry {
+  id: string
+  monthKey: string
+  hours: number
+  workerName: string
+  createdAt: string
+  fileName: string
+}
+
 interface CashFlowRecord {
   id: EntityId
   payment_number: number
@@ -162,7 +171,6 @@ interface CashFlowRecordsResponse {
 }
 
 interface CashFlowFormState {
-  transactionType: "income" | "outcome"
   hasInvoice: boolean
   invoiceMediaName: string
   invoiceMediaData: string | null
@@ -1599,8 +1607,25 @@ const getMonthDateRange = (monthValue: string) => {
   }
 }
 
+const buildMonthRangeLabel = (monthFrom: string, monthTo: string) => {
+  const formatMonth = (monthValue: string) => {
+    const [yearRaw, monthRaw] = monthValue.split("-")
+    const year = Number(yearRaw)
+    const month = Number(monthRaw)
+    if (!year || !month) return monthValue
+    return new Date(Date.UTC(year, month - 1, 1)).toLocaleDateString("en-GB", {
+      month: "long",
+      year: "numeric",
+      timeZone: "UTC",
+    })
+  }
+
+  return monthFrom === monthTo
+    ? formatMonth(monthFrom)
+    : `${formatMonth(monthFrom)} to ${formatMonth(monthTo)}`
+}
+
 const getEmptyCashFlowForm = (): CashFlowFormState => ({
-  transactionType: "outcome",
   hasInvoice: false,
   invoiceMediaName: "",
   invoiceMediaData: null,
@@ -1609,6 +1634,56 @@ const getEmptyCashFlowForm = (): CashFlowFormState => ({
   description: "",
   flat: "",
 })
+
+const CARETAKER_INVOICE_HOURS_STORAGE_KEY = "oakhill-caretaker-invoice-hours"
+const CLEANER_INVOICE_HOURS_STORAGE_KEY = "oakhill-cleaner-invoice-hours"
+const CONTRACTOR_INVOICE_HOURS_STORAGE_KEY = "oakhill-contractor-invoice-hours"
+
+const readInvoiceHoursFromStorage = (
+  storageKey: string,
+): WorkerInvoiceHourEntry[] => {
+  if (typeof window === "undefined") return []
+  try {
+    const raw = localStorage.getItem(storageKey)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .map((entry) => ({
+        id: String(entry?.id || ""),
+        monthKey: String(entry?.monthKey || ""),
+        hours: Number(entry?.hours),
+        workerName: String(
+          entry?.workerName || entry?.caretakerName || "Worker",
+        ),
+        createdAt: String(entry?.createdAt || ""),
+        fileName: String(entry?.fileName || ""),
+      }))
+      .filter(
+        (entry) =>
+          entry.id &&
+          /^\d{4}-\d{2}$/.test(entry.monthKey) &&
+          Number.isFinite(entry.hours) &&
+          entry.hours > 0,
+      )
+  } catch {
+    return []
+  }
+}
+
+const writeInvoiceHoursToStorage = (
+  storageKey: string,
+  entries: WorkerInvoiceHourEntry[],
+) => {
+  if (typeof window === "undefined") return
+  localStorage.setItem(storageKey, JSON.stringify(entries))
+}
+
+const formatInvoiceHours = (hours: number) => {
+  if (!Number.isFinite(hours)) return "0h"
+  const rounded = Number(hours.toFixed(2))
+  return Number.isInteger(rounded) ? `${rounded}h` : `${rounded}h`
+}
 
 const readFileAsDataUrl = async (file: File) =>
   new Promise<string>((resolve, reject) => {
@@ -2350,7 +2425,30 @@ function CashFlowContent() {
   const [invoicePreview, setInvoicePreview] = useState<CashFlowRecord | null>(
     null,
   )
+  const [invoiceUploadRecord, setInvoiceUploadRecord] =
+    useState<CashFlowRecord | null>(null)
+  const [invoiceUploadMediaName, setInvoiceUploadMediaName] = useState("")
+  const [invoiceUploadMediaData, setInvoiceUploadMediaData] = useState<
+    string | null
+  >(null)
+  const [editingDescriptionRecord, setEditingDescriptionRecord] =
+    useState<CashFlowRecord | null>(null)
+  const [editingDescriptionValue, setEditingDescriptionValue] = useState("")
   const [form, setForm] = useState<CashFlowFormState>(getEmptyCashFlowForm)
+  const [isReportDialogOpen, setIsReportDialogOpen] = useState(false)
+  const [reportMonthFrom, setReportMonthFrom] = useState(
+    getCurrentMonthInputValue,
+  )
+  const [reportMonthTo, setReportMonthTo] = useState(getCurrentMonthInputValue)
+  const [reportEmail, setReportEmail] = useState("")
+  const [reportPdfDataUrl, setReportPdfDataUrl] = useState("")
+  const [reportFileName, setReportFileName] = useState("")
+  const [reportInvoiceCount, setReportInvoiceCount] = useState(0)
+  const [includeInvoiceReportTable, setIncludeInvoiceReportTable] =
+    useState(false)
+  const [isGeneratingInvoiceReport, setIsGeneratingInvoiceReport] =
+    useState(false)
+  const [isSendingInvoiceReport, setIsSendingInvoiceReport] = useState(false)
   const { dateFrom, dateTo } = useMemo(
     () => getMonthDateRange(selectedMonth),
     [selectedMonth],
@@ -2437,6 +2535,28 @@ function CashFlowContent() {
     },
   })
 
+  const updateCashFlowMutation = useMutation({
+    mutationFn: ({
+      id,
+      payload,
+    }: {
+      id: EntityId
+      payload: Record<string, unknown>
+    }) =>
+      apiCall(`/api/v1/cash-flow/${id}`, {
+        method: "PATCH",
+        body: payload,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["cash-flow"] })
+    },
+    onError: (error: unknown) => {
+      showErrorToast(
+        error instanceof Error ? error.message : "Could not update record",
+      )
+    },
+  })
+
   const updateForm = <K extends keyof CashFlowFormState>(
     key: K,
     value: CashFlowFormState[K],
@@ -2448,6 +2568,15 @@ function CashFlowContent() {
     setIsDialogOpen(open)
     if (!open) {
       setForm(getEmptyCashFlowForm())
+    }
+  }
+
+  const handleReportDialogChange = (open: boolean) => {
+    setIsReportDialogOpen(open)
+    if (!open) {
+      setReportPdfDataUrl("")
+      setReportFileName("")
+      setReportInvoiceCount(0)
     }
   }
 
@@ -2473,32 +2602,102 @@ function CashFlowContent() {
     }
   }
 
+  const resetInvoiceUploadDialog = () => {
+    setInvoiceUploadRecord(null)
+    setInvoiceUploadMediaName("")
+    setInvoiceUploadMediaData(null)
+  }
+
+  const handleExistingInvoiceFileChange = async (
+    event: ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    try {
+      const dataUrl = await readFileAsDataUrl(file)
+      setInvoiceUploadMediaName(file.name)
+      setInvoiceUploadMediaData(dataUrl)
+    } catch (error) {
+      showErrorToast(
+        error instanceof Error ? error.message : "Could not read invoice media",
+      )
+    } finally {
+      event.target.value = ""
+    }
+  }
+
+  const handleSaveExistingInvoice = async () => {
+    if (!invoiceUploadRecord) return
+    if (!invoiceUploadMediaData) {
+      showErrorToast("Select invoice media")
+      return
+    }
+
+    try {
+      await updateCashFlowMutation.mutateAsync({
+        id: invoiceUploadRecord.id,
+        payload: {
+          has_invoice: true,
+          invoice_media_name: invoiceUploadMediaName || null,
+          invoice_media_data: invoiceUploadMediaData,
+        },
+      })
+      showSuccessToast("Invoice media added")
+      resetInvoiceUploadDialog()
+    } catch {
+      // The mutation already shows the error toast.
+    }
+  }
+
+  const handleOpenDescriptionEdit = (record: CashFlowRecord) => {
+    setEditingDescriptionRecord(record)
+    setEditingDescriptionValue(record.description || "")
+  }
+
+  const resetDescriptionEditDialog = () => {
+    setEditingDescriptionRecord(null)
+    setEditingDescriptionValue("")
+  }
+
+  const handleSaveDescriptionEdit = async () => {
+    if (!editingDescriptionRecord) return
+
+    try {
+      await updateCashFlowMutation.mutateAsync({
+        id: editingDescriptionRecord.id,
+        payload: {
+          description: editingDescriptionValue.trim(),
+        },
+      })
+      showSuccessToast("Description updated")
+      resetDescriptionEditDialog()
+    } catch {
+      // The mutation already shows the error toast.
+    }
+  }
+
   const handleSubmit = () => {
     const rawAmount = Number(form.amount)
     if (!form.recordDate) {
       showErrorToast("Date is required")
       return
     }
-    if (!Number.isFinite(rawAmount) || rawAmount <= 0) {
+    if (!form.amount.trim() || !Number.isFinite(rawAmount)) {
       showErrorToast("Amount must be a valid number")
       return
     }
-    if (!form.description.trim()) {
-      showErrorToast("Description is required")
+    if (rawAmount === 0) {
+      showErrorToast("Amount must be different from zero")
       return
     }
-
-    const amount =
-      form.transactionType === "outcome"
-        ? -Math.abs(rawAmount)
-        : Math.abs(rawAmount)
 
     createCashFlowMutation.mutate({
       has_invoice: form.hasInvoice,
       invoice_media_name: form.hasInvoice ? form.invoiceMediaName || null : null,
       invoice_media_data: form.hasInvoice ? form.invoiceMediaData : null,
       record_date: form.recordDate,
-      amount,
+      amount: rawAmount,
       description: form.description.trim(),
       flat: form.flat.trim(),
     })
@@ -2517,6 +2716,217 @@ function CashFlowContent() {
     deleteCashFlowMutation.mutate(record.id)
   }
 
+  const generateInvoiceReportPdf = async () => {
+    if (!reportMonthFrom || !reportMonthTo) {
+      showErrorToast("Select the month range")
+      return null
+    }
+    if (reportMonthFrom > reportMonthTo) {
+      showErrorToast("Start month must be before end month")
+      return null
+    }
+
+    const rangeFrom = getMonthDateRange(reportMonthFrom)
+    const rangeTo = getMonthDateRange(reportMonthTo)
+    const periodLabel = buildMonthRangeLabel(reportMonthFrom, reportMonthTo)
+
+    setIsGeneratingInvoiceReport(true)
+    try {
+      const pageLimit = 500
+      const firstPage = (await apiCall("/api/v1/cash-flow/", {
+        skip: 0,
+        limit: pageLimit,
+        date_from: rangeFrom.dateFrom,
+        date_to: rangeTo.dateTo,
+      })) as CashFlowRecordsResponse
+      const allRecords = [...(firstPage.data || [])]
+      for (let skip = pageLimit; skip < (firstPage.count || 0); skip += pageLimit) {
+        const nextPage = (await apiCall("/api/v1/cash-flow/", {
+          skip,
+          limit: pageLimit,
+          date_from: rangeFrom.dateFrom,
+          date_to: rangeTo.dateTo,
+        })) as CashFlowRecordsResponse
+        allRecords.push(...(nextPage.data || []))
+      }
+
+      const invoiceRecords = allRecords.filter(
+        (record) => record.has_invoice && record.invoice_media_data,
+      )
+
+      if (invoiceRecords.length === 0) {
+        showErrorToast("No invoices found in the selected range")
+        setReportPdfDataUrl("")
+        setReportFileName("")
+        setReportInvoiceCount(0)
+        return null
+      }
+
+      const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" })
+      const pageWidth = doc.internal.pageSize.getWidth()
+      const pageHeight = doc.internal.pageSize.getHeight()
+      const margin = 40
+
+      if (includeInvoiceReportTable) {
+        doc.setFontSize(16)
+        doc.text("Cash Flow Invoice Report", margin, 42)
+        doc.setFontSize(10)
+        doc.text(`Period: ${periodLabel}`, margin, 62)
+        doc.text(`Generated: ${new Date().toLocaleString("en-GB")}`, margin, 78)
+
+        autoTable(doc, {
+          startY: 98,
+          head: [["Payment #", "Date", "Amount", "Description", "Flat", "Invoice"]],
+          body: invoiceRecords.map((record) => [
+            record.payment_number,
+            formatDateToGb(record.record_date),
+            formatCurrencyGbp(record.amount),
+            record.description || "-",
+            record.flat || "-",
+            record.invoice_media_name || "Invoice",
+          ]),
+          theme: "grid",
+          styles: {
+            fontSize: 8,
+            cellPadding: 4,
+            lineColor: [180, 180, 180],
+            lineWidth: 0.4,
+          },
+          headStyles: {
+            fillColor: [140, 117, 105],
+            textColor: 255,
+            fontStyle: "bold",
+          },
+        })
+      }
+
+      for (const [index, record] of invoiceRecords.entries()) {
+        if (includeInvoiceReportTable || index > 0) {
+          doc.addPage()
+        }
+        doc.setFontSize(13)
+        doc.text(`Invoice #${record.payment_number}`, margin, 38)
+        doc.setFontSize(9)
+        doc.text(`Date: ${formatDateToGb(record.record_date)}`, margin, 56)
+        doc.text(`Amount: ${formatCurrencyGbp(record.amount)}`, margin, 72)
+        doc.text(`Description: ${record.description || "-"}`, margin, 88, {
+          maxWidth: pageWidth - margin * 2,
+        })
+        const mediaData = record.invoice_media_data || ""
+        if (isImageDataUrl(mediaData)) {
+          try {
+            const image = new Image()
+            await new Promise<void>((resolve, reject) => {
+              image.onload = () => resolve()
+              image.onerror = () => reject(new Error("Could not load invoice image"))
+              image.src = mediaData
+            })
+            const maxWidth = pageWidth - margin * 2
+            const maxHeight = pageHeight - 180
+            const ratio = Math.min(
+              maxWidth / Math.max(image.naturalWidth, 1),
+              maxHeight / Math.max(image.naturalHeight, 1),
+            )
+            const width = image.naturalWidth * ratio
+            const height = image.naturalHeight * ratio
+            const x = margin + (maxWidth - width) / 2
+            const y = 130 + (maxHeight - height) / 2
+            const imageFormat = mediaData.startsWith("data:image/png")
+              ? "PNG"
+              : "JPEG"
+            doc.addImage(mediaData, imageFormat, x, y, width, height)
+          } catch {
+            doc.setFontSize(11)
+            doc.text("Invoice image could not be added to the PDF.", margin, 150)
+          }
+        } else if (isPdfDataUrl(mediaData)) {
+          doc.setFontSize(11)
+          doc.text(
+            "This invoice was uploaded as a PDF. Its file is listed in this report, but PDF pages cannot be merged in the browser preview.",
+            margin,
+            150,
+            { maxWidth: pageWidth - margin * 2 },
+          )
+        } else {
+          doc.setFontSize(11)
+          doc.text("Invoice preview is not available for this file type.", margin, 150)
+        }
+      }
+
+      const dataUrl = doc.output("datauristring")
+      const fileName = `cash-flow-invoices-${reportMonthFrom}-to-${reportMonthTo}.pdf`
+      setReportPdfDataUrl(dataUrl)
+      setReportFileName(fileName)
+      setReportInvoiceCount(invoiceRecords.length)
+      return { dataUrl, fileName, invoiceCount: invoiceRecords.length, periodLabel }
+    } catch (error) {
+      showErrorToast(
+        error instanceof Error ? error.message : "Failed to generate invoice report",
+      )
+      return null
+    } finally {
+      setIsGeneratingInvoiceReport(false)
+    }
+  }
+
+  const handleSendInvoiceReport = async () => {
+    if (!reportEmail.trim()) {
+      showErrorToast("Email is required")
+      return
+    }
+
+    const report =
+      reportPdfDataUrl && reportFileName
+        ? {
+            dataUrl: reportPdfDataUrl,
+            fileName: reportFileName,
+            invoiceCount: reportInvoiceCount,
+            periodLabel: buildMonthRangeLabel(reportMonthFrom, reportMonthTo),
+          }
+        : await generateInvoiceReportPdf()
+    if (!report) return
+
+    const fileDataBase64 = report.dataUrl.split(",")[1] || ""
+    if (!fileDataBase64) {
+      showErrorToast("Failed to prepare report file")
+      return
+    }
+
+    try {
+      setIsSendingInvoiceReport(true)
+      await apiCall("/api/v1/utils/send-report-email/", {
+        method: "POST",
+        body: {
+          email_to: reportEmail.trim(),
+          subject: "Cash Flow Invoice Report",
+          html_content: `<p>Hello,</p><p>Please find attached the cash flow invoice report for ${report.periodLabel}.</p><p>Invoices included: ${report.invoiceCount}</p>`,
+          file_name: report.fileName,
+          file_data_base64: fileDataBase64,
+        },
+      })
+      showSuccessToast("Invoice report sent successfully")
+      handleReportDialogChange(false)
+    } catch (error) {
+      showErrorToast(
+        error instanceof Error ? error.message : "Failed to send invoice report",
+      )
+    } finally {
+      setIsSendingInvoiceReport(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!isReportDialogOpen) return
+    if (!reportMonthFrom || !reportMonthTo) return
+    if (reportMonthFrom > reportMonthTo) return
+
+    const timeoutId = window.setTimeout(() => {
+      generateInvoiceReportPdf()
+    }, 200)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [isReportDialogOpen, reportMonthFrom, reportMonthTo, includeInvoiceReportTable])
+
   return (
     <div className="mx-auto max-w-7xl space-y-6">
       <div className="rounded-lg bg-white p-6 shadow-md">
@@ -2529,17 +2939,26 @@ function CashFlowContent() {
               Monthly register for payments, invoices and flat allocation.
             </p>
           </div>
-          <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] px-5 py-4">
-            <p className="text-xs font-bold uppercase tracking-wide text-[rgba(85,49,28,0.7)]">
-              Month balance
-            </p>
-            <p
-              className={`mt-1 font-mono text-2xl font-bold ${
-                monthBalance < 0 ? "text-[#b42318]" : "text-[#217a4b]"
-              }`}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
+            <button
+              type="button"
+              onClick={() => setIsReportDialogOpen(true)}
+              className="rounded-lg border border-[#8c7569] px-4 py-3 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
             >
-              {formatCurrencyGbp(monthBalance)}
-            </p>
+              Invoice report
+            </button>
+            <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] px-5 py-4">
+              <p className="text-xs font-bold uppercase tracking-wide text-[rgba(85,49,28,0.7)]">
+                Month balance
+              </p>
+              <p
+                className={`mt-1 font-mono text-2xl font-bold ${
+                  monthBalance < 0 ? "text-[#b42318]" : "text-[#217a4b]"
+                }`}
+              >
+                {formatCurrencyGbp(monthBalance)}
+              </p>
+            </div>
           </div>
         </div>
       </div>
@@ -2659,7 +3078,17 @@ function CashFlowContent() {
                           "Yes"
                         )
                       ) : (
-                        "-"
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setInvoiceUploadRecord(record)
+                            setInvoiceUploadMediaName("")
+                            setInvoiceUploadMediaData(null)
+                          }}
+                          className="rounded border border-[#8c7569] px-3 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+                        >
+                          Add
+                        </button>
                       )}
                     </td>
                     <td className="border border-[#e5e0dc] px-3 py-2 text-center text-sm text-[#55311c]">
@@ -2673,7 +3102,13 @@ function CashFlowContent() {
                       {formatCurrencyGbp(record.amount)}
                     </td>
                     <td className="border border-[#e5e0dc] px-3 py-2 text-center text-sm text-[#55311c]">
-                      {record.description}
+                      <button
+                        type="button"
+                        onClick={() => handleOpenDescriptionEdit(record)}
+                        className="w-full rounded px-2 py-1 text-sm text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                      >
+                        {record.description || "-"}
+                      </button>
                     </td>
                     <td className="border border-[#e5e0dc] px-3 py-2 text-center text-sm text-[#55311c]">
                       {record.flat || "-"}
@@ -2729,28 +3164,6 @@ function CashFlowContent() {
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <label
-                htmlFor="cash-flow-form-type"
-                className="mb-1 block text-sm font-semibold text-[#55311c]"
-              >
-                Type
-              </label>
-              <select
-                id="cash-flow-form-type"
-                value={form.transactionType}
-                onChange={(event) =>
-                  updateForm(
-                    "transactionType",
-                    event.target.value as CashFlowFormState["transactionType"],
-                  )
-                }
-                className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
-              >
-                <option value="outcome">Outcome</option>
-                <option value="income">Income</option>
-              </select>
-            </div>
-            <div>
-              <label
                 htmlFor="cash-flow-form-date"
                 className="mb-1 block text-sm font-semibold text-[#55311c]"
               >
@@ -2777,15 +3190,14 @@ function CashFlowContent() {
                 id="cash-flow-form-amount"
                 type="number"
                 step="0.01"
-                min="0"
                 inputMode="decimal"
                 value={form.amount}
                 onChange={(event) => updateForm("amount", event.target.value)}
-                placeholder="610.00"
+                placeholder="-610.00"
                 className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
               />
               <p className="mt-1 text-xs text-[rgba(0,0,0,0.6)]">
-                Choose Income or Outcome above; the balance sign is applied automatically.
+                Use negative values for money out and positive values for money in.
               </p>
             </div>
             <div className="sm:col-span-2">
@@ -2877,6 +3289,257 @@ function CashFlowContent() {
               className="rounded bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {createCashFlowMutation.isPending ? "Saving..." : "Save record"}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(invoiceUploadRecord)}
+        onOpenChange={(open) => {
+          if (!open) resetInvoiceUploadDialog()
+        }}
+      >
+        <DialogContent className="border-[#e5e0dc] bg-white text-[#55311c] sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-[#55311c]">
+              Add invoice media
+            </DialogTitle>
+            <DialogDescription className="text-[rgba(0,0,0,0.7)]">
+              Select the invoice file for payment #
+              {invoiceUploadRecord?.payment_number}.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <input
+              type="file"
+              accept="image/*,application/pdf"
+              onChange={handleExistingInvoiceFileChange}
+              className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c]"
+            />
+            {invoiceUploadMediaData && (
+              <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-3 text-sm text-[#55311c]">
+                <p className="font-semibold">
+                  {invoiceUploadMediaName || "Invoice media"}
+                </p>
+                {isImageDataUrl(invoiceUploadMediaData) && (
+                  <img
+                    src={invoiceUploadMediaData}
+                    alt="Invoice preview"
+                    className="mt-3 max-h-48 rounded border border-[#d9d0ca] bg-white"
+                  />
+                )}
+                {isPdfDataUrl(invoiceUploadMediaData) && (
+                  <p className="mt-2 text-xs text-[rgba(0,0,0,0.65)]">
+                    PDF selected.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <button
+              type="button"
+              onClick={resetInvoiceUploadDialog}
+              disabled={updateCashFlowMutation.isPending}
+              className="rounded border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleSaveExistingInvoice}
+              disabled={updateCashFlowMutation.isPending}
+              className="rounded bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {updateCashFlowMutation.isPending ? "Saving..." : "Save invoice"}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(editingDescriptionRecord)}
+        onOpenChange={(open) => {
+          if (!open) resetDescriptionEditDialog()
+        }}
+      >
+        <DialogContent className="border-[#e5e0dc] bg-white text-[#55311c] sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-[#55311c]">
+              Edit description
+            </DialogTitle>
+            <DialogDescription className="text-[rgba(0,0,0,0.7)]">
+              Update the description for payment #
+              {editingDescriptionRecord?.payment_number}.
+            </DialogDescription>
+          </DialogHeader>
+
+          <textarea
+            value={editingDescriptionValue}
+            onChange={(event) => setEditingDescriptionValue(event.target.value)}
+            rows={4}
+            placeholder="Description"
+            className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+          />
+
+          <DialogFooter>
+            <button
+              type="button"
+              onClick={resetDescriptionEditDialog}
+              disabled={updateCashFlowMutation.isPending}
+              className="rounded border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleSaveDescriptionEdit}
+              disabled={updateCashFlowMutation.isPending}
+              className="rounded bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {updateCashFlowMutation.isPending ? "Saving..." : "Save"}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isReportDialogOpen} onOpenChange={handleReportDialogChange}>
+        <DialogContent className="border-[#e5e0dc] bg-white text-[#55311c] sm:max-w-5xl">
+          <DialogHeader>
+            <DialogTitle className="text-[#55311c]">
+              Cash flow invoice report
+            </DialogTitle>
+            <DialogDescription className="text-[rgba(0,0,0,0.7)]">
+              Select the month range, preview the PDF, and send it by email.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
+            <div className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+                <div>
+                  <label
+                    htmlFor="cash-flow-report-month-from"
+                    className="mb-1 block text-sm font-semibold text-[#55311c]"
+                  >
+                    From
+                  </label>
+                  <input
+                    id="cash-flow-report-month-from"
+                    type="month"
+                    value={reportMonthFrom}
+                    onChange={(event) => {
+                      setReportMonthFrom(event.target.value)
+                      setReportPdfDataUrl("")
+                      setReportFileName("")
+                      setReportInvoiceCount(0)
+                    }}
+                    className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                  />
+                </div>
+                <div>
+                  <label
+                    htmlFor="cash-flow-report-month-to"
+                    className="mb-1 block text-sm font-semibold text-[#55311c]"
+                  >
+                    To
+                  </label>
+                  <input
+                    id="cash-flow-report-month-to"
+                    type="month"
+                    value={reportMonthTo}
+                    onChange={(event) => {
+                      setReportMonthTo(event.target.value)
+                      setReportPdfDataUrl("")
+                      setReportFileName("")
+                      setReportInvoiceCount(0)
+                    }}
+                    className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="cash-flow-report-email"
+                  className="mb-1 block text-sm font-semibold text-[#55311c]"
+                >
+                  Email
+                </label>
+                <input
+                  id="cash-flow-report-email"
+                  type="email"
+                  value={reportEmail}
+                  onChange={(event) => setReportEmail(event.target.value)}
+                  placeholder="report@email.com"
+                  className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                />
+              </div>
+
+              <label className="flex items-center gap-2 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-3 text-sm font-semibold text-[#55311c]">
+                <input
+                  type="checkbox"
+                  checked={includeInvoiceReportTable}
+                  onChange={(event) => {
+                    setIncludeInvoiceReportTable(event.target.checked)
+                    setReportPdfDataUrl("")
+                    setReportFileName("")
+                    setReportInvoiceCount(0)
+                  }}
+                  className="h-4 w-4 accent-[#8c7569]"
+                />
+                Include table before invoices
+              </label>
+
+              {reportPdfDataUrl && (
+                <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-3 text-sm text-[#55311c]">
+                  <p className="font-semibold">{reportFileName}</p>
+                  <p className="mt-1 text-xs text-[rgba(0,0,0,0.65)]">
+                    {reportInvoiceCount} invoice(s) included
+                  </p>
+                </div>
+              )}
+              {isGeneratingInvoiceReport && (
+                <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-3 text-sm font-semibold text-[#55311c]">
+                  Generating preview...
+                </div>
+              )}
+            </div>
+
+            <div className="min-h-[520px] rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-3">
+              {reportPdfDataUrl ? (
+                <iframe
+                  title="Cash flow invoice report preview"
+                  src={reportPdfDataUrl}
+                  className="h-[520px] w-full rounded border border-[#d9d0ca] bg-white"
+                />
+              ) : (
+                <div className="flex h-[520px] items-center justify-center rounded border border-dashed border-[#d9d0ca] bg-white px-6 text-center text-sm text-[rgba(0,0,0,0.65)]">
+                  Generate the report to preview the PDF here.
+                </div>
+              )}
+            </div>
+          </div>
+
+          <DialogFooter>
+            <button
+              type="button"
+              onClick={() => handleReportDialogChange(false)}
+              disabled={isGeneratingInvoiceReport || isSendingInvoiceReport}
+              className="rounded border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleSendInvoiceReport}
+              disabled={isGeneratingInvoiceReport || isSendingInvoiceReport}
+              className="rounded bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isSendingInvoiceReport ? "Sending..." : "Send PDF"}
             </button>
           </DialogFooter>
         </DialogContent>
@@ -8360,6 +9023,452 @@ function CleanerQrCodesContent() {
   )
 }
 
+function HoursInvoiceLauncherDialog({
+  open,
+  onOpenChange,
+  workerLabel,
+  workerName,
+  descriptionSubject,
+  storageKey,
+  onLaunched,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  workerLabel: string
+  workerName: string
+  descriptionSubject: string
+  storageKey: string
+  onLaunched: (entries: WorkerInvoiceHourEntry[]) => void
+}) {
+  const queryClient = useQueryClient()
+  const { showSuccessToast, showErrorToast } = useCustomToast()
+  const [invoiceHours, setInvoiceHours] = useState("")
+  const [invoiceAmount, setInvoiceAmount] = useState("")
+  const [includeInvoiceTable, setIncludeInvoiceTable] = useState(true)
+  const [invoiceMediaName, setInvoiceMediaName] = useState("")
+  const [invoiceMediaData, setInvoiceMediaData] = useState<string | null>(null)
+  const [invoicePdfDataUrl, setInvoicePdfDataUrl] = useState("")
+  const [invoicePdfFileName, setInvoicePdfFileName] = useState("")
+  const [isGeneratingInvoicePdf, setIsGeneratingInvoicePdf] = useState(false)
+  const [isLaunchingInvoice, setIsLaunchingInvoice] = useState(false)
+
+  const resetForm = () => {
+    setInvoiceHours("")
+    setInvoiceAmount("")
+    setIncludeInvoiceTable(true)
+    setInvoiceMediaName("")
+    setInvoiceMediaData(null)
+    setInvoicePdfDataUrl("")
+    setInvoicePdfFileName("")
+  }
+
+  const clearPreview = () => {
+    setInvoicePdfDataUrl("")
+    setInvoicePdfFileName("")
+  }
+
+  const handleDialogChange = (nextOpen: boolean) => {
+    onOpenChange(nextOpen)
+    if (!nextOpen) resetForm()
+  }
+
+  const handleInvoiceFileChange = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    try {
+      const dataUrl = await readFileAsDataUrl(file)
+      setInvoiceMediaName(file.name)
+      setInvoiceMediaData(dataUrl)
+      clearPreview()
+    } catch (error) {
+      showErrorToast(
+        error instanceof Error ? error.message : "Could not read invoice media",
+      )
+    } finally {
+      event.target.value = ""
+    }
+  }
+
+  const generateInvoicePdf = async ({
+    showToast = true,
+  }: { showToast?: boolean } = {}) => {
+    const parsedHours = Number(invoiceHours)
+    if (!invoiceHours.trim() || !Number.isFinite(parsedHours) || parsedHours <= 0) {
+      if (showToast) showErrorToast("Total hours must be a valid number")
+      return null
+    }
+
+    setIsGeneratingInvoicePdf(true)
+    try {
+      const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" })
+      const pageWidth = doc.internal.pageSize.getWidth()
+      const pageHeight = doc.internal.pageSize.getHeight()
+      const margin = 44
+      const invoiceDate = new Date().toLocaleDateString("en-GB")
+      const fileDate = new Date().toISOString().slice(0, 10)
+      const fileName = `${descriptionSubject.toLowerCase()}-hours-invoice-${fileDate}.pdf`
+      const parsedAmount = Number(invoiceAmount)
+      const hasAmount = invoiceAmount.trim() && Number.isFinite(parsedAmount)
+      const monthKey = getCurrentMonthInputValue()
+      const monthLabel = buildMonthRangeLabel(monthKey, monthKey)
+
+      doc.setFontSize(18)
+      doc.text(`${workerLabel} Hours Payment Invoice`, margin, 48)
+      doc.setFontSize(10)
+      doc.text(`Generated: ${new Date().toLocaleString("en-GB")}`, margin, 68)
+
+      const invoiceSummaryRows = [
+        ["Invoice date", invoiceDate],
+        [workerLabel, workerName || workerLabel],
+        ["Month", monthLabel],
+        ["Total hours", formatInvoiceHours(parsedHours)],
+        ["Amount", hasAmount ? formatCurrencyGbp(-Math.abs(parsedAmount)) : "-"],
+        ["Attached media", invoiceMediaName || "None"],
+      ]
+
+      if (includeInvoiceTable) {
+        autoTable(doc, {
+          startY: 100,
+          head: [["Field", "Value"]],
+          body: invoiceSummaryRows,
+          theme: "grid",
+          styles: {
+            fontSize: 10,
+            cellPadding: 7,
+            lineColor: [180, 180, 180],
+            lineWidth: 0.4,
+          },
+          headStyles: {
+            fillColor: [140, 117, 105],
+            textColor: 255,
+            fontStyle: "bold",
+          },
+          columnStyles: {
+            0: { fontStyle: "bold", cellWidth: 150 },
+          },
+        })
+      } else {
+        doc.setFontSize(11)
+        invoiceSummaryRows.forEach(([label, value], index) => {
+          doc.text(`${label}: ${value}`, margin, 104 + index * 22, {
+            maxWidth: pageWidth - margin * 2,
+          })
+        })
+      }
+
+      if (invoiceMediaData) {
+        doc.addPage()
+        doc.setFontSize(14)
+        doc.text("Supporting media", margin, 44)
+        doc.setFontSize(10)
+        doc.text(invoiceMediaName || "Attached media", margin, 64, {
+          maxWidth: pageWidth - margin * 2,
+        })
+
+        if (isImageDataUrl(invoiceMediaData)) {
+          try {
+            const image = new Image()
+            await new Promise<void>((resolve, reject) => {
+              image.onload = () => resolve()
+              image.onerror = () => reject(new Error("Could not load invoice media"))
+              image.src = invoiceMediaData
+            })
+            const maxWidth = pageWidth - margin * 2
+            const maxHeight = pageHeight - 110
+            const ratio = Math.min(
+              maxWidth / Math.max(image.naturalWidth, 1),
+              maxHeight / Math.max(image.naturalHeight, 1),
+            )
+            const width = image.naturalWidth * ratio
+            const height = image.naturalHeight * ratio
+            const x = margin + (maxWidth - width) / 2
+            const imageFormat = invoiceMediaData.startsWith("data:image/png")
+              ? "PNG"
+              : "JPEG"
+            doc.addImage(invoiceMediaData, imageFormat, x, 84, width, height)
+          } catch {
+            doc.text("The attached image could not be added to the PDF.", margin, 96)
+          }
+        } else if (isPdfDataUrl(invoiceMediaData)) {
+          doc.text(
+            "A PDF media file was attached. The generated invoice references the file, but browser-side PDF merging is not available.",
+            margin,
+            96,
+            { maxWidth: pageWidth - margin * 2 },
+          )
+        } else {
+          doc.text("Preview is not available for this media type.", margin, 96)
+        }
+      }
+
+      const dataUrl = doc.output("datauristring")
+      const hours = Number(parsedHours.toFixed(2))
+      setInvoicePdfDataUrl(dataUrl)
+      setInvoicePdfFileName(fileName)
+      if (showToast) showSuccessToast("Invoice preview generated")
+      return { dataUrl, fileName, hours, monthKey }
+    } catch (error) {
+      showErrorToast(
+        error instanceof Error ? error.message : "Could not generate invoice",
+      )
+      return null
+    } finally {
+      setIsGeneratingInvoicePdf(false)
+    }
+  }
+
+  const handleLaunchInvoice = async () => {
+    const parsedAmount = Number(invoiceAmount)
+    if (!invoiceAmount.trim() || !Number.isFinite(parsedAmount)) {
+      showErrorToast("Amount must be a valid number")
+      return
+    }
+    if (parsedAmount === 0) {
+      showErrorToast("Amount must be different from zero")
+      return
+    }
+
+    try {
+      setIsLaunchingInvoice(true)
+      const generatedInvoice = await generateInvoicePdf({ showToast: false })
+      if (!generatedInvoice) return
+
+      const amount = parsedAmount < 0 ? parsedAmount : -Math.abs(parsedAmount)
+      const hoursLabel = Number(generatedInvoice.hours.toFixed(2)).toString()
+
+      await apiCall("/api/v1/cash-flow/", {
+        method: "POST",
+        body: {
+          has_invoice: true,
+          invoice_media_name: generatedInvoice.fileName,
+          invoice_media_data: generatedInvoice.dataUrl,
+          record_date: getTodayDateInputValue(),
+          amount,
+          description: `${descriptionSubject} ${hoursLabel} hours payment`,
+          flat: "",
+        },
+      })
+
+      const nextEntries = [
+        ...readInvoiceHoursFromStorage(storageKey),
+        {
+          id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          monthKey: generatedInvoice.monthKey,
+          hours: generatedInvoice.hours,
+          workerName: workerName || workerLabel,
+          createdAt: new Date().toISOString(),
+          fileName: generatedInvoice.fileName,
+        },
+      ]
+      writeInvoiceHoursToStorage(storageKey, nextEntries)
+      onLaunched(nextEntries)
+      queryClient.invalidateQueries({ queryKey: ["cash-flow"] })
+      showSuccessToast(`${workerLabel} invoice added to cash flow`)
+      handleDialogChange(false)
+    } catch (error) {
+      showErrorToast(
+        error instanceof Error ? error.message : "Could not add invoice to cash flow",
+      )
+    } finally {
+      setIsLaunchingInvoice(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!open) return
+    const parsedHours = Number(invoiceHours)
+    if (!invoiceHours.trim() || !Number.isFinite(parsedHours) || parsedHours <= 0) {
+      return
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      generateInvoicePdf({ showToast: false })
+    }, 200)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [
+    open,
+    invoiceHours,
+    invoiceAmount,
+    includeInvoiceTable,
+    invoiceMediaData,
+    invoiceMediaName,
+    workerLabel,
+    workerName,
+  ])
+
+  return (
+    <Dialog open={open} onOpenChange={handleDialogChange}>
+      <DialogContent className="border-[#e5e0dc] bg-white text-[#55311c] sm:max-w-5xl">
+        <DialogHeader>
+          <DialogTitle className="text-[#55311c]">
+            {workerLabel} hours invoice
+          </DialogTitle>
+          <DialogDescription className="text-[rgba(0,0,0,0.7)]">
+            Enter the total hours, amount and optional media to preview the PDF.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="grid max-h-[70vh] min-h-0 gap-4 overflow-y-auto lg:grid-cols-[300px_minmax(0,1fr)]">
+          <div className="space-y-4">
+            <div>
+              <label
+                className="block text-sm font-semibold text-[#55311c]"
+                htmlFor={`${descriptionSubject.toLowerCase()}-invoice-hours`}
+              >
+                Total hours
+              </label>
+              <input
+                id={`${descriptionSubject.toLowerCase()}-invoice-hours`}
+                type="number"
+                min="0"
+                step="0.01"
+                inputMode="decimal"
+                value={invoiceHours}
+                onChange={(event) => {
+                  setInvoiceHours(event.target.value)
+                  clearPreview()
+                }}
+                placeholder="20.00"
+                className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+              />
+            </div>
+
+            <div>
+              <label
+                className="block text-sm font-semibold text-[#55311c]"
+                htmlFor={`${descriptionSubject.toLowerCase()}-invoice-amount`}
+              >
+                Amount
+              </label>
+              <input
+                id={`${descriptionSubject.toLowerCase()}-invoice-amount`}
+                type="number"
+                step="0.01"
+                inputMode="decimal"
+                value={invoiceAmount}
+                onChange={(event) => {
+                  setInvoiceAmount(event.target.value)
+                  clearPreview()
+                }}
+                placeholder="-120.00"
+                className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+              />
+            </div>
+
+            <label className="flex items-center gap-2 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-3 text-sm font-semibold text-[#55311c]">
+              <input
+                type="checkbox"
+                checked={includeInvoiceTable}
+                onChange={(event) => {
+                  setIncludeInvoiceTable(event.target.checked)
+                  clearPreview()
+                }}
+                className="h-4 w-4 accent-[#8c7569]"
+              />
+              Include summary table in PDF
+            </label>
+
+            <div>
+              <label
+                className="block text-sm font-semibold text-[#55311c]"
+                htmlFor={`${descriptionSubject.toLowerCase()}-invoice-media`}
+              >
+                Media
+              </label>
+              <input
+                id={`${descriptionSubject.toLowerCase()}-invoice-media`}
+                type="file"
+                accept="image/*,application/pdf"
+                onChange={handleInvoiceFileChange}
+                className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+              />
+              {invoiceMediaData && (
+                <div className="mt-3 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-3 text-sm text-[#55311c]">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="min-w-0 truncate font-semibold">
+                      {invoiceMediaName || "Attached media"}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setInvoiceMediaName("")
+                        setInvoiceMediaData(null)
+                        clearPreview()
+                      }}
+                      className="shrink-0 rounded border border-[#8c7569] px-2 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                  {isImageDataUrl(invoiceMediaData) && (
+                    <img
+                      src={invoiceMediaData}
+                      alt="Invoice media preview"
+                      className="mt-3 max-h-32 rounded border border-[#d9d0ca] bg-white"
+                    />
+                  )}
+                </div>
+              )}
+            </div>
+
+            {invoicePdfDataUrl && (
+              <a
+                href={invoicePdfDataUrl}
+                download={invoicePdfFileName}
+                className="block w-full rounded-lg bg-[#8c7569] px-4 py-2 text-center text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c]"
+              >
+                Download preview
+              </a>
+            )}
+            {isGeneratingInvoicePdf && (
+              <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-3 text-sm font-semibold text-[#55311c]">
+                Generating preview...
+              </div>
+            )}
+          </div>
+
+          <div className="min-h-[520px] rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-3">
+            {invoicePdfDataUrl ? (
+              <iframe
+                title={`${workerLabel} hours invoice preview`}
+                src={invoicePdfDataUrl}
+                className="h-[520px] w-full rounded border border-[#d9d0ca] bg-white"
+              />
+            ) : (
+              <div className="flex h-[520px] items-center justify-center rounded border border-dashed border-[#d9d0ca] bg-white px-6 text-center text-sm text-[rgba(0,0,0,0.65)]">
+                Enter hours to preview the PDF here.
+              </div>
+            )}
+          </div>
+        </div>
+
+        <DialogFooter>
+          <button
+            type="button"
+            onClick={() => handleDialogChange(false)}
+            disabled={isGeneratingInvoicePdf || isLaunchingInvoice}
+            className="rounded border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Close
+          </button>
+          <button
+            type="button"
+            onClick={handleLaunchInvoice}
+            disabled={isGeneratingInvoicePdf || isLaunchingInvoice}
+            className="rounded bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isLaunchingInvoice ? "Launching..." : "Launch invoice"}
+          </button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function ContractorsContent() {
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
@@ -8367,6 +9476,11 @@ function ContractorsContent() {
   const [dateFrom, setDateFrom] = useState("")
   const [dateTo, setDateTo] = useState("")
   const [isMediaDialogOpen, setIsMediaDialogOpen] = useState(false)
+  const [isInvoiceDialogOpen, setIsInvoiceDialogOpen] = useState(false)
+  const [contractorInvoiceHourEntries, setContractorInvoiceHourEntries] =
+    useState<WorkerInvoiceHourEntry[]>(() =>
+      readInvoiceHoursFromStorage(CONTRACTOR_INVOICE_HOURS_STORAGE_KEY),
+    )
   const [selectedVisit, setSelectedVisit] =
     useState<ContractorVisitAdmin | null>(null)
   const [mediaForm, setMediaForm] = useState<ContractorMediaFormState>(
@@ -8389,6 +9503,10 @@ function ContractorsContent() {
 
   const visits = data?.data || []
   const totalVisits = data?.count || visits.length
+  const currentMonthKey = getCurrentMonthInputValue()
+  const contractorInvoiceHours = contractorInvoiceHourEntries
+    .filter((entry) => entry.monthKey === currentMonthKey)
+    .reduce((sum, entry) => sum + entry.hours, 0)
 
   const contractorMediaMutation = useMutation({
     mutationFn: ({
@@ -8507,6 +9625,18 @@ function ContractorsContent() {
             </p>
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="sm:col-span-3 flex flex-col gap-2 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-3 sm:flex-row sm:items-center sm:justify-between">
+              <span className="text-sm font-semibold text-[#217a4b]">
+                Invoices launched {formatInvoiceHours(contractorInvoiceHours)}
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsInvoiceDialogOpen(true)}
+                className="rounded-lg border border-[#8c7569] bg-white px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+              >
+                Invoice
+              </button>
+            </div>
             <div>
               <label
                 htmlFor="contractor-search"
@@ -8859,6 +9989,16 @@ function ContractorsContent() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <HoursInvoiceLauncherDialog
+        open={isInvoiceDialogOpen}
+        onOpenChange={setIsInvoiceDialogOpen}
+        workerLabel="Contractor"
+        workerName="Contractor"
+        descriptionSubject="Contractor"
+        storageKey={CONTRACTOR_INVOICE_HOURS_STORAGE_KEY}
+        onLaunched={setContractorInvoiceHourEntries}
+      />
     </div>
   )
 }
@@ -9204,6 +10344,12 @@ function CleanerContent() {
   const [activeSubTab, setActiveSubTab] = useState<"summary" | "register">(
     "summary",
   )
+  const [invoiceTrigger, setInvoiceTrigger] = useState(0)
+
+  const handleOpenInvoice = () => {
+    setActiveSubTab("summary")
+    setInvoiceTrigger((current) => current + 1)
+  }
 
   return (
     <div className="mx-auto max-w-7xl">
@@ -9217,7 +10363,14 @@ function CleanerContent() {
               Work summary and cleaner registration.
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleOpenInvoice}
+              className="rounded-lg border border-[#8c7569] bg-white px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+            >
+              Invoice
+            </button>
             <button
               type="button"
               onClick={() => setActiveSubTab("summary")}
@@ -9244,7 +10397,11 @@ function CleanerContent() {
         </div>
       </div>
 
-      {activeSubTab === "summary" ? <CleanerSummary /> : <CleanerRegister />}
+      {activeSubTab === "summary" ? (
+        <CleanerSummary invoiceTrigger={invoiceTrigger} />
+      ) : (
+        <CleanerRegister />
+      )}
     </div>
   )
 }
@@ -9254,10 +10411,16 @@ function CaretakerContent() {
     "summary" | "bins" | "register" | "schedules"
   >("summary")
   const [reportTrigger, setReportTrigger] = useState(0)
+  const [invoiceTrigger, setInvoiceTrigger] = useState(0)
 
   const handleOpenReport = () => {
     setActiveSubTab("summary")
     setReportTrigger((current) => current + 1)
+  }
+
+  const handleOpenInvoice = () => {
+    setActiveSubTab("summary")
+    setInvoiceTrigger((current) => current + 1)
   }
 
   return (
@@ -9273,6 +10436,13 @@ function CaretakerContent() {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleOpenInvoice}
+              className="rounded-lg border border-[#8c7569] bg-white px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+            >
+              Invoice
+            </button>
             <button
               type="button"
               onClick={handleOpenReport}
@@ -9309,6 +10479,7 @@ function CaretakerContent() {
       <CaretakerSummary
         activeTab={activeSubTab === "bins" ? "bins" : "summary"}
         reportTrigger={reportTrigger}
+        invoiceTrigger={invoiceTrigger}
       />
       {activeSubTab === "register" && <CaretakerRegister />}
       {activeSubTab === "schedules" && <CaretakerSchedules />}
@@ -11728,7 +12899,7 @@ function BuildingSchedulePage({
   )
 }
 
-function CleanerSummary() {
+function CleanerSummary({ invoiceTrigger = 0 }: { invoiceTrigger?: number }) {
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
   const { data: cleanersData } = useQuery<ApiListResponse<Funcionario>>({
@@ -11773,6 +12944,10 @@ function CleanerSummary() {
   const [cleanerHistoryPage, setCleanerHistoryPage] = useState(0)
   const [selectedCleanerDateFrom, setSelectedCleanerDateFrom] = useState("")
   const [selectedCleanerDateTo, setSelectedCleanerDateTo] = useState("")
+  const [isInvoiceDialogOpen, setIsInvoiceDialogOpen] = useState(false)
+  const [cleanerInvoiceHourEntries, setCleanerInvoiceHourEntries] = useState<
+    WorkerInvoiceHourEntry[]
+  >(() => readInvoiceHoursFromStorage(CLEANER_INVOICE_HOURS_STORAGE_KEY))
   const cleanerDeferredSearch = useDeferredValue(cleanerSearch.trim())
   const cleanerHistoryPageSize = 10
 
@@ -11790,6 +12965,16 @@ function CleanerSummary() {
     )
     return (
       cleaners.find((cleaner: Funcionario) => cleaner.is_default)?.id || null
+    )
+  }, [cleanersData])
+
+  const activeCleanerName = useMemo(() => {
+    const cleaners = (cleanersData?.data || []).filter(
+      (funcionario: Funcionario) => funcionario.cargo === 0,
+    )
+    return (
+      cleaners.find((cleaner: Funcionario) => cleaner.is_default)?.nome ||
+      "Cleaner"
     )
   }, [cleanersData])
 
@@ -12108,6 +13293,15 @@ function CleanerSummary() {
     ]
   }, [enrichedSessions, formatTotalMinutes])
 
+  const currentCleanerMonthKey = getCurrentMonthInputValue()
+  const cleanerInvoiceHours = useMemo(
+    () =>
+      cleanerInvoiceHourEntries
+        .filter((entry) => entry.monthKey === currentCleanerMonthKey)
+        .reduce((sum, entry) => sum + entry.hours, 0),
+    [cleanerInvoiceHourEntries, currentCleanerMonthKey],
+  )
+
   const handleOpenCleanerRecordEdit = (
     inRecordId: EntityId | null,
     inIsoValue: string | null,
@@ -12384,6 +13578,12 @@ function CleanerSummary() {
     }
   }
 
+  useEffect(() => {
+    if (invoiceTrigger > 0) {
+      setIsInvoiceDialogOpen(true)
+    }
+  }, [invoiceTrigger])
+
   return (
     <div className="rounded-lg bg-white p-6 shadow-md">
       <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -12395,6 +13595,9 @@ function CleanerSummary() {
             Select an active cleaner from registration
           </span>
         )}
+        <span className="rounded-full bg-[#eef8f2] px-3 py-1 text-xs font-semibold text-[#217a4b]">
+          Invoices launched {formatInvoiceHours(cleanerInvoiceHours)}
+        </span>
       </div>
 
       <div className="mb-6 grid gap-3 sm:grid-cols-3">
@@ -12967,6 +14170,16 @@ function CleanerSummary() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <HoursInvoiceLauncherDialog
+        open={isInvoiceDialogOpen}
+        onOpenChange={setIsInvoiceDialogOpen}
+        workerLabel="Cleaner"
+        workerName={activeCleanerName}
+        descriptionSubject="Cleaner"
+        storageKey={CLEANER_INVOICE_HOURS_STORAGE_KEY}
+        onLaunched={setCleanerInvoiceHourEntries}
+      />
     </div>
   )
 }
@@ -13241,9 +14454,11 @@ function CleanerRegister() {
 function CaretakerSummary({
   activeTab,
   reportTrigger = 0,
+  invoiceTrigger = 0,
 }: {
   activeTab: "summary" | "bins"
   reportTrigger?: number
+  invoiceTrigger?: number
 }) {
   const { showSuccessToast, showErrorToast } = useCustomToast()
   const queryClient = useQueryClient()
@@ -13366,6 +14581,25 @@ function CaretakerSummary({
   const [reportEmail, setReportEmail] = useState("")
   const [isSendingReport, setIsSendingReport] = useState(false)
   const [showReportModal, setShowReportModal] = useState(false)
+  const [showInvoiceModal, setShowInvoiceModal] = useState(false)
+  const [invoiceHours, setInvoiceHours] = useState("")
+  const [invoiceAmount, setInvoiceAmount] = useState("")
+  const [includeCaretakerInvoiceTable, setIncludeCaretakerInvoiceTable] =
+    useState(true)
+  const [invoiceMediaName, setInvoiceMediaName] = useState("")
+  const [invoiceMediaData, setInvoiceMediaData] = useState<string | null>(null)
+  const [invoicePdfDataUrl, setInvoicePdfDataUrl] = useState("")
+  const [invoicePdfFileName, setInvoicePdfFileName] = useState("")
+  const [isGeneratingInvoicePdf, setIsGeneratingInvoicePdf] = useState(false)
+  const [isLaunchingCaretakerInvoice, setIsLaunchingCaretakerInvoice] =
+    useState(false)
+  const [currentInvoiceHourEntryId, setCurrentInvoiceHourEntryId] = useState<
+    string | null
+  >(null)
+  const [caretakerInvoiceHourEntries, setCaretakerInvoiceHourEntries] =
+    useState<WorkerInvoiceHourEntry[]>(() =>
+      readInvoiceHoursFromStorage(CARETAKER_INVOICE_HOURS_STORAGE_KEY),
+    )
   const [deletingBinsRowKey, setDeletingBinsRowKey] = useState<string | null>(
     null,
   )
@@ -13553,12 +14787,17 @@ function CaretakerSummary({
   const selectedWorkMonthHours = selectedWorkMonthMetric?.worked_hours || 0
   const selectedWorkMonthTargetHours =
     selectedWorkMonthMetric?.target_hours || 0
-  const selectedWorkMonthCarryOverHours =
-    selectedWorkMonthMetric?.carry_over_hours || 0
   const selectedWorkMonthEffectiveTargetHours =
     selectedWorkMonthMetric?.effective_target_hours || 0
   const selectedWorkMonthRemainingHours =
     selectedWorkMonthMetric?.remaining_hours || 0
+  const selectedWorkMonthInvoiceHours = useMemo(
+    () =>
+      caretakerInvoiceHourEntries
+        .filter((entry) => entry.monthKey === selectedWorkMonthKey)
+        .reduce((sum, entry) => sum + entry.hours, 0),
+    [caretakerInvoiceHourEntries, selectedWorkMonthKey],
+  )
 
   const resetMonthlyGoalForm = () => {
     setEditingMonthlyGoal(null)
@@ -13825,12 +15064,16 @@ function CaretakerSummary({
       const current = totals.get(buildingLabel) || 0
       totals.set(buildingLabel, current + duration)
     })
-    return [...totals.entries()]
+    const rows = [...totals.entries()]
       .map(([building, minutes]) => ({
         building,
         hours: Number((minutes / 60).toFixed(2)),
       }))
       .sort((a, b) => b.hours - a.hours)
+    const totalHours = rows.reduce((sum, row) => sum + row.hours, 0)
+    return totalHours > 0
+      ? [...rows, { building: "Total", hours: Number(totalHours.toFixed(2)) }]
+      : rows
   }, [
     binSessionsGrouped,
     binsDateFrom,
@@ -14138,6 +15381,233 @@ function CaretakerSummary({
       showErrorToast(message)
     } finally {
       setIsSendingReport(false)
+    }
+  }
+
+  const resetCaretakerInvoiceForm = () => {
+    setInvoiceHours("")
+    setInvoiceAmount("")
+    setIncludeCaretakerInvoiceTable(true)
+    setInvoiceMediaName("")
+    setInvoiceMediaData(null)
+    setInvoicePdfDataUrl("")
+    setInvoicePdfFileName("")
+    setCurrentInvoiceHourEntryId(null)
+  }
+
+  const handleCaretakerInvoiceFileChange = async (
+    event: ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    try {
+      const dataUrl = await readFileAsDataUrl(file)
+      setInvoiceMediaName(file.name)
+      setInvoiceMediaData(dataUrl)
+      setInvoicePdfDataUrl("")
+      setInvoicePdfFileName("")
+    } catch (error) {
+      showErrorToast(
+        error instanceof Error ? error.message : "Could not read invoice media",
+      )
+    } finally {
+      event.target.value = ""
+    }
+  }
+
+  const generateCaretakerInvoicePdf = async ({
+    showToast = true,
+  }: { showToast?: boolean } = {}) => {
+    const parsedHours = Number(invoiceHours)
+    if (!invoiceHours.trim() || !Number.isFinite(parsedHours) || parsedHours <= 0) {
+      if (showToast) showErrorToast("Total hours must be a valid number")
+      return
+    }
+
+    setIsGeneratingInvoicePdf(true)
+    try {
+      const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" })
+      const pageWidth = doc.internal.pageSize.getWidth()
+      const pageHeight = doc.internal.pageSize.getHeight()
+      const margin = 44
+      const invoiceDate = new Date().toLocaleDateString("en-GB")
+      const fileName = `caretaker-hours-invoice-${new Date().toISOString().slice(0, 10)}.pdf`
+      const parsedAmount = Number(invoiceAmount)
+      const hasAmount = invoiceAmount.trim() && Number.isFinite(parsedAmount)
+
+      doc.setFontSize(18)
+      doc.text("Caretaker Hours Payment Invoice", margin, 48)
+      doc.setFontSize(10)
+      doc.text(`Generated: ${new Date().toLocaleString("en-GB")}`, margin, 68)
+
+      const invoiceSummaryRows = [
+        ["Invoice date", invoiceDate],
+        ["Caretaker", activeCaretakerName],
+        ["Month", selectedWorkMonthLabel],
+        ["Total hours", formatDecimalHours(parsedHours)],
+        ["Amount", hasAmount ? formatCurrencyGbp(-Math.abs(parsedAmount)) : "-"],
+        ["Attached media", invoiceMediaName || "None"],
+      ]
+
+      if (includeCaretakerInvoiceTable) {
+        autoTable(doc, {
+          startY: 100,
+          head: [["Field", "Value"]],
+          body: invoiceSummaryRows,
+          theme: "grid",
+          styles: {
+            fontSize: 10,
+            cellPadding: 7,
+            lineColor: [180, 180, 180],
+            lineWidth: 0.4,
+          },
+          headStyles: {
+            fillColor: [140, 117, 105],
+            textColor: 255,
+            fontStyle: "bold",
+          },
+          columnStyles: {
+            0: { fontStyle: "bold", cellWidth: 150 },
+          },
+        })
+      } else {
+        doc.setFontSize(11)
+        invoiceSummaryRows.forEach(([label, value], index) => {
+          doc.text(`${label}: ${value}`, margin, 104 + index * 22, {
+            maxWidth: pageWidth - margin * 2,
+          })
+        })
+      }
+
+      if (invoiceMediaData) {
+        doc.addPage()
+        doc.setFontSize(14)
+        doc.text("Supporting media", margin, 44)
+        doc.setFontSize(10)
+        doc.text(invoiceMediaName || "Attached media", margin, 64, {
+          maxWidth: pageWidth - margin * 2,
+        })
+
+        if (isImageDataUrl(invoiceMediaData)) {
+          try {
+            const image = new Image()
+            await new Promise<void>((resolve, reject) => {
+              image.onload = () => resolve()
+              image.onerror = () => reject(new Error("Could not load invoice media"))
+              image.src = invoiceMediaData
+            })
+            const maxWidth = pageWidth - margin * 2
+            const maxHeight = pageHeight - 110
+            const ratio = Math.min(
+              maxWidth / Math.max(image.naturalWidth, 1),
+              maxHeight / Math.max(image.naturalHeight, 1),
+            )
+            const width = image.naturalWidth * ratio
+            const height = image.naturalHeight * ratio
+            const x = margin + (maxWidth - width) / 2
+            const imageFormat = invoiceMediaData.startsWith("data:image/png")
+              ? "PNG"
+              : "JPEG"
+            doc.addImage(invoiceMediaData, imageFormat, x, 84, width, height)
+          } catch {
+            doc.text("The attached image could not be added to the PDF.", margin, 96)
+          }
+        } else if (isPdfDataUrl(invoiceMediaData)) {
+          doc.text(
+            "A PDF media file was attached. The generated invoice references the file, but browser-side PDF merging is not available.",
+            margin,
+            96,
+            { maxWidth: pageWidth - margin * 2 },
+          )
+        } else {
+          doc.text("Preview is not available for this media type.", margin, 96)
+        }
+      }
+
+      const dataUrl = doc.output("datauristring")
+      setInvoicePdfDataUrl(dataUrl)
+      setInvoicePdfFileName(fileName)
+      const hours = Number(parsedHours.toFixed(2))
+      if (showToast) showSuccessToast("Invoice preview generated")
+      return { dataUrl, fileName, hours }
+    } catch (error) {
+      showErrorToast(
+        error instanceof Error ? error.message : "Could not generate invoice",
+      )
+    } finally {
+      setIsGeneratingInvoicePdf(false)
+    }
+  }
+
+  const handleLaunchCaretakerInvoice = async () => {
+    const parsedAmount = Number(invoiceAmount)
+    if (!invoiceAmount.trim() || !Number.isFinite(parsedAmount)) {
+      showErrorToast("Amount must be a valid number")
+      return
+    }
+    if (parsedAmount === 0) {
+      showErrorToast("Amount must be different from zero")
+      return
+    }
+
+    try {
+      setIsLaunchingCaretakerInvoice(true)
+      const generatedInvoice = await generateCaretakerInvoicePdf({
+        showToast: false,
+      })
+      if (!generatedInvoice) return
+
+      const amount = parsedAmount < 0 ? parsedAmount : -Math.abs(parsedAmount)
+      const hoursLabel = Number(generatedInvoice.hours.toFixed(2)).toString()
+      const entryId =
+        currentInvoiceHourEntryId ||
+        `${Date.now()}-${Math.random().toString(36).slice(2)}`
+
+      await apiCall("/api/v1/cash-flow/", {
+        method: "POST",
+        body: {
+          has_invoice: true,
+          invoice_media_name: generatedInvoice.fileName,
+          invoice_media_data: generatedInvoice.dataUrl,
+          record_date: getTodayDateInputValue(),
+          amount,
+          description: `Caretaker ${hoursLabel} hours payment`,
+          flat: "",
+        },
+      })
+
+      setCurrentInvoiceHourEntryId(entryId)
+      setCaretakerInvoiceHourEntries((currentEntries) => {
+        const nextEntries = [
+          ...currentEntries.filter((entry) => entry.id !== entryId),
+          {
+            id: entryId,
+            monthKey: selectedWorkMonthKey,
+            hours: generatedInvoice.hours,
+            workerName: activeCaretakerName,
+            createdAt: new Date().toISOString(),
+            fileName: generatedInvoice.fileName,
+          },
+        ]
+        writeInvoiceHoursToStorage(
+          CARETAKER_INVOICE_HOURS_STORAGE_KEY,
+          nextEntries,
+        )
+        return nextEntries
+      })
+      queryClient.invalidateQueries({ queryKey: ["cash-flow"] })
+      showSuccessToast("Caretaker invoice added to cash flow")
+      setShowInvoiceModal(false)
+      resetCaretakerInvoiceForm()
+    } catch (error) {
+      showErrorToast(
+        error instanceof Error
+          ? error.message
+          : "Could not add caretaker invoice to cash flow",
+      )
+    } finally {
+      setIsLaunchingCaretakerInvoice(false)
     }
   }
 
@@ -14543,6 +16013,36 @@ function CaretakerSummary({
     }
   }, [reportTrigger])
 
+  useEffect(() => {
+    if (invoiceTrigger > 0) {
+      resetCaretakerInvoiceForm()
+      setShowInvoiceModal(true)
+    }
+  }, [invoiceTrigger])
+
+  useEffect(() => {
+    if (!showInvoiceModal) return
+    const parsedHours = Number(invoiceHours)
+    if (!invoiceHours.trim() || !Number.isFinite(parsedHours) || parsedHours <= 0) {
+      return
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      generateCaretakerInvoicePdf({ showToast: false })
+    }, 200)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [
+    showInvoiceModal,
+    invoiceHours,
+    invoiceAmount,
+    includeCaretakerInvoiceTable,
+    invoiceMediaData,
+    invoiceMediaName,
+    selectedWorkMonthKey,
+    activeCaretakerName,
+  ])
+
   return (
     <div className="rounded-lg bg-white p-6 shadow-md">
       <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -14598,11 +16098,10 @@ function CaretakerSummary({
                   <span className="font-semibold text-[#55311c]">
                     Target {formatDecimalHours(selectedWorkMonthTargetHours)}
                   </span>
-                  {selectedWorkMonthCarryOverHours > 0 && (
-                    <sup className="text-xs font-semibold text-[#8a3d1b]">
-                      +{formatDecimalHours(selectedWorkMonthCarryOverHours)}
-                    </sup>
-                  )}
+                  <span className="font-semibold text-[#217a4b]">
+                    Invoices launched{" "}
+                    {formatDecimalHours(selectedWorkMonthInvoiceHours)}
+                  </span>
                 </div>
                 <p className="mt-2 text-sm text-[rgba(85,49,28,0.72)]">
                   {isLoadingMonthlyMetrics
@@ -15443,6 +16942,185 @@ function CaretakerSummary({
           </div>
         </DialogContent>
       </Dialog>
+
+      {showInvoiceModal && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-3 sm:items-center sm:px-4">
+          <div className="flex max-h-[92vh] w-full max-w-5xl flex-col rounded-2xl bg-white p-4 shadow-xl sm:p-6">
+            <div className="mb-4">
+              <h3 className="text-lg font-bold text-[#55311c]">
+                Caretaker hours invoice
+              </h3>
+              <p className="mt-1 text-sm text-[rgba(0,0,0,0.7)]">
+                Enter the total hours, optionally attach media, then preview and
+                download the PDF.
+              </p>
+            </div>
+
+            <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto lg:grid-cols-[300px_minmax(0,1fr)]">
+              <div className="space-y-4">
+                <div>
+                  <label
+                    className="block text-sm font-semibold text-[#55311c]"
+                    htmlFor="caretaker-invoice-hours"
+                  >
+                    Total hours
+                  </label>
+                  <input
+                    id="caretaker-invoice-hours"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    inputMode="decimal"
+                    value={invoiceHours}
+                    onChange={(event) => {
+                      setInvoiceHours(event.target.value)
+                      setInvoicePdfDataUrl("")
+                      setInvoicePdfFileName("")
+                    }}
+                    placeholder="20.00"
+                    className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                  />
+                </div>
+
+                <div>
+                  <label
+                    className="block text-sm font-semibold text-[#55311c]"
+                    htmlFor="caretaker-invoice-amount"
+                  >
+                    Amount
+                  </label>
+                  <input
+                    id="caretaker-invoice-amount"
+                    type="number"
+                    step="0.01"
+                    inputMode="decimal"
+                    value={invoiceAmount}
+                    onChange={(event) => {
+                      setInvoiceAmount(event.target.value)
+                      setInvoicePdfDataUrl("")
+                      setInvoicePdfFileName("")
+                    }}
+                    placeholder="-120.00"
+                    className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                  />
+                </div>
+
+                <label className="flex items-center gap-2 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-3 text-sm font-semibold text-[#55311c]">
+                  <input
+                    type="checkbox"
+                    checked={includeCaretakerInvoiceTable}
+                    onChange={(event) => {
+                      setIncludeCaretakerInvoiceTable(event.target.checked)
+                      setInvoicePdfDataUrl("")
+                      setInvoicePdfFileName("")
+                    }}
+                    className="h-4 w-4 accent-[#8c7569]"
+                  />
+                  Include summary table in PDF
+                </label>
+
+                <div>
+                  <label
+                    className="block text-sm font-semibold text-[#55311c]"
+                    htmlFor="caretaker-invoice-media"
+                  >
+                    Media
+                  </label>
+                  <input
+                    id="caretaker-invoice-media"
+                    type="file"
+                    accept="image/*,application/pdf"
+                    onChange={handleCaretakerInvoiceFileChange}
+                    className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                  />
+                  {invoiceMediaData && (
+                    <div className="mt-3 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-3 text-sm text-[#55311c]">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="min-w-0 truncate font-semibold">
+                          {invoiceMediaName || "Attached media"}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setInvoiceMediaName("")
+                            setInvoiceMediaData(null)
+                            setInvoicePdfDataUrl("")
+                            setInvoicePdfFileName("")
+                          }}
+                          className="shrink-0 rounded border border-[#8c7569] px-2 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                      {isImageDataUrl(invoiceMediaData) && (
+                        <img
+                          src={invoiceMediaData}
+                          alt="Invoice media preview"
+                          className="mt-3 max-h-32 rounded border border-[#d9d0ca] bg-white"
+                        />
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {invoicePdfDataUrl && (
+                  <a
+                    href={invoicePdfDataUrl}
+                    download={
+                      invoicePdfFileName ||
+                      `caretaker-hours-invoice-${new Date().toISOString().slice(0, 10)}.pdf`
+                    }
+                    className="block w-full rounded-lg bg-[#8c7569] px-4 py-2 text-center text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c]"
+                  >
+                    Download preview
+                  </a>
+                )}
+                {isGeneratingInvoicePdf && (
+                  <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-3 text-sm font-semibold text-[#55311c]">
+                    Generating preview...
+                  </div>
+                )}
+              </div>
+
+              <div className="min-h-[520px] rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-3">
+                {invoicePdfDataUrl ? (
+                  <iframe
+                    title="Caretaker hours invoice preview"
+                    src={invoicePdfDataUrl}
+                    className="h-[520px] w-full rounded border border-[#d9d0ca] bg-white"
+                  />
+                ) : (
+                  <div className="flex h-[520px] items-center justify-center rounded border border-dashed border-[#d9d0ca] bg-white px-6 text-center text-sm text-[rgba(0,0,0,0.65)]">
+                    Generate the invoice to preview the PDF here.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowInvoiceModal(false)
+                  resetCaretakerInvoiceForm()
+                }}
+                disabled={isGeneratingInvoicePdf || isLaunchingCaretakerInvoice}
+                className="w-full rounded-lg border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                onClick={handleLaunchCaretakerInvoice}
+                disabled={isGeneratingInvoicePdf || isLaunchingCaretakerInvoice}
+                className="w-full rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+              >
+                {isLaunchingCaretakerInvoice ? "Launching..." : "Launch invoice"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showReportModal && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-3 sm:items-center sm:px-4">

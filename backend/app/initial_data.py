@@ -60,6 +60,27 @@ def ensure_northwood_flat_1a(session: Session, condominio: Condominio) -> None:
     logger.info("Ensured Northwood flat 1A exists")
 
 
+def ensure_general_building(session: Session, condominio: Condominio) -> None:
+    existing = session.exec(
+        select(Building).where(
+            Building.condominio_id == condominio.id,
+            Building.nome == "General",
+        )
+    ).first()
+    if existing:
+        return
+
+    session.add(
+        Building(
+            nome="General",
+            condominio_id=condominio.id,
+            reading_types=0,
+        )
+    )
+    session.commit()
+    logger.info("Ensured General building exists")
+
+
 def init() -> None:
     with Session(engine) as session:
         init_db(session)
@@ -128,6 +149,7 @@ def create_initial_data() -> None:
 
             session.commit()
             ensure_northwood_flat_1a(session, condominio)
+            ensure_general_building(session, condominio)
             ensure_fire_alarm_schedule_seed(session)
             ensure_default_manager_user(session, condominio)
             logger.info("Initial data already exists, ensured default staff are active")
@@ -147,6 +169,7 @@ def create_initial_data() -> None:
             "Northwood": 12,
             "Oak Lodge": 14,
             "Office": 0,  # Office doesn't have flats
+            "General": 0,
         }
 
         buildings = {}

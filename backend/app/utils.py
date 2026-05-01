@@ -39,6 +39,18 @@ def _truncate_text(value: str, max_length: int = 2000) -> str:
     return compact[: max_length - 3].rstrip() + "..."
 
 
+def _safe_email_error(exc: Exception) -> str:
+    detail = str(exc).strip() or exc.__class__.__name__
+    for secret in (
+        settings.SMTP_PASSWORD,
+        settings.SMTP_USER,
+        str(settings.EMAILS_FROM_EMAIL) if settings.EMAILS_FROM_EMAIL else None,
+    ):
+        if secret:
+            detail = detail.replace(secret, "[redacted]")
+    return _truncate_text(detail, 500)
+
+
 def _build_email_history_message(subject: str, html_content: str) -> str:
     content = _strip_html(html_content)
     if subject.strip() and content:
@@ -176,15 +188,16 @@ def send_email(
         )
     except Exception as exc:
         logger.exception("send email failed")
+        error_detail = _safe_email_error(exc)
         _record_notification_history(
             notification_type="email",
             recipient_to=email_to,
             message=_build_email_history_message(subject, html_content),
             delivery_status="failed",
             success=False,
-            error_message=str(exc),
+            error_message=error_detail,
         )
-        raise RuntimeError("Failed to send email. Check SMTP credentials/settings.") from exc
+        raise RuntimeError(f"Failed to send email: {error_detail}") from exc
 
 
 def send_email_with_attachment(
@@ -247,15 +260,16 @@ def send_email_with_attachment(
         )
     except Exception as exc:
         logger.exception("send email with attachment failed")
+        error_detail = _safe_email_error(exc)
         _record_notification_history(
             notification_type="email",
             recipient_to=email_to,
             message=_build_email_history_message(subject, html_content),
             delivery_status="failed",
             success=False,
-            error_message=str(exc),
+            error_message=error_detail,
         )
-        raise RuntimeError("Failed to send email. Check SMTP credentials/settings.") from exc
+        raise RuntimeError(f"Failed to send email: {error_detail}") from exc
 
 
 def send_email_with_attachments(
@@ -314,15 +328,16 @@ def send_email_with_attachments(
         )
     except Exception as exc:
         logger.exception("send email with attachments failed")
+        error_detail = _safe_email_error(exc)
         _record_notification_history(
             notification_type="email",
             recipient_to=email_to,
             message=_build_email_history_message(subject, html_content),
             delivery_status="failed",
             success=False,
-            error_message=str(exc),
+            error_message=error_detail,
         )
-        raise RuntimeError("Failed to send email. Check SMTP credentials/settings.") from exc
+        raise RuntimeError(f"Failed to send email: {error_detail}") from exc
 
 
 def send_sms_notification(*, phone_to: str, body: str) -> str:

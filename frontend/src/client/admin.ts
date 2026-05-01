@@ -88,7 +88,6 @@ export type CashFlowRecordPublic = {
   record_date: string
   amount: number
   description: string
-  flat: string
   condominio_id: string
   created_by_user_id: string
   created_at: string
@@ -106,7 +105,6 @@ export type CashFlowRecordCreate = {
   record_date: string
   amount: number
   description: string
-  flat: string
 }
 
 export const CondominiosService = {

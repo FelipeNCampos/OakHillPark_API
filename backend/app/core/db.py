@@ -517,7 +517,6 @@ def ensure_cash_flow_record_schema(session: Session) -> None:
                 record_date DATE NOT NULL,
                 amount DOUBLE PRECISION NOT NULL DEFAULT 0,
                 description VARCHAR(500) NOT NULL DEFAULT '',
-                flat VARCHAR(100) NOT NULL DEFAULT '',
                 condominio_id UUID NOT NULL REFERENCES condominio (id) ON DELETE CASCADE,
                 created_by_user_id UUID NOT NULL REFERENCES "user" (id),
                 created_at TIMESTAMPTZ NOT NULL
@@ -541,12 +540,6 @@ def ensure_cash_flow_record_schema(session: Session) -> None:
         text(
             "CREATE INDEX IF NOT EXISTS ix_cash_flow_record_record_date "
             "ON cash_flow_record (record_date)"
-        )
-    )
-    session.execute(
-        text(
-            "CREATE INDEX IF NOT EXISTS ix_cash_flow_record_flat "
-            "ON cash_flow_record (flat)"
         )
     )
     session.commit()

@@ -46,7 +46,6 @@ def test_create_and_read_cash_flow_records(
             "record_date": "2026-03-01",
             "amount": -610,
             "description": "Admin fees",
-            "flat": "Pent",
         },
     )
     response_b = client.post(
@@ -57,13 +56,13 @@ def test_create_and_read_cash_flow_records(
             "record_date": "2026-03-09",
             "amount": 125,
             "description": "Refund",
-            "flat": "Flat 51",
         },
     )
 
     assert response_a.status_code == 201
     assert response_a.json()["payment_number"] == 1
     assert response_a.json()["invoice_media_name"] == "invoice.png"
+    assert "flat" not in response_a.json()
     assert response_b.status_code == 201
     assert response_b.json()["payment_number"] == 2
 
@@ -79,6 +78,100 @@ def test_create_and_read_cash_flow_records(
     assert body["balance"] == -485
     assert body["next_payment_number"] == 3
     assert [record["payment_number"] for record in body["data"]] == [1, 2]
+    assert all("flat" not in record for record in body["data"])
+
+
+def test_cash_flow_payment_numbers_are_chronological_within_month(
+    client: TestClient,
+    db: Session,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    condominio = _create_test_condominio(db)
+    _assign_superuser_to_condominio(db, condominio)
+
+    response_later = client.post(
+        f"{settings.API_V1_STR}/cash-flow/",
+        headers=superuser_token_headers,
+        json={
+            "has_invoice": False,
+            "record_date": "2026-03-20",
+            "amount": -20,
+            "description": "Later payment",
+        },
+    )
+    response_earlier = client.post(
+        f"{settings.API_V1_STR}/cash-flow/",
+        headers=superuser_token_headers,
+        json={
+            "has_invoice": False,
+            "record_date": "2026-03-19",
+            "amount": -19,
+            "description": "Earlier payment",
+        },
+    )
+
+    assert response_later.status_code == 201
+    assert response_later.json()["payment_number"] == 1
+    assert response_earlier.status_code == 201
+    assert response_earlier.json()["payment_number"] == 1
+
+    read_response = client.get(
+        f"{settings.API_V1_STR}/cash-flow/",
+        headers=superuser_token_headers,
+        params={"date_from": "2026-03-01", "date_to": "2026-03-31"},
+    )
+
+    assert read_response.status_code == 200
+    body = read_response.json()
+    assert body["next_payment_number"] == 3
+    assert [
+        (record["record_date"], record["payment_number"], record["description"])
+        for record in body["data"]
+    ] == [
+        ("2026-03-19", 1, "Earlier payment"),
+        ("2026-03-20", 2, "Later payment"),
+    ]
+
+
+def test_cash_flow_payment_numbers_restart_each_month(
+    client: TestClient,
+    db: Session,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    condominio = _create_test_condominio(db)
+    _assign_superuser_to_condominio(db, condominio)
+
+    for record_date in ("2026-03-20", "2026-04-01"):
+        response = client.post(
+            f"{settings.API_V1_STR}/cash-flow/",
+            headers=superuser_token_headers,
+            json={
+                "has_invoice": False,
+                "record_date": record_date,
+                "amount": -10,
+                "description": f"Payment {record_date}",
+            },
+        )
+        assert response.status_code == 201
+        assert response.json()["payment_number"] == 1
+
+    march_response = client.get(
+        f"{settings.API_V1_STR}/cash-flow/",
+        headers=superuser_token_headers,
+        params={"date_from": "2026-03-01", "date_to": "2026-03-31"},
+    )
+    april_response = client.get(
+        f"{settings.API_V1_STR}/cash-flow/",
+        headers=superuser_token_headers,
+        params={"date_from": "2026-04-01", "date_to": "2026-04-30"},
+    )
+
+    assert march_response.status_code == 200
+    assert april_response.status_code == 200
+    assert march_response.json()["data"][0]["payment_number"] == 1
+    assert april_response.json()["data"][0]["payment_number"] == 1
+    assert march_response.json()["next_payment_number"] == 2
+    assert april_response.json()["next_payment_number"] == 2
 
 
 def test_cash_flow_records_are_scoped_to_condominio(
@@ -100,7 +193,6 @@ def test_cash_flow_records_are_scoped_to_condominio(
         record_date=date(2026, 3, 1),
         amount=-10,
         description="Visible",
-        flat="Flat 51",
         condominio_id=condominio_a.id,
         created_by_user_id=db.exec(
             select(User).where(User.email == settings.FIRST_SUPERUSER)
@@ -111,7 +203,6 @@ def test_cash_flow_records_are_scoped_to_condominio(
         record_date=date(2026, 3, 1),
         amount=-99,
         description="Hidden",
-        flat="Pent",
         condominio_id=condominio_b.id,
         created_by_user_id=visible.created_by_user_id,
     )
@@ -148,7 +239,6 @@ def test_delete_cash_flow_record(
             "record_date": "2026-03-15",
             "amount": -42.5,
             "description": "Cleaner",
-            "flat": "Flat 51",
         },
     )
     assert create_response.status_code == 201

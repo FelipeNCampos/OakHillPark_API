@@ -7,6 +7,7 @@ import {
 import { createFileRoute, redirect } from "@tanstack/react-router"
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
+import { CheckIcon } from "lucide-react"
 import QRCode from "qrcode"
 import type { ChangeEvent, KeyboardEvent } from "react"
 import { useDeferredValue, useEffect, useMemo, useState } from "react"
@@ -159,7 +160,6 @@ interface CashFlowRecord {
   record_date: string
   amount: number
   description: string
-  flat: string
   created_at: string
 }
 
@@ -177,7 +177,6 @@ interface CashFlowFormState {
   recordDate: string
   amount: string
   description: string
-  flat: string
 }
 
 interface CaretakerRecordEditState {
@@ -1632,7 +1631,6 @@ const getEmptyCashFlowForm = (): CashFlowFormState => ({
   recordDate: getTodayDateInputValue(),
   amount: "",
   description: "",
-  flat: "",
 })
 
 const CARETAKER_INVOICE_HOURS_STORAGE_KEY = "oakhill-caretaker-invoice-hours"
@@ -2442,6 +2440,7 @@ function CashFlowContent() {
   const [reportMonthTo, setReportMonthTo] = useState(getCurrentMonthInputValue)
   const [reportEmail, setReportEmail] = useState("")
   const [reportPdfDataUrl, setReportPdfDataUrl] = useState("")
+  const [reportPdfPreviewUrl, setReportPdfPreviewUrl] = useState("")
   const [reportFileName, setReportFileName] = useState("")
   const [reportInvoiceCount, setReportInvoiceCount] = useState(0)
   const [includeInvoiceReportTable, setIncludeInvoiceReportTable] =
@@ -2454,6 +2453,11 @@ function CashFlowContent() {
     [selectedMonth],
   )
   const deferredSearch = useDeferredValue(search.trim())
+
+  useEffect(() => {
+    if (!reportPdfPreviewUrl) return undefined
+    return () => URL.revokeObjectURL(reportPdfPreviewUrl)
+  }, [reportPdfPreviewUrl])
 
   const recordsQuery = useQuery<CashFlowRecordsResponse>({
     queryKey: ["cash-flow", selectedMonth, deferredSearch],
@@ -2482,7 +2486,6 @@ function CashFlowContent() {
 
   const records = recordsQuery.data?.data || []
   const monthBalance = monthSummaryQuery.data?.balance || 0
-  const nextPaymentNumber = monthSummaryQuery.data?.next_payment_number || 1
 
   const recordsWithBalance = useMemo(() => {
     let runningBalance = 0
@@ -2500,7 +2503,6 @@ function CashFlowContent() {
       record_date: string
       amount: number
       description: string
-      flat: string
     }) =>
       apiCall("/api/v1/cash-flow/", {
         method: "POST",
@@ -2571,12 +2573,17 @@ function CashFlowContent() {
     }
   }
 
+  const resetInvoiceReportPreview = () => {
+    setReportPdfDataUrl("")
+    setReportPdfPreviewUrl("")
+    setReportFileName("")
+    setReportInvoiceCount(0)
+  }
+
   const handleReportDialogChange = (open: boolean) => {
     setIsReportDialogOpen(open)
     if (!open) {
-      setReportPdfDataUrl("")
-      setReportFileName("")
-      setReportInvoiceCount(0)
+      resetInvoiceReportPreview()
     }
   }
 
@@ -2699,7 +2706,6 @@ function CashFlowContent() {
       record_date: form.recordDate,
       amount: rawAmount,
       description: form.description.trim(),
-      flat: form.flat.trim(),
     })
   }
 
@@ -2756,9 +2762,7 @@ function CashFlowContent() {
 
       if (invoiceRecords.length === 0) {
         showErrorToast("No invoices found in the selected range")
-        setReportPdfDataUrl("")
-        setReportFileName("")
-        setReportInvoiceCount(0)
+        resetInvoiceReportPreview()
         return null
       }
 
@@ -2767,22 +2771,24 @@ function CashFlowContent() {
       const pageHeight = doc.internal.pageSize.getHeight()
       const margin = 40
 
-      if (includeInvoiceReportTable) {
+      const renderInvoiceTable = (
+        records: CashFlowRecord[],
+        tablePeriodLabel: string,
+      ) => {
         doc.setFontSize(16)
         doc.text("Cash Flow Invoice Report", margin, 42)
         doc.setFontSize(10)
-        doc.text(`Period: ${periodLabel}`, margin, 62)
+        doc.text(`Period: ${tablePeriodLabel}`, margin, 62)
         doc.text(`Generated: ${new Date().toLocaleString("en-GB")}`, margin, 78)
 
         autoTable(doc, {
           startY: 98,
-          head: [["Payment #", "Date", "Amount", "Description", "Flat", "Invoice"]],
-          body: invoiceRecords.map((record) => [
+          head: [["Payment #", "Date", "Amount", "Description", "Invoice"]],
+          body: records.map((record) => [
             record.payment_number,
             formatDateToGb(record.record_date),
             formatCurrencyGbp(record.amount),
             record.description || "-",
-            record.flat || "-",
             record.invoice_media_name || "Invoice",
           ]),
           theme: "grid",
@@ -2800,10 +2806,10 @@ function CashFlowContent() {
         })
       }
 
-      for (const [index, record] of invoiceRecords.entries()) {
-        if (includeInvoiceReportTable || index > 0) {
-          doc.addPage()
-        }
+      const renderInvoiceMediaPage = async (
+        record: CashFlowRecord,
+        monthLabel?: string,
+      ) => {
         doc.setFontSize(13)
         doc.text(`Invoice #${record.payment_number}`, margin, 38)
         doc.setFontSize(9)
@@ -2812,6 +2818,9 @@ function CashFlowContent() {
         doc.text(`Description: ${record.description || "-"}`, margin, 88, {
           maxWidth: pageWidth - margin * 2,
         })
+        if (monthLabel) {
+          doc.text(`Month: ${monthLabel}`, margin, 108)
+        }
         const mediaData = record.invoice_media_data || ""
         if (isImageDataUrl(mediaData)) {
           try {
@@ -2831,10 +2840,21 @@ function CashFlowContent() {
             const height = image.naturalHeight * ratio
             const x = margin + (maxWidth - width) / 2
             const y = 130 + (maxHeight - height) / 2
-            const imageFormat = mediaData.startsWith("data:image/png")
-              ? "PNG"
-              : "JPEG"
-            doc.addImage(mediaData, imageFormat, x, y, width, height)
+            const canvasRatio = Math.min(
+              1,
+              1400 / Math.max(image.naturalWidth, 1),
+              1800 / Math.max(image.naturalHeight, 1),
+            )
+            const canvas = document.createElement("canvas")
+            canvas.width = Math.max(1, Math.round(image.naturalWidth * canvasRatio))
+            canvas.height = Math.max(1, Math.round(image.naturalHeight * canvasRatio))
+            const context = canvas.getContext("2d")
+            if (!context) throw new Error("Could not prepare invoice image")
+            context.fillStyle = "#ffffff"
+            context.fillRect(0, 0, canvas.width, canvas.height)
+            context.drawImage(image, 0, 0, canvas.width, canvas.height)
+            const compressedImage = canvas.toDataURL("image/jpeg", 0.78)
+            doc.addImage(compressedImage, "JPEG", x, y, width, height)
           } catch {
             doc.setFontSize(11)
             doc.text("Invoice image could not be added to the PDF.", margin, 150)
@@ -2853,9 +2873,46 @@ function CashFlowContent() {
         }
       }
 
+      if (includeInvoiceReportTable) {
+        const recordsByMonth = new Map<string, CashFlowRecord[]>()
+        for (const record of invoiceRecords) {
+          const monthKey = record.record_date.slice(0, 7)
+          recordsByMonth.set(monthKey, [
+            ...(recordsByMonth.get(monthKey) || []),
+            record,
+          ])
+        }
+
+        for (const [groupIndex, [monthKey, records]] of Array.from(
+          recordsByMonth.entries(),
+        ).entries()) {
+          const monthLabel =
+            reportMonthFrom === reportMonthTo
+              ? periodLabel
+              : buildMonthRangeLabel(monthKey, monthKey)
+          if (groupIndex > 0) {
+            doc.addPage()
+          }
+          renderInvoiceTable(records, monthLabel)
+          for (const record of records) {
+            doc.addPage()
+            await renderInvoiceMediaPage(record, monthLabel)
+          }
+        }
+      } else {
+        for (const [index, record] of invoiceRecords.entries()) {
+          if (index > 0) {
+            doc.addPage()
+          }
+          await renderInvoiceMediaPage(record)
+        }
+      }
+
+      const pdfBlob = doc.output("blob")
       const dataUrl = doc.output("datauristring")
       const fileName = `cash-flow-invoices-${reportMonthFrom}-to-${reportMonthTo}.pdf`
       setReportPdfDataUrl(dataUrl)
+      setReportPdfPreviewUrl(URL.createObjectURL(pdfBlob))
       setReportFileName(fileName)
       setReportInvoiceCount(invoiceRecords.length)
       return { dataUrl, fileName, invoiceCount: invoiceRecords.length, periodLabel }
@@ -2936,7 +2993,7 @@ function CashFlowContent() {
               Cash Flow Control
             </h2>
             <p className="mt-1 text-[rgba(0,0,0,0.7)]">
-              Monthly register for payments, invoices and flat allocation.
+              Monthly register for payments, invoices and descriptions.
             </p>
           </div>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
@@ -2992,7 +3049,7 @@ function CashFlowContent() {
               type="text"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Description or flat"
+              placeholder="Description"
               className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
             />
           </div>
@@ -3026,9 +3083,6 @@ function CashFlowContent() {
                 <th className="border border-[#7e6a5f] px-3 py-2 text-center text-sm font-bold text-[#333]">
                   Description
                 </th>
-                <th className="border border-[#7e6a5f] px-3 py-2 text-center text-sm font-bold text-[#333]">
-                  Flat
-                </th>
                 <th className="border border-[#7e6a5f] px-3 py-2 text-right text-sm font-bold text-[#333]">
                   Balance
                 </th>
@@ -3041,7 +3095,7 @@ function CashFlowContent() {
               {recordsQuery.isLoading && (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={7}
                     className="border border-[#e5e0dc] px-3 py-4 text-center text-sm text-[rgba(0,0,0,0.7)]"
                   >
                     Loading cash flow records...
@@ -3051,7 +3105,7 @@ function CashFlowContent() {
               {!recordsQuery.isLoading && records.length === 0 && (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={7}
                     className="border border-[#e5e0dc] px-3 py-4 text-center text-sm text-[rgba(0,0,0,0.7)]"
                   >
                     No cash flow records found for this month.
@@ -3070,12 +3124,18 @@ function CashFlowContent() {
                           <button
                             type="button"
                             onClick={() => setInvoicePreview(record)}
-                            className="font-semibold text-[#8c7569] underline"
+                            aria-label="Open invoice preview"
+                            className="inline-flex items-center justify-center rounded border border-black bg-white p-1 text-black transition-all duration-200 hover:bg-[#f0f0f0] focus:outline-none focus:ring-2 focus:ring-black"
                           >
-                            Yes
+                            <CheckIcon className="h-4 w-4" strokeWidth={2.5} />
                           </button>
                         ) : (
-                          "Yes"
+                          <span
+                            aria-label="Invoice attached"
+                            className="inline-flex items-center justify-center rounded border border-black bg-white p-1 text-black"
+                          >
+                            <CheckIcon className="h-4 w-4" strokeWidth={2.5} />
+                          </span>
                         )
                       ) : (
                         <button
@@ -3110,9 +3170,6 @@ function CashFlowContent() {
                         {record.description || "-"}
                       </button>
                     </td>
-                    <td className="border border-[#e5e0dc] px-3 py-2 text-center text-sm text-[#55311c]">
-                      {record.flat || "-"}
-                    </td>
                     <td className="border border-[#e5e0dc] px-3 py-2 text-right font-mono text-sm font-bold text-[#55311c]">
                       {formatCurrencyGbp(record.balance)}
                     </td>
@@ -3133,7 +3190,7 @@ function CashFlowContent() {
               <tfoot>
                 <tr>
                   <td
-                    colSpan={6}
+                    colSpan={5}
                     className="border border-[#7e6a5f] bg-[#bdb7b2] px-3 py-3 text-right text-sm font-bold text-[#333]"
                   >
                     Month total
@@ -3156,8 +3213,8 @@ function CashFlowContent() {
               New cash flow record
             </DialogTitle>
             <DialogDescription className="text-[rgba(0,0,0,0.7)]">
-              Payment number will be assigned automatically as #
-              {nextPaymentNumber}.
+              Payment number will be assigned automatically based on the record
+              date.
             </DialogDescription>
           </DialogHeader>
 
@@ -3215,22 +3272,6 @@ function CashFlowContent() {
                 }
                 rows={3}
                 placeholder="Council tax control"
-                className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
-              />
-            </div>
-            <div>
-              <label
-                htmlFor="cash-flow-form-flat"
-                className="mb-1 block text-sm font-semibold text-[#55311c]"
-              >
-                Flat
-              </label>
-              <input
-                id="cash-flow-form-flat"
-                type="text"
-                value={form.flat}
-                onChange={(event) => updateForm("flat", event.target.value)}
-                placeholder="Flat 51"
                 className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
               />
             </div>
@@ -3433,9 +3474,7 @@ function CashFlowContent() {
                     value={reportMonthFrom}
                     onChange={(event) => {
                       setReportMonthFrom(event.target.value)
-                      setReportPdfDataUrl("")
-                      setReportFileName("")
-                      setReportInvoiceCount(0)
+                      resetInvoiceReportPreview()
                     }}
                     className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
                   />
@@ -3453,9 +3492,7 @@ function CashFlowContent() {
                     value={reportMonthTo}
                     onChange={(event) => {
                       setReportMonthTo(event.target.value)
-                      setReportPdfDataUrl("")
-                      setReportFileName("")
-                      setReportInvoiceCount(0)
+                      resetInvoiceReportPreview()
                     }}
                     className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
                   />
@@ -3485,9 +3522,7 @@ function CashFlowContent() {
                   checked={includeInvoiceReportTable}
                   onChange={(event) => {
                     setIncludeInvoiceReportTable(event.target.checked)
-                    setReportPdfDataUrl("")
-                    setReportFileName("")
-                    setReportInvoiceCount(0)
+                    resetInvoiceReportPreview()
                   }}
                   className="h-4 w-4 accent-[#8c7569]"
                 />
@@ -3510,10 +3545,10 @@ function CashFlowContent() {
             </div>
 
             <div className="min-h-[520px] rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-3">
-              {reportPdfDataUrl ? (
+              {reportPdfPreviewUrl ? (
                 <iframe
                   title="Cash flow invoice report preview"
-                  src={reportPdfDataUrl}
+                  src={reportPdfPreviewUrl}
                   className="h-[520px] w-full rounded border border-[#d9d0ca] bg-white"
                 />
               ) : (
@@ -9248,7 +9283,6 @@ function HoursInvoiceLauncherDialog({
           record_date: getTodayDateInputValue(),
           amount,
           description: `${descriptionSubject} ${hoursLabel} hours payment`,
-          flat: "",
         },
       })
 
@@ -15573,7 +15607,6 @@ function CaretakerSummary({
           record_date: getTodayDateInputValue(),
           amount,
           description: `Caretaker ${hoursLabel} hours payment`,
-          flat: "",
         },
       })
 

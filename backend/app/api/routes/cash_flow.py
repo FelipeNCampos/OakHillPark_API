@@ -84,13 +84,60 @@ def _validate_amount(amount: float) -> float:
     return round(amount, 2)
 
 
-def _next_payment_number(session: SessionDep, condominio_id: uuid.UUID) -> int:
-    last_number = session.exec(
-        select(func.max(CashFlowRecord.payment_number)).where(
-            CashFlowRecord.condominio_id == condominio_id
+def _month_bounds(value: date) -> tuple[date, date]:
+    start = value.replace(day=1)
+    if start.month == 12:
+        return start, start.replace(year=start.year + 1, month=1)
+    return start, start.replace(month=start.month + 1)
+
+
+def _cash_flow_month_filters(
+    *, condominio_id: uuid.UUID, month_date: date
+) -> list[Any]:
+    month_start, next_month_start = _month_bounds(month_date)
+    return [
+        CashFlowRecord.condominio_id == condominio_id,
+        CashFlowRecord.record_date >= month_start,
+        CashFlowRecord.record_date < next_month_start,
+    ]
+
+
+def _renumber_cash_flow_month(
+    session: SessionDep, *, condominio_id: uuid.UUID, month_date: date
+) -> None:
+    records = session.exec(
+        select(CashFlowRecord)
+        .where(
+            *_cash_flow_month_filters(
+                condominio_id=condominio_id, month_date=month_date
+            )
+        )
+        .order_by(
+            CashFlowRecord.record_date.asc(),
+            CashFlowRecord.created_at.asc(),
+            CashFlowRecord.id.asc(),
+        )
+    ).all()
+
+    for index, record in enumerate(records, start=1):
+        if record.payment_number != index:
+            record.payment_number = index
+            session.add(record)
+
+
+def _next_payment_number(
+    session: SessionDep, *, condominio_id: uuid.UUID, month_date: date
+) -> int:
+    record_count = session.exec(
+        select(func.count())
+        .select_from(CashFlowRecord)
+        .where(
+            *_cash_flow_month_filters(
+                condominio_id=condominio_id, month_date=month_date
+            )
         )
     ).one()
-    return int(last_number or 0) + 1
+    return int(record_count or 0) + 1
 
 
 def _require_record_for_condominio(
@@ -115,7 +162,6 @@ def _to_public(record: CashFlowRecord) -> CashFlowRecordPublic:
         record_date=record.record_date,
         amount=record.amount,
         description=record.description,
-        flat=record.flat,
         condominio_id=record.condominio_id,
         created_by_user_id=record.created_by_user_id,
         created_at=record.created_at,
@@ -146,9 +192,7 @@ def read_cash_flow_records(
         filters.append(CashFlowRecord.record_date <= date_to)
     if search and search.strip():
         query = f"%{search.strip()}%"
-        filters.append(
-            CashFlowRecord.description.ilike(query) | CashFlowRecord.flat.ilike(query)
-        )
+        filters.append(CashFlowRecord.description.ilike(query))
 
     count_statement = select(func.count()).select_from(CashFlowRecord).where(*filters)
     balance_statement = select(func.coalesce(func.sum(CashFlowRecord.amount), 0)).where(
@@ -170,7 +214,11 @@ def read_cash_flow_records(
         data=[_to_public(record) for record in records],
         count=count,
         balance=round(float(balance or 0), 2),
-        next_payment_number=_next_payment_number(session, condominio_id),
+        next_payment_number=_next_payment_number(
+            session,
+            condominio_id=condominio_id,
+            month_date=date_from or date.today(),
+        ),
     )
 
 
@@ -195,7 +243,7 @@ def create_cash_flow_record(
     )
 
     record = CashFlowRecord(
-        payment_number=_next_payment_number(session, condominio_id),
+        payment_number=0,
         has_invoice=payload.has_invoice,
         invoice_media_name=_normalise_media_name(payload.invoice_media_name)
         if invoice_media_data
@@ -204,11 +252,14 @@ def create_cash_flow_record(
         record_date=payload.record_date,
         amount=_validate_amount(payload.amount),
         description=_normalise_text(payload.description),
-        flat=_normalise_text(payload.flat),
         condominio_id=condominio_id,
         created_by_user_id=current_user.id,
     )
     session.add(record)
+    session.flush()
+    _renumber_cash_flow_month(
+        session, condominio_id=condominio_id, month_date=record.record_date
+    )
     session.commit()
     session.refresh(record)
     return _to_public(record)
@@ -235,13 +286,12 @@ def update_cash_flow_record(
         record_id=record_id,
     )
 
+    original_record_date = record.record_date
     update = payload.model_dump(exclude_unset=True)
     if "amount" in update and update["amount"] is not None:
         update["amount"] = _validate_amount(float(update["amount"]))
     if "description" in update and update["description"] is not None:
         update["description"] = _normalise_text(update["description"])
-    if "flat" in update and update["flat"] is not None:
-        update["flat"] = _normalise_text(update["flat"])
 
     has_invoice = bool(update.get("has_invoice", record.has_invoice))
     if "invoice_media_data" in update or "has_invoice" in update:
@@ -261,6 +311,14 @@ def update_cash_flow_record(
 
     record.sqlmodel_update(update)
     session.add(record)
+    session.flush()
+    _renumber_cash_flow_month(
+        session, condominio_id=condominio_id, month_date=original_record_date
+    )
+    if _month_bounds(original_record_date) != _month_bounds(record.record_date):
+        _renumber_cash_flow_month(
+            session, condominio_id=condominio_id, month_date=record.record_date
+        )
     session.commit()
     session.refresh(record)
     return _to_public(record)
@@ -285,6 +343,11 @@ def delete_cash_flow_record(
         condominio_id=condominio_id,
         record_id=record_id,
     )
+    record_date = record.record_date
     session.delete(record)
+    session.flush()
+    _renumber_cash_flow_month(
+        session, condominio_id=condominio_id, month_date=record_date
+    )
     session.commit()
     return Message(message="Cash flow record deleted successfully")

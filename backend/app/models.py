@@ -99,6 +99,12 @@ class Condominio(SQLModel, table=True):
     cash_flow_records: list["CashFlowRecord"] = Relationship(
         back_populates="condominio", cascade_delete=True
     )
+    cleaner_invoices: list["CleanerInvoice"] = Relationship(
+        back_populates="condominio", cascade_delete=True
+    )
+    caretaker_invoices: list["CaretakerInvoice"] = Relationship(
+        back_populates="condominio", cascade_delete=True
+    )
 
 
 class Building(SQLModel, table=True):
@@ -514,6 +520,42 @@ class CashFlowRecord(SQLModel, table=True):
         sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
     )
     condominio: Condominio | None = Relationship(back_populates="cash_flow_records")
+
+
+class CleanerInvoice(SQLModel, table=True):
+    __tablename__ = "cleaner_invoice"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    invoice_date: date = Field(index=True)
+    media_name: str | None = Field(default=None, max_length=255)
+    media_data: str = Field()
+    condominio_id: uuid.UUID = Field(
+        foreign_key="condominio.id", nullable=False, ondelete="CASCADE", index=True
+    )
+    created_by_user_id: uuid.UUID = Field(foreign_key="user.id", nullable=False)
+    created_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    condominio: Condominio | None = Relationship(back_populates="cleaner_invoices")
+
+
+class CaretakerInvoice(SQLModel, table=True):
+    __tablename__ = "caretaker_invoice"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    invoice_date: date = Field(index=True)
+    media_name: str | None = Field(default=None, max_length=255)
+    media_data: str = Field()
+    condominio_id: uuid.UUID = Field(
+        foreign_key="condominio.id", nullable=False, ondelete="CASCADE", index=True
+    )
+    created_by_user_id: uuid.UUID = Field(foreign_key="user.id", nullable=False)
+    created_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    condominio: Condominio | None = Relationship(back_populates="caretaker_invoices")
 
 
 class Readings(SQLModel, table=True):
@@ -1220,6 +1262,48 @@ class CashFlowRecordsPublic(SQLModel):
     count: int
     balance: float
     next_payment_number: int
+
+
+class CleanerInvoiceCreate(SQLModel):
+    invoice_date: date
+    media_name: str | None = Field(default=None, max_length=255)
+    media_data: str
+
+
+class CleanerInvoicePublic(SQLModel):
+    id: uuid.UUID
+    invoice_date: date
+    media_name: str | None
+    media_data: str
+    condominio_id: uuid.UUID
+    created_by_user_id: uuid.UUID
+    created_at: datetime
+
+
+class CleanerInvoicesPublic(SQLModel):
+    data: list[CleanerInvoicePublic]
+    count: int
+
+
+class CaretakerInvoiceCreate(SQLModel):
+    invoice_date: date
+    media_name: str | None = Field(default=None, max_length=255)
+    media_data: str
+
+
+class CaretakerInvoicePublic(SQLModel):
+    id: uuid.UUID
+    invoice_date: date
+    media_name: str | None
+    media_data: str
+    condominio_id: uuid.UUID
+    created_by_user_id: uuid.UUID
+    created_at: datetime
+
+
+class CaretakerInvoicesPublic(SQLModel):
+    data: list[CaretakerInvoicePublic]
+    count: int
 
 
 class CaretakerPublic(SQLModel):

@@ -14,6 +14,12 @@ const searchSchema = z.object({
   buildingName: z.string().optional().catch(""),
 })
 
+const IN_OUT_BUILDING_NAME = "general"
+const IN_OUT_LABEL = "In/Out"
+
+const formatBuildingLabel = (label: string) =>
+  label.trim().toLowerCase() === IN_OUT_BUILDING_NAME ? IN_OUT_LABEL : label
+
 const publicApiCall = async (
   endpoint: string,
   params?: Record<string, any> | { method?: string; body?: any },
@@ -93,7 +99,9 @@ function CleanerAccess() {
         ? "Exit"
         : ""
 
-  const buildingLabel = building || buildingName || buildingId || ""
+  const buildingLabel = formatBuildingLabel(
+    building || buildingName || buildingId || "",
+  )
 
   const hasActiveSessionInBuilding =
     hasOpenSession &&

@@ -15,6 +15,13 @@ const searchSchema = z.object({
   buildingName: z.string().optional().catch(""),
 })
 
+const IN_OUT_BUILDING_NAME = "general"
+const IN_OUT_LABEL = "In/Out"
+const WORK_TIME_LABEL = "Work Time"
+
+const formatBuildingLabel = (label: string) =>
+  label.trim().toLowerCase() === IN_OUT_BUILDING_NAME ? IN_OUT_LABEL : label
+
 type QueryParams = Record<string, string | number | boolean | null | undefined>
 type RequestOptions = { method?: string; body?: unknown }
 type ApiParams = QueryParams | RequestOptions
@@ -101,7 +108,9 @@ function CaretakerAccess() {
         ? "Exit"
         : ""
 
-  const buildingLabel = building || buildingName || buildingId || ""
+  const buildingLabel = formatBuildingLabel(
+    building || buildingName || buildingId || "",
+  )
 
   const hasActiveSessionInBuilding =
     hasOpenSession &&
@@ -240,7 +249,7 @@ function CaretakerAccess() {
       <div className="mx-auto w-full max-w-xl">
         <div className="mobile-page-panel rounded-2xl bg-white p-5 shadow-lg sm:p-8">
           <h1 className="mb-2 text-center text-2xl font-bold text-[#55311c]">
-            {isWorkTimeMode ? "WORK TIME" : "Caretaker Access"}
+            {isWorkTimeMode ? WORK_TIME_LABEL : "Caretaker Access"}
           </h1>
           <p className="mb-6 text-center text-[rgba(0,0,0,0.7)]">
             {isWorkTimeMode

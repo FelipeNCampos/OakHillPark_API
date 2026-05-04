@@ -63,6 +63,16 @@ interface Building {
   flats?: Flat[]
 }
 
+const QR_IN_OUT_BUILDING_NAME = "general"
+const QR_IN_OUT_LABEL = "In/Out"
+const QR_WORK_TIME_LABEL = "Work Time"
+
+const isInOutQrBuilding = (building: Building) =>
+  building.nome.trim().toLowerCase() === QR_IN_OUT_BUILDING_NAME
+
+const getQrBuildingLabel = (building: Building) =>
+  isInOutQrBuilding(building) ? QR_IN_OUT_LABEL : building.nome || "Building"
+
 interface Flat {
   id: EntityId
   numero: number
@@ -122,6 +132,14 @@ interface WorkTimeSessionRecord {
   data: string
   operacao: number
   funcionario_id: EntityId
+}
+
+interface WorkerSimpleInvoiceRecord {
+  id: EntityId
+  invoice_date: string
+  media_name?: string | null
+  media_data: string
+  created_at: string
 }
 
 interface CaretakerMonthlyGoalRecord {
@@ -1634,7 +1652,6 @@ const getEmptyCashFlowForm = (): CashFlowFormState => ({
 })
 
 const CARETAKER_INVOICE_HOURS_STORAGE_KEY = "oakhill-caretaker-invoice-hours"
-const CLEANER_INVOICE_HOURS_STORAGE_KEY = "oakhill-cleaner-invoice-hours"
 const CONTRACTOR_INVOICE_HOURS_STORAGE_KEY = "oakhill-contractor-invoice-hours"
 
 const readInvoiceHoursFromStorage = (
@@ -2037,7 +2054,7 @@ function ClientDashboard() {
         { label: "Cleaner", id: "qr-cleaner" },
         { label: "Contractor", id: "qr-contractor" },
         { label: "Caretaker", id: "qr-caretaker" },
-        { label: "Bin Report", id: "qr-bins" },
+        { label: QR_IN_OUT_LABEL, id: "qr-bins" },
       ],
     },
     {
@@ -2322,7 +2339,7 @@ function OverviewContent({
         { label: "Cleaner", tabId: "qr-cleaner" },
         { label: "Contractor", tabId: "qr-contractor" },
         { label: "Caretaker", tabId: "qr-caretaker" },
-        { label: "Bin Report", tabId: "qr-bins" },
+        { label: QR_IN_OUT_LABEL, tabId: "qr-bins" },
       ],
     },
     {
@@ -8133,11 +8150,8 @@ function BinsQrCodesContent() {
 
   const buildings = (buildingsData?.data || []) as Building[]
   const defaultBuilding = useMemo(
-    () =>
-      [...buildings].find(
-        (building) => !building.nome.toLowerCase().includes("office"),
-      ) || null,
-    [buildings],
+    () => buildings.find(isInOutQrBuilding) || null,
+    [buildingsData?.data],
   )
 
   const baseUrl = useMemo(() => {
@@ -8187,10 +8201,10 @@ function BinsQrCodesContent() {
     <div className="mx-auto max-w-7xl">
       <div className="mb-6 rounded-lg bg-white p-6 shadow-md">
         <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
-          Bin Report
+          {QR_IN_OUT_LABEL}
         </h2>
         <p className="mt-2 text-[rgba(0,0,0,0.7)]">
-          Single QR Code for miss collection reporting.
+          Single QR Code for In/Out reporting.
         </p>
       </div>
 
@@ -8202,7 +8216,7 @@ function BinsQrCodesContent() {
 
       {!isLoading && !defaultBuilding && (
         <div className="rounded-lg bg-white p-6 text-center text-sm text-[#55311c] shadow-md">
-          No building found.
+          No In/Out QR code found.
         </div>
       )}
 
@@ -8210,10 +8224,10 @@ function BinsQrCodesContent() {
         <div className="rounded-lg bg-white p-6 shadow-md">
           <div className="mb-4">
             <h3 className="font-['Nunito',sans-serif] text-xl font-bold text-[#55311c]">
-              MISS COLLECTION
+              {QR_IN_OUT_LABEL}
             </h3>
             <p className="text-sm text-[rgba(0,0,0,0.65)]">
-              Use this QR code to report missed bin collections.
+              Use this QR code to register In/Out.
             </p>
           </div>
 
@@ -8221,7 +8235,7 @@ function BinsQrCodesContent() {
             {qrData ? (
               <img
                 src={qrData.dataUrl}
-                alt="QR Code - Miss Collection"
+                alt="QR Code - In/Out"
                 className="h-64 w-64"
               />
             ) : (
@@ -8233,7 +8247,7 @@ function BinsQrCodesContent() {
             <div className="mt-4 grid gap-2 md:grid-cols-2">
               <a
                 href={qrData.dataUrl}
-                download="qr-miss-collection.png"
+                download="qr-in-out.png"
                 className="block rounded-lg bg-[#8c7569] px-4 py-2 text-center text-sm font-semibold text-white transition-all duration-300 hover:bg-[#55311c]"
               >
                 Download PNG
@@ -8925,12 +8939,16 @@ function CleanerQrCodesContent() {
     Record<string, { dataUrl: string; link: string }>
   >({})
   const [isGenerating, setIsGenerating] = useState(false)
+  const visibleBuildings = useMemo(
+    () => buildings.filter(isInOutQrBuilding),
+    [buildingsData?.data],
+  )
 
   useEffect(() => {
     let isActive = true
 
     const generateQRCodes = async () => {
-      if (!baseUrl || buildings.length === 0) {
+      if (!baseUrl || visibleBuildings.length === 0) {
         setQrMap({})
         return
       }
@@ -8938,7 +8956,7 @@ function CleanerQrCodesContent() {
       setIsGenerating(true)
 
       const entries = await Promise.all(
-        buildings.map(async (building) => {
+        visibleBuildings.map(async (building) => {
           const params = new URLSearchParams()
           params.set("buildingId", String(building.id))
           if (building.nome) {
@@ -8968,7 +8986,7 @@ function CleanerQrCodesContent() {
     return () => {
       isActive = false
     }
-  }, [baseUrl, buildings])
+  }, [baseUrl, visibleBuildings])
 
   return (
     <div className="mx-auto max-w-7xl">
@@ -8977,8 +8995,7 @@ function CleanerQrCodesContent() {
           QR Code - Cleaner
         </h2>
         <p className="mt-2 text-[rgba(0,0,0,0.7)]">
-          Download one QR code per building to register access in the Cleaner
-          panel.
+          Download the In/Out QR code to register access in the Cleaner panel.
         </p>
       </div>
 
@@ -8988,16 +9005,14 @@ function CleanerQrCodesContent() {
         </div>
       )}
 
-      {!isLoading && buildings.length === 0 && (
+      {!isLoading && visibleBuildings.length === 0 && (
         <div className="rounded-lg bg-white p-6 text-center text-sm text-[#55311c] shadow-md">
-          No building found.
+          No In/Out QR code found.
         </div>
       )}
 
       <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-        {[...buildings]
-          .filter((building) => !building.nome.toLowerCase().includes("office"))
-          .map((building) => {
+        {visibleBuildings.map((building) => {
             const qrItem = qrMap[String(building.id)]
             return (
               <div
@@ -9006,7 +9021,7 @@ function CleanerQrCodesContent() {
               >
                 <div>
                   <h3 className="text-lg font-semibold text-[#55311c]">
-                    {building.nome || "Building"}
+                    {getQrBuildingLabel(building)}
                   </h3>
                 </div>
 
@@ -9014,7 +9029,7 @@ function CleanerQrCodesContent() {
                   {qrItem?.dataUrl ? (
                     <img
                       src={qrItem.dataUrl}
-                      alt={`QR Code ${building.nome || building.id}`}
+                      alt={`QR Code ${getQrBuildingLabel(building)}`}
                       className="h-48 w-48 rounded-lg border border-[#e5e0dc] bg-white p-2"
                     />
                   ) : (
@@ -9026,7 +9041,7 @@ function CleanerQrCodesContent() {
                   <div className="flex w-full flex-col gap-2">
                     <a
                       href={qrItem?.dataUrl || "#"}
-                      download={`qr-cleaner-${building.nome || building.id}.png`}
+                      download="qr-cleaner-in-out.png"
                       className={`w-full rounded-lg px-4 py-2 text-center text-sm font-semibold transition-all duration-200 ${
                         qrItem?.dataUrl
                           ? "bg-[#8c7569] text-white hover:bg-[#55311c]"
@@ -10175,19 +10190,16 @@ function CaretakerQrCodesContent() {
     Record<string, { dataUrl: string; link: string }>
   >({})
   const [isGenerating, setIsGenerating] = useState(false)
-  const binsBuildings = useMemo(
-    () =>
-      [...buildings].filter(
-        (building) => !building.nome.toLowerCase().includes("office"),
-      ),
-    [buildings],
+  const inOutBuildings = useMemo(
+    () => buildings.filter(isInOutQrBuilding),
+    [buildingsData?.data],
   )
 
   useEffect(() => {
     let isActive = true
 
     const generateQRCodes = async () => {
-      if (!baseUrl || buildings.length === 0) {
+      if (!baseUrl) {
         setQrMap({})
         return
       }
@@ -10200,7 +10212,7 @@ function CaretakerQrCodesContent() {
             key: "work-time",
             link: `${baseUrl}/caretaker-access?mode=work-time`,
           },
-          ...binsBuildings.map((building) => {
+          ...inOutBuildings.map((building) => {
             const params = new URLSearchParams()
             params.set("buildingId", String(building.id))
             if (building.nome) params.set("buildingName", String(building.nome))
@@ -10233,7 +10245,7 @@ function CaretakerQrCodesContent() {
     return () => {
       isActive = false
     }
-  }, [baseUrl, buildings, binsBuildings])
+  }, [baseUrl, inOutBuildings])
 
   return (
     <div className="mx-auto max-w-7xl">
@@ -10242,7 +10254,7 @@ function CaretakerQrCodesContent() {
           QR Code - Caretaker
         </h2>
         <p className="mt-2 text-[rgba(0,0,0,0.7)]">
-          QR codes for WORK TIME and building sessions.
+          QR codes for In/Out and Work Time.
         </p>
       </div>
 
@@ -10252,9 +10264,9 @@ function CaretakerQrCodesContent() {
         </div>
       )}
 
-      {!isLoading && binsBuildings.length === 0 && (
+      {!isLoading && inOutBuildings.length === 0 && (
         <div className="rounded-lg bg-white p-6 text-center text-sm text-[#55311c] shadow-md">
-          No building found.
+          No In/Out QR code found.
         </div>
       )}
 
@@ -10264,7 +10276,9 @@ function CaretakerQrCodesContent() {
           className="flex h-full flex-col justify-between rounded-lg bg-white p-6 shadow-md"
         >
           <div>
-            <h3 className="text-lg font-semibold text-[#55311c]">WORK TIME</h3>
+            <h3 className="text-lg font-semibold text-[#55311c]">
+              {QR_WORK_TIME_LABEL}
+            </h3>
             <p className="text-sm text-[rgba(0,0,0,0.6)]">Caretaker IN/OUT</p>
           </div>
 
@@ -10272,7 +10286,7 @@ function CaretakerQrCodesContent() {
             {qrMap["work-time"]?.dataUrl ? (
               <img
                 src={qrMap["work-time"].dataUrl}
-                alt="QR Code WORK TIME"
+                alt={`QR Code ${QR_WORK_TIME_LABEL}`}
                 className="h-48 w-48 rounded-lg border border-[#e5e0dc] bg-white p-2"
               />
             ) : (
@@ -10284,7 +10298,7 @@ function CaretakerQrCodesContent() {
             <div className="flex w-full flex-col gap-2">
               <a
                 href={qrMap["work-time"]?.dataUrl || "#"}
-                download="qr-work-time.png"
+                download="qr-caretaker-work-time.png"
                 className={`w-full rounded-lg px-4 py-2 text-center text-sm font-semibold transition-all duration-200 ${
                   qrMap["work-time"]?.dataUrl
                     ? "bg-[#8c7569] text-white hover:bg-[#55311c]"
@@ -10310,7 +10324,7 @@ function CaretakerQrCodesContent() {
           </div>
         </div>
 
-        {binsBuildings.map((building) => {
+        {inOutBuildings.map((building) => {
           const qrItem = qrMap[String(building.id)]
           return (
             <div
@@ -10319,10 +10333,10 @@ function CaretakerQrCodesContent() {
             >
               <div>
                 <h3 className="text-lg font-semibold text-[#55311c]">
-                  {building.nome || "Building"}
+                  {getQrBuildingLabel(building)}
                 </h3>
                 <p className="text-sm text-[rgba(0,0,0,0.6)]">
-                  Caretaker building session
+                  Caretaker IN/OUT
                 </p>
               </div>
 
@@ -10330,7 +10344,7 @@ function CaretakerQrCodesContent() {
                 {qrItem?.dataUrl ? (
                   <img
                     src={qrItem.dataUrl}
-                    alt={`QR Code ${building.nome || building.id}`}
+                    alt={`QR Code ${getQrBuildingLabel(building)}`}
                     className="h-48 w-48 rounded-lg border border-[#e5e0dc] bg-white p-2"
                   />
                 ) : (
@@ -10342,7 +10356,7 @@ function CaretakerQrCodesContent() {
                 <div className="flex w-full flex-col gap-2">
                   <a
                     href={qrItem?.dataUrl || "#"}
-                    download={`qr-caretaker-${building.nome || building.id}.png`}
+                    download="qr-caretaker-in-out.png"
                     className={`w-full rounded-lg px-4 py-2 text-center text-sm font-semibold transition-all duration-200 ${
                       qrItem?.dataUrl
                         ? "bg-[#8c7569] text-white hover:bg-[#55311c]"
@@ -10374,16 +10388,402 @@ function CaretakerQrCodesContent() {
   )
 }
 
+function WorkerSimpleInvoiceDialog({
+  open,
+  onOpenChange,
+  workerLabel,
+  endpoint,
+  queryKey,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  workerLabel: string
+  endpoint: string
+  queryKey: string
+}) {
+  const queryClient = useQueryClient()
+  const { showSuccessToast, showErrorToast } = useCustomToast()
+  const [invoiceDate, setInvoiceDate] = useState(getTodayDateInputValue())
+  const [mediaName, setMediaName] = useState("")
+  const [mediaData, setMediaData] = useState<string | null>(null)
+  const [isSaving, setIsSaving] = useState(false)
+
+  const resetForm = () => {
+    setInvoiceDate(getTodayDateInputValue())
+    setMediaName("")
+    setMediaData(null)
+  }
+
+  const handleDialogChange = (nextOpen: boolean) => {
+    onOpenChange(nextOpen)
+    if (!nextOpen) resetForm()
+  }
+
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    try {
+      const dataUrl = await readFileAsDataUrl(file)
+      setMediaName(file.name)
+      setMediaData(dataUrl)
+    } catch (error) {
+      showErrorToast(
+        error instanceof Error ? error.message : "Could not read invoice media",
+      )
+    } finally {
+      event.target.value = ""
+    }
+  }
+
+  const handleSave = async () => {
+    if (!invoiceDate) {
+      showErrorToast("Invoice date is required")
+      return
+    }
+    if (!mediaData) {
+      showErrorToast("Invoice media is required")
+      return
+    }
+
+    try {
+      setIsSaving(true)
+      await apiCall(endpoint, {
+        method: "POST",
+        body: {
+          invoice_date: invoiceDate,
+          media_name: mediaName || null,
+          media_data: mediaData,
+        },
+      })
+      await queryClient.invalidateQueries({ queryKey: [queryKey] })
+      showSuccessToast(`${workerLabel} invoice saved`)
+      handleDialogChange(false)
+    } catch (error) {
+      showErrorToast(
+        error instanceof Error ? error.message : `Could not save ${workerLabel.toLowerCase()} invoice`,
+      )
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={handleDialogChange}>
+      <DialogContent className="border-[#e5e0dc] bg-white text-[#55311c] sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle className="text-[#55311c]">
+            {workerLabel} invoice
+          </DialogTitle>
+          <DialogDescription className="text-[rgba(0,0,0,0.7)]">
+            Save the invoice date and media file.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          <div>
+            <label
+              className="block text-sm font-semibold text-[#55311c]"
+              htmlFor="cleaner-invoice-date"
+            >
+              Date
+            </label>
+            <input
+              id="cleaner-invoice-date"
+              type="date"
+              value={invoiceDate}
+              onChange={(event) => setInvoiceDate(event.target.value)}
+              className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+            />
+          </div>
+
+          <div>
+            <label
+              className="block text-sm font-semibold text-[#55311c]"
+              htmlFor="cleaner-invoice-media"
+            >
+              Media
+            </label>
+            <input
+              id="cleaner-invoice-media"
+              type="file"
+              accept="image/*,application/pdf"
+              onChange={handleFileChange}
+              className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+            />
+            {mediaData && (
+              <div className="mt-3 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-3 text-sm text-[#55311c]">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="min-w-0 truncate font-semibold">
+                    {mediaName || "Invoice media"}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMediaName("")
+                      setMediaData(null)
+                    }}
+                    className="shrink-0 rounded border border-[#8c7569] px-2 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+                  >
+                    Remove
+                  </button>
+                </div>
+                {isImageDataUrl(mediaData) && (
+                  <img
+                    src={mediaData}
+                alt={`${workerLabel} invoice media preview`}
+                    className="mt-3 max-h-44 rounded border border-[#d9d0ca] bg-white"
+                  />
+                )}
+                {isPdfDataUrl(mediaData) && (
+                  <iframe
+                    title={`${workerLabel} invoice PDF preview`}
+                    src={mediaData}
+                    className="mt-3 h-64 w-full rounded border border-[#d9d0ca] bg-white"
+                  />
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <DialogFooter>
+          <button
+            type="button"
+            onClick={() => handleDialogChange(false)}
+            disabled={isSaving}
+            className="rounded border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Close
+          </button>
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={isSaving}
+            className="rounded bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isSaving ? "Saving..." : "Save invoice"}
+          </button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function WorkerSimpleInvoiceHistoryDialog({
+  open,
+  onOpenChange,
+  workerLabel,
+  endpoint,
+  queryKey,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  workerLabel: string
+  endpoint: string
+  queryKey: string
+}) {
+  const [dateFrom, setDateFrom] = useState("")
+  const [dateTo, setDateTo] = useState("")
+  const [previewInvoice, setPreviewInvoice] = useState<WorkerSimpleInvoiceRecord | null>(
+    null,
+  )
+
+  const { data, isLoading } = useQuery<ApiListResponse<WorkerSimpleInvoiceRecord>>({
+    queryKey: [queryKey, dateFrom, dateTo],
+    queryFn: () => {
+      const params: Record<string, string | number> = { skip: 0, limit: 500 }
+      if (dateFrom) params.date_from = dateFrom
+      if (dateTo) params.date_to = dateTo
+      return apiCall(endpoint, params)
+    },
+    enabled: open,
+  })
+
+  const invoices = data?.data || []
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="border-[#e5e0dc] bg-white text-[#55311c] sm:max-w-5xl">
+        <DialogHeader>
+          <DialogTitle className="text-[#55311c]">
+            {workerLabel} invoice history
+          </DialogTitle>
+          <DialogDescription className="text-[rgba(0,0,0,0.7)]">
+            Filter invoices by date and open the attached media.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+            <div>
+              <label
+                className="block text-sm font-semibold text-[#55311c]"
+                htmlFor="cleaner-invoice-history-from"
+              >
+                From
+              </label>
+              <input
+                id="cleaner-invoice-history-from"
+                type="date"
+                value={dateFrom}
+                onChange={(event) => setDateFrom(event.target.value)}
+                className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+              />
+            </div>
+            <div>
+              <label
+                className="block text-sm font-semibold text-[#55311c]"
+                htmlFor="cleaner-invoice-history-to"
+              >
+                To
+              </label>
+              <input
+                id="cleaner-invoice-history-to"
+                type="date"
+                value={dateTo}
+                onChange={(event) => setDateTo(event.target.value)}
+                className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setDateFrom("")
+                setDateTo("")
+              }}
+              className="rounded border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+            >
+              Clear filters
+            </button>
+          </div>
+
+          <div className="max-h-[55vh] overflow-y-auto rounded-lg border border-[#e5e0dc]">
+            <table className="w-full min-w-[620px] text-left text-sm">
+              <thead className="bg-[#f5f1ee] text-[#55311c]">
+                <tr>
+                  <th className="px-4 py-3 font-semibold">Date</th>
+                  <th className="px-4 py-3 font-semibold">Media</th>
+                  <th className="px-4 py-3 font-semibold">Created</th>
+                  <th className="px-4 py-3 text-right font-semibold">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {isLoading && (
+                  <tr>
+                    <td colSpan={4} className="px-4 py-6 text-center">
+                      Loading invoices...
+                    </td>
+                  </tr>
+                )}
+                {!isLoading && invoices.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="px-4 py-6 text-center">
+                      No invoices found.
+                    </td>
+                  </tr>
+                )}
+                {!isLoading &&
+                  invoices.map((invoice) => (
+                    <tr key={invoice.id} className="border-t border-[#e5e0dc]">
+                      <td className="px-4 py-3">
+                        {formatDateToGb(invoice.invoice_date)}
+                      </td>
+                      <td className="max-w-[260px] truncate px-4 py-3">
+                        {invoice.media_name || "Invoice media"}
+                      </td>
+                      <td className="px-4 py-3">
+                        {new Date(invoice.created_at).toLocaleString("en-GB")}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setPreviewInvoice(invoice)}
+                            className="rounded border border-[#8c7569] px-3 py-1.5 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+                          >
+                            Open
+                          </button>
+                          <a
+                            href={invoice.media_data}
+                            download={
+                              invoice.media_name ||
+                              `${workerLabel.toLowerCase()}-invoice`
+                            }
+                            className="rounded bg-[#8c7569] px-3 py-1.5 text-xs font-semibold text-white transition-all duration-200 hover:bg-[#55311c]"
+                          >
+                            Download
+                          </a>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <button
+            type="button"
+            onClick={() => onOpenChange(false)}
+            className="rounded border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+          >
+            Close
+          </button>
+        </DialogFooter>
+      </DialogContent>
+
+      <Dialog
+        open={Boolean(previewInvoice)}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) setPreviewInvoice(null)
+        }}
+      >
+        <DialogContent className="border-[#e5e0dc] bg-white text-[#55311c] sm:max-w-4xl">
+          <DialogHeader>
+            <DialogTitle className="text-[#55311c]">
+              {previewInvoice
+                ? `Invoice ${formatDateToGb(previewInvoice.invoice_date)}`
+                : "Invoice"}
+            </DialogTitle>
+            <DialogDescription className="text-[rgba(0,0,0,0.7)]">
+              {previewInvoice?.media_name || "Invoice media"}
+            </DialogDescription>
+          </DialogHeader>
+          {previewInvoice?.media_data && (
+            <div className="max-h-[70vh] overflow-auto rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-3">
+              {isImageDataUrl(previewInvoice.media_data) ? (
+                <img
+                  src={previewInvoice.media_data}
+                  alt={previewInvoice.media_name || `${workerLabel} invoice media`}
+                  className="mx-auto max-h-[65vh] rounded border border-[#d9d0ca] bg-white"
+                />
+              ) : isPdfDataUrl(previewInvoice.media_data) ? (
+                <iframe
+                  title={previewInvoice.media_name || `${workerLabel} invoice PDF`}
+                  src={previewInvoice.media_data}
+                  className="h-[65vh] w-full rounded border border-[#d9d0ca] bg-white"
+                />
+              ) : (
+                <p className="text-sm text-[rgba(0,0,0,0.7)]">
+                  Preview is not available for this media type.
+                </p>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </Dialog>
+  )
+}
+
 function CleanerContent() {
   const [activeSubTab, setActiveSubTab] = useState<"summary" | "register">(
     "summary",
   )
-  const [invoiceTrigger, setInvoiceTrigger] = useState(0)
-
-  const handleOpenInvoice = () => {
-    setActiveSubTab("summary")
-    setInvoiceTrigger((current) => current + 1)
-  }
+  const [isInvoiceDialogOpen, setIsInvoiceDialogOpen] = useState(false)
+  const [isInvoiceHistoryOpen, setIsInvoiceHistoryOpen] = useState(false)
 
   return (
     <div className="mx-auto max-w-7xl">
@@ -10400,10 +10800,17 @@ function CleanerContent() {
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={handleOpenInvoice}
+              onClick={() => setIsInvoiceDialogOpen(true)}
               className="rounded-lg border border-[#8c7569] bg-white px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
             >
               Invoice
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsInvoiceHistoryOpen(true)}
+              className="rounded-lg border border-[#8c7569] bg-white px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+            >
+              Invoice history
             </button>
             <button
               type="button"
@@ -10432,10 +10839,25 @@ function CleanerContent() {
       </div>
 
       {activeSubTab === "summary" ? (
-        <CleanerSummary invoiceTrigger={invoiceTrigger} />
+        <CleanerSummary />
       ) : (
         <CleanerRegister />
       )}
+
+      <WorkerSimpleInvoiceDialog
+        open={isInvoiceDialogOpen}
+        onOpenChange={setIsInvoiceDialogOpen}
+        workerLabel="Cleaner"
+        endpoint="/api/v1/cleaner-invoices/"
+        queryKey="cleaner-invoices"
+      />
+      <WorkerSimpleInvoiceHistoryDialog
+        open={isInvoiceHistoryOpen}
+        onOpenChange={setIsInvoiceHistoryOpen}
+        workerLabel="Cleaner"
+        endpoint="/api/v1/cleaner-invoices/"
+        queryKey="cleaner-invoices"
+      />
     </div>
   )
 }
@@ -10445,16 +10867,12 @@ function CaretakerContent() {
     "summary" | "bins" | "register" | "schedules"
   >("summary")
   const [reportTrigger, setReportTrigger] = useState(0)
-  const [invoiceTrigger, setInvoiceTrigger] = useState(0)
+  const [isInvoiceDialogOpen, setIsInvoiceDialogOpen] = useState(false)
+  const [isInvoiceHistoryOpen, setIsInvoiceHistoryOpen] = useState(false)
 
   const handleOpenReport = () => {
     setActiveSubTab("summary")
     setReportTrigger((current) => current + 1)
-  }
-
-  const handleOpenInvoice = () => {
-    setActiveSubTab("summary")
-    setInvoiceTrigger((current) => current + 1)
   }
 
   return (
@@ -10472,10 +10890,17 @@ function CaretakerContent() {
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={handleOpenInvoice}
+              onClick={() => setIsInvoiceDialogOpen(true)}
               className="rounded-lg border border-[#8c7569] bg-white px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
             >
               Invoice
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsInvoiceHistoryOpen(true)}
+              className="rounded-lg border border-[#8c7569] bg-white px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+            >
+              Invoice history
             </button>
             <button
               type="button"
@@ -10513,10 +10938,24 @@ function CaretakerContent() {
       <CaretakerSummary
         activeTab={activeSubTab === "bins" ? "bins" : "summary"}
         reportTrigger={reportTrigger}
-        invoiceTrigger={invoiceTrigger}
       />
       {activeSubTab === "register" && <CaretakerRegister />}
       {activeSubTab === "schedules" && <CaretakerSchedules />}
+
+      <WorkerSimpleInvoiceDialog
+        open={isInvoiceDialogOpen}
+        onOpenChange={setIsInvoiceDialogOpen}
+        workerLabel="Caretaker"
+        endpoint="/api/v1/caretaker-invoices/"
+        queryKey="caretaker-invoices"
+      />
+      <WorkerSimpleInvoiceHistoryDialog
+        open={isInvoiceHistoryOpen}
+        onOpenChange={setIsInvoiceHistoryOpen}
+        workerLabel="Caretaker"
+        endpoint="/api/v1/caretaker-invoices/"
+        queryKey="caretaker-invoices"
+      />
     </div>
   )
 }
@@ -12933,7 +13372,7 @@ function BuildingSchedulePage({
   )
 }
 
-function CleanerSummary({ invoiceTrigger = 0 }: { invoiceTrigger?: number }) {
+function CleanerSummary() {
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
   const { data: cleanersData } = useQuery<ApiListResponse<Funcionario>>({
@@ -12978,10 +13417,6 @@ function CleanerSummary({ invoiceTrigger = 0 }: { invoiceTrigger?: number }) {
   const [cleanerHistoryPage, setCleanerHistoryPage] = useState(0)
   const [selectedCleanerDateFrom, setSelectedCleanerDateFrom] = useState("")
   const [selectedCleanerDateTo, setSelectedCleanerDateTo] = useState("")
-  const [isInvoiceDialogOpen, setIsInvoiceDialogOpen] = useState(false)
-  const [cleanerInvoiceHourEntries, setCleanerInvoiceHourEntries] = useState<
-    WorkerInvoiceHourEntry[]
-  >(() => readInvoiceHoursFromStorage(CLEANER_INVOICE_HOURS_STORAGE_KEY))
   const cleanerDeferredSearch = useDeferredValue(cleanerSearch.trim())
   const cleanerHistoryPageSize = 10
 
@@ -12999,16 +13434,6 @@ function CleanerSummary({ invoiceTrigger = 0 }: { invoiceTrigger?: number }) {
     )
     return (
       cleaners.find((cleaner: Funcionario) => cleaner.is_default)?.id || null
-    )
-  }, [cleanersData])
-
-  const activeCleanerName = useMemo(() => {
-    const cleaners = (cleanersData?.data || []).filter(
-      (funcionario: Funcionario) => funcionario.cargo === 0,
-    )
-    return (
-      cleaners.find((cleaner: Funcionario) => cleaner.is_default)?.nome ||
-      "Cleaner"
     )
   }, [cleanersData])
 
@@ -13327,15 +13752,6 @@ function CleanerSummary({ invoiceTrigger = 0 }: { invoiceTrigger?: number }) {
     ]
   }, [enrichedSessions, formatTotalMinutes])
 
-  const currentCleanerMonthKey = getCurrentMonthInputValue()
-  const cleanerInvoiceHours = useMemo(
-    () =>
-      cleanerInvoiceHourEntries
-        .filter((entry) => entry.monthKey === currentCleanerMonthKey)
-        .reduce((sum, entry) => sum + entry.hours, 0),
-    [cleanerInvoiceHourEntries, currentCleanerMonthKey],
-  )
-
   const handleOpenCleanerRecordEdit = (
     inRecordId: EntityId | null,
     inIsoValue: string | null,
@@ -13612,12 +14028,6 @@ function CleanerSummary({ invoiceTrigger = 0 }: { invoiceTrigger?: number }) {
     }
   }
 
-  useEffect(() => {
-    if (invoiceTrigger > 0) {
-      setIsInvoiceDialogOpen(true)
-    }
-  }, [invoiceTrigger])
-
   return (
     <div className="rounded-lg bg-white p-6 shadow-md">
       <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -13629,9 +14039,6 @@ function CleanerSummary({ invoiceTrigger = 0 }: { invoiceTrigger?: number }) {
             Select an active cleaner from registration
           </span>
         )}
-        <span className="rounded-full bg-[#eef8f2] px-3 py-1 text-xs font-semibold text-[#217a4b]">
-          Invoices launched {formatInvoiceHours(cleanerInvoiceHours)}
-        </span>
       </div>
 
       <div className="mb-6 grid gap-3 sm:grid-cols-3">
@@ -14204,16 +14611,6 @@ function CleanerSummary({ invoiceTrigger = 0 }: { invoiceTrigger?: number }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      <HoursInvoiceLauncherDialog
-        open={isInvoiceDialogOpen}
-        onOpenChange={setIsInvoiceDialogOpen}
-        workerLabel="Cleaner"
-        workerName={activeCleanerName}
-        descriptionSubject="Cleaner"
-        storageKey={CLEANER_INVOICE_HOURS_STORAGE_KEY}
-        onLaunched={setCleanerInvoiceHourEntries}
-      />
     </div>
   )
 }
@@ -14488,11 +14885,9 @@ function CleanerRegister() {
 function CaretakerSummary({
   activeTab,
   reportTrigger = 0,
-  invoiceTrigger = 0,
 }: {
   activeTab: "summary" | "bins"
   reportTrigger?: number
-  invoiceTrigger?: number
 }) {
   const { showSuccessToast, showErrorToast } = useCustomToast()
   const queryClient = useQueryClient()
@@ -14630,7 +15025,7 @@ function CaretakerSummary({
   const [currentInvoiceHourEntryId, setCurrentInvoiceHourEntryId] = useState<
     string | null
   >(null)
-  const [caretakerInvoiceHourEntries, setCaretakerInvoiceHourEntries] =
+  const [, setCaretakerInvoiceHourEntries] =
     useState<WorkerInvoiceHourEntry[]>(() =>
       readInvoiceHoursFromStorage(CARETAKER_INVOICE_HOURS_STORAGE_KEY),
     )
@@ -14825,14 +15220,6 @@ function CaretakerSummary({
     selectedWorkMonthMetric?.effective_target_hours || 0
   const selectedWorkMonthRemainingHours =
     selectedWorkMonthMetric?.remaining_hours || 0
-  const selectedWorkMonthInvoiceHours = useMemo(
-    () =>
-      caretakerInvoiceHourEntries
-        .filter((entry) => entry.monthKey === selectedWorkMonthKey)
-        .reduce((sum, entry) => sum + entry.hours, 0),
-    [caretakerInvoiceHourEntries, selectedWorkMonthKey],
-  )
-
   const resetMonthlyGoalForm = () => {
     setEditingMonthlyGoal(null)
     setGoalFormMonth(selectedWorkMonthKey)
@@ -16047,13 +16434,6 @@ function CaretakerSummary({
   }, [reportTrigger])
 
   useEffect(() => {
-    if (invoiceTrigger > 0) {
-      resetCaretakerInvoiceForm()
-      setShowInvoiceModal(true)
-    }
-  }, [invoiceTrigger])
-
-  useEffect(() => {
     if (!showInvoiceModal) return
     const parsedHours = Number(invoiceHours)
     if (!invoiceHours.trim() || !Number.isFinite(parsedHours) || parsedHours <= 0) {
@@ -16130,10 +16510,6 @@ function CaretakerSummary({
                 <div className="mt-3 flex flex-wrap items-start gap-2 text-sm text-[rgba(85,49,28,0.78)]">
                   <span className="font-semibold text-[#55311c]">
                     Target {formatDecimalHours(selectedWorkMonthTargetHours)}
-                  </span>
-                  <span className="font-semibold text-[#217a4b]">
-                    Invoices launched{" "}
-                    {formatDecimalHours(selectedWorkMonthInvoiceHours)}
                   </span>
                 </div>
                 <p className="mt-2 text-sm text-[rgba(85,49,28,0.72)]">

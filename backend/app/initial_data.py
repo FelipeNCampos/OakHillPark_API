@@ -60,25 +60,38 @@ def ensure_northwood_flat_1a(session: Session, condominio: Condominio) -> None:
     logger.info("Ensured Northwood flat 1A exists")
 
 
-def ensure_general_building(session: Session, condominio: Condominio) -> None:
-    existing = session.exec(
+def ensure_cleaner_building(session: Session, condominio: Condominio) -> None:
+    existing_cleaner = session.exec(
+        select(Building).where(
+            Building.condominio_id == condominio.id,
+            Building.nome == "Cleaner",
+        )
+    ).first()
+    if existing_cleaner:
+        return
+
+    legacy_general = session.exec(
         select(Building).where(
             Building.condominio_id == condominio.id,
             Building.nome == "General",
         )
     ).first()
-    if existing:
+    if legacy_general:
+        legacy_general.nome = "Cleaner"
+        session.add(legacy_general)
+        session.commit()
+        logger.info("Renamed legacy General building to Cleaner")
         return
 
     session.add(
         Building(
-            nome="General",
+            nome="Cleaner",
             condominio_id=condominio.id,
             reading_types=0,
         )
     )
     session.commit()
-    logger.info("Ensured General building exists")
+    logger.info("Ensured Cleaner building exists")
 
 
 def init() -> None:
@@ -149,7 +162,7 @@ def create_initial_data() -> None:
 
             session.commit()
             ensure_northwood_flat_1a(session, condominio)
-            ensure_general_building(session, condominio)
+            ensure_cleaner_building(session, condominio)
             ensure_fire_alarm_schedule_seed(session)
             ensure_default_manager_user(session, condominio)
             logger.info("Initial data already exists, ensured default staff are active")
@@ -169,7 +182,7 @@ def create_initial_data() -> None:
             "Northwood": 12,
             "Oak Lodge": 14,
             "Office": 0,  # Office doesn't have flats
-            "General": 0,
+            "Cleaner": 0,
         }
 
         buildings = {}

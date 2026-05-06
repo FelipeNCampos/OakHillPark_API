@@ -136,12 +136,12 @@ def _has_all_buildings_cleaner_in_and_out_for_day(
     cleaner: Funcionario,
     target_date: datetime.date,
 ) -> bool:
+    excluded_names = {"office", "general", "cleaner"}
     building_ids = set(
         session.exec(
             select(Building.id).where(
                 Building.condominio_id == cleaner.condominio_id,
-                func.lower(func.trim(Building.nome)) != "office",
-                func.lower(func.trim(Building.nome)) != "general",
+                func.lower(func.trim(Building.nome)).not_in(excluded_names),
             )
         ).all()
     )

@@ -63,15 +63,18 @@ interface Building {
   flats?: Flat[]
 }
 
-const QR_IN_OUT_BUILDING_NAME = "general"
+const QR_SPECIAL_CLEANER_BUILDING_NAMES = new Set(["general", "cleaner"])
+const QR_SPECIAL_CLEANER_BUILDING_LABEL = "Cleaner"
 const QR_IN_OUT_LABEL = "In/Out"
 const QR_WORK_TIME_LABEL = "Work Time"
 
 const isInOutQrBuilding = (building: Building) =>
-  building.nome.trim().toLowerCase() === QR_IN_OUT_BUILDING_NAME
+  QR_SPECIAL_CLEANER_BUILDING_NAMES.has(building.nome.trim().toLowerCase())
 
 const getQrBuildingLabel = (building: Building) =>
-  isInOutQrBuilding(building) ? QR_IN_OUT_LABEL : building.nome || "Building"
+  isInOutQrBuilding(building)
+    ? QR_SPECIAL_CLEANER_BUILDING_LABEL
+    : building.nome || "Building"
 
 interface Flat {
   id: EntityId

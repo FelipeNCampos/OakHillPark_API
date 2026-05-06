@@ -7,6 +7,10 @@ export type ListResponse<T> = {
   count: number
 }
 
+export type MessageResponse = {
+  message: string
+}
+
 export type CondominioPublic = {
   id: string
   nome: string
@@ -107,6 +111,123 @@ export type CashFlowRecordCreate = {
   description: string
 }
 
+export type ReminderPublic = {
+  id: string
+  name: string
+  schedule_unit: string
+  schedule_mode: string
+  interval_value?: number | null
+  weekday_mask: number
+  month_mask?: number | null
+  is_active: boolean
+  action_sms: boolean
+  sms_to?: string | null
+  sms_message?: string | null
+  action_task: boolean
+  task_title?: string | null
+  task_description?: string | null
+  condominio_id: string
+  created_by_user_id: string
+  last_triggered_on?: string | null
+  last_triggered_at?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type ReminderCreate = {
+  name: string
+  schedule_unit: string
+  schedule_mode: string
+  interval_value?: number | null
+  weekday_mask: number
+  month_mask?: number | null
+  is_active: boolean
+  action_sms: boolean
+  sms_to?: string | null
+  sms_message?: string | null
+  action_task: boolean
+  task_title?: string | null
+  task_description?: string | null
+}
+
+export type ReminderUpdate = {
+  name?: string
+  schedule_unit?: string
+  schedule_mode?: string
+  interval_value?: number | null
+  weekday_mask?: number | null
+  month_mask?: number | null
+  is_active?: boolean
+  action_sms?: boolean
+  sms_to?: string | null
+  sms_message?: string | null
+  action_task?: boolean
+  task_title?: string | null
+  task_description?: string | null
+}
+
+export type ReminderExecutionSummary = {
+  checked: number
+  triggered: number
+  sms_sent: number
+  tasks_created: number
+}
+
+export type CleanerInvoicePublic = {
+  id: string
+  invoice_date: string
+  media_name?: string | null
+  media_data: string
+  condominio_id: string
+  created_by_user_id: string
+  created_at: string
+}
+
+export type CleanerInvoiceCreate = {
+  invoice_date: string
+  media_name?: string | null
+  media_data: string
+}
+
+export type CaretakerInvoicePublic = {
+  id: string
+  invoice_date: string
+  media_name?: string | null
+  media_data: string
+  condominio_id: string
+  created_by_user_id: string
+  created_at: string
+}
+
+export type CaretakerInvoiceCreate = {
+  invoice_date: string
+  media_name?: string | null
+  media_data: string
+}
+
+export type FireAlarmExternalCertificatePublic = {
+  id: string
+  condominio_id: string
+  building_id?: string | null
+  building_name?: string | null
+  certificate_date: string
+  media_1_name?: string | null
+  media_1_data?: string | null
+  media_2_name?: string | null
+  media_2_data?: string | null
+  created_by_user_id: string
+  created_at: string
+}
+
+export type FireAlarmExternalCertificateCreate = {
+  building_id: string
+  certificate_date: string
+  media_1_name?: string | null
+  media_1_data?: string | null
+  media_2_name?: string | null
+  media_2_data?: string | null
+}
+
 export const CondominiosService = {
   readCondominios: (data: { skip?: number; limit?: number } = {}): CancelablePromise<ListResponse<CondominioPublic>> =>
     __request(OpenAPI, {
@@ -129,7 +250,7 @@ export const CondominiosService = {
       body: data.requestBody,
       mediaType: "application/json",
     }),
-  deleteCondominio: (data: { id: string }): CancelablePromise<{ message: string }> =>
+  deleteCondominio: (data: { id: string }): CancelablePromise<MessageResponse> =>
     __request(OpenAPI, {
       method: "DELETE",
       url: "/api/v1/condominios/{id}",
@@ -159,7 +280,7 @@ export const BuildingsService = {
       body: data.requestBody,
       mediaType: "application/json",
     }),
-  deleteBuilding: (data: { id: string }): CancelablePromise<{ message: string }> =>
+  deleteBuilding: (data: { id: string }): CancelablePromise<MessageResponse> =>
     __request(OpenAPI, {
       method: "DELETE",
       url: "/api/v1/buildings/{id}",
@@ -189,7 +310,7 @@ export const FlatsService = {
       body: data.requestBody,
       mediaType: "application/json",
     }),
-  deleteFlat: (data: { id: string }): CancelablePromise<{ message: string }> =>
+  deleteFlat: (data: { id: string }): CancelablePromise<MessageResponse> =>
     __request(OpenAPI, {
       method: "DELETE",
       url: "/api/v1/flats/{id}",
@@ -227,7 +348,7 @@ export const MoradoresService = {
       body: data.reading_types,
       mediaType: "application/json",
     }),
-  deleteMorador: (data: { id: string }): CancelablePromise<{ message: string }> =>
+  deleteMorador: (data: { id: string }): CancelablePromise<MessageResponse> =>
     __request(OpenAPI, {
       method: "DELETE",
       url: "/api/v1/moradores/{id}",
@@ -257,7 +378,7 @@ export const FuncionariosService = {
       body: data.requestBody,
       mediaType: "application/json",
     }),
-  deleteFuncionario: (data: { id: string }): CancelablePromise<{ message: string }> =>
+  deleteFuncionario: (data: { id: string }): CancelablePromise<MessageResponse> =>
     __request(OpenAPI, {
       method: "DELETE",
       url: "/api/v1/funcionarios/{id}",
@@ -287,7 +408,7 @@ export const AcessService = {
       body: data.requestBody,
       mediaType: "application/json",
     }),
-  deleteAcess: (data: { id: string }): CancelablePromise<{ message: string }> =>
+  deleteAcess: (data: { id: string }): CancelablePromise<MessageResponse> =>
     __request(OpenAPI, {
       method: "DELETE",
       url: "/api/v1/acess/{id}",
@@ -317,7 +438,7 @@ export const ReadingsService = {
       body: data.requestBody,
       mediaType: "application/json",
     }),
-  deleteReading: (data: { id: string }): CancelablePromise<{ message: string }> =>
+  deleteReading: (data: { id: string }): CancelablePromise<MessageResponse> =>
     __request(OpenAPI, {
       method: "DELETE",
       url: "/api/v1/readings/{id}",
@@ -353,10 +474,164 @@ export const CashFlowService = {
       body: data.requestBody,
       mediaType: "application/json",
     }),
-  deleteRecord: (data: { id: string }): CancelablePromise<{ message: string }> =>
+  updateRecord: (data: {
+    id: string
+    requestBody: Partial<CashFlowRecordCreate>
+  }): CancelablePromise<CashFlowRecordPublic> =>
+    __request(OpenAPI, {
+      method: "PATCH",
+      url: "/api/v1/cash-flow/{id}",
+      path: { id: data.id },
+      body: data.requestBody,
+      mediaType: "application/json",
+    }),
+  deleteRecord: (data: { id: string }): CancelablePromise<MessageResponse> =>
     __request(OpenAPI, {
       method: "DELETE",
       url: "/api/v1/cash-flow/{id}",
+      path: { id: data.id },
+    }),
+}
+
+export const RemindersService = {
+  readReminders: (data: { skip?: number; limit?: number } = {}): CancelablePromise<ListResponse<ReminderPublic>> =>
+    __request(OpenAPI, {
+      method: "GET",
+      url: "/api/v1/reminds/",
+      query: { skip: data.skip, limit: data.limit },
+    }),
+  createReminder: (data: { requestBody: ReminderCreate }): CancelablePromise<ReminderPublic> =>
+    __request(OpenAPI, {
+      method: "POST",
+      url: "/api/v1/reminds/",
+      body: data.requestBody,
+      mediaType: "application/json",
+    }),
+  updateReminder: (data: {
+    id: string
+    requestBody: ReminderUpdate
+  }): CancelablePromise<ReminderPublic> =>
+    __request(OpenAPI, {
+      method: "PATCH",
+      url: "/api/v1/reminds/{id}",
+      path: { id: data.id },
+      body: data.requestBody,
+      mediaType: "application/json",
+    }),
+  deleteReminder: (data: { id: string }): CancelablePromise<MessageResponse> =>
+    __request(OpenAPI, {
+      method: "DELETE",
+      url: "/api/v1/reminds/{id}",
+      path: { id: data.id },
+    }),
+  executeDueReminders: (): CancelablePromise<ReminderExecutionSummary> =>
+    __request(OpenAPI, {
+      method: "POST",
+      url: "/api/v1/reminds/execute-due",
+    }),
+}
+
+export const CleanerInvoicesService = {
+  readCleanerInvoices: (data: {
+    skip?: number
+    limit?: number
+    date_from?: string
+    date_to?: string
+  } = {}): CancelablePromise<ListResponse<CleanerInvoicePublic>> =>
+    __request(OpenAPI, {
+      method: "GET",
+      url: "/api/v1/cleaner-invoices/",
+      query: {
+        skip: data.skip,
+        limit: data.limit,
+        date_from: data.date_from,
+        date_to: data.date_to,
+      },
+    }),
+  createCleanerInvoice: (data: {
+    requestBody: CleanerInvoiceCreate
+  }): CancelablePromise<CleanerInvoicePublic> =>
+    __request(OpenAPI, {
+      method: "POST",
+      url: "/api/v1/cleaner-invoices/",
+      body: data.requestBody,
+      mediaType: "application/json",
+    }),
+}
+
+export const CaretakerInvoicesService = {
+  readCaretakerInvoices: (data: {
+    skip?: number
+    limit?: number
+    date_from?: string
+    date_to?: string
+  } = {}): CancelablePromise<ListResponse<CaretakerInvoicePublic>> =>
+    __request(OpenAPI, {
+      method: "GET",
+      url: "/api/v1/caretaker-invoices/",
+      query: {
+        skip: data.skip,
+        limit: data.limit,
+        date_from: data.date_from,
+        date_to: data.date_to,
+      },
+    }),
+  createCaretakerInvoice: (data: {
+    requestBody: CaretakerInvoiceCreate
+  }): CancelablePromise<CaretakerInvoicePublic> =>
+    __request(OpenAPI, {
+      method: "POST",
+      url: "/api/v1/caretaker-invoices/",
+      body: data.requestBody,
+      mediaType: "application/json",
+    }),
+}
+
+export const FireAlarmExternalCertificatesService = {
+  readFireAlarmExternalCertificates: (data: {
+    skip?: number
+    limit?: number
+    search?: string
+    date_from?: string
+    date_to?: string
+  } = {}): CancelablePromise<ListResponse<FireAlarmExternalCertificatePublic>> =>
+    __request(OpenAPI, {
+      method: "GET",
+      url: "/api/v1/fire-alarm-external-certificates/",
+      query: {
+        skip: data.skip,
+        limit: data.limit,
+        search: data.search,
+        date_from: data.date_from,
+        date_to: data.date_to,
+      },
+    }),
+  createFireAlarmExternalCertificate: (data: {
+    requestBody: FireAlarmExternalCertificateCreate
+  }): CancelablePromise<FireAlarmExternalCertificatePublic> =>
+    __request(OpenAPI, {
+      method: "POST",
+      url: "/api/v1/fire-alarm-external-certificates/",
+      body: data.requestBody,
+      mediaType: "application/json",
+    }),
+  updateFireAlarmExternalCertificate: (data: {
+    id: string
+    requestBody: FireAlarmExternalCertificateCreate
+  }): CancelablePromise<FireAlarmExternalCertificatePublic> =>
+    __request(OpenAPI, {
+      method: "PATCH",
+      url: "/api/v1/fire-alarm-external-certificates/{id}",
+      path: { id: data.id },
+      body: data.requestBody,
+      mediaType: "application/json",
+    }),
+  deleteFireAlarmExternalCertificate: (data: {
+    id: string
+  }): CancelablePromise<MessageResponse> =>
+    __request(OpenAPI, {
+      method: "DELETE",
+      url: "/api/v1/fire-alarm-external-certificates/{id}",
       path: { id: data.id },
     }),
 }

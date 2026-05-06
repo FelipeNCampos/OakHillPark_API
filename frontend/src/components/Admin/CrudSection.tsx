@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useMemo, useState } from "react"
+import { useMemo, useState, type ComponentProps, type ReactNode } from "react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -20,6 +20,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { Input } from "@/components/ui/input"
 import useCustomToast from "@/hooks/useCustomToast"
 import { cn } from "@/lib/utils"
 import { handleError } from "@/utils"
@@ -27,6 +28,14 @@ import { handleError } from "@/utils"
 export type CrudListResponse<T> = {
   data: T[]
   count: number
+}
+
+interface CrudToolbarAction {
+  label: string
+  onClick: () => void
+  variant?: ComponentProps<typeof Button>["variant"]
+  disabled?: boolean
+  isPending?: boolean
 }
 
 interface CrudSectionProps<T extends { id: string }> {
@@ -37,10 +46,13 @@ interface CrudSectionProps<T extends { id: string }> {
     skip?: number
     limit?: number
   }) => Promise<CrudListResponse<T>>
-  createFn: (payload: Record<string, unknown>) => Promise<T>
-  updateFn: (id: string, payload: Record<string, unknown>) => Promise<T>
-  deleteFn: (id: string) => Promise<{ message: string }>
-  defaultCreatePayload: Record<string, unknown>
+  createFn?: (payload: Record<string, unknown>) => Promise<T>
+  updateFn?: (id: string, payload: Record<string, unknown>) => Promise<T>
+  deleteFn?: (id: string) => Promise<{ message: string }>
+  defaultCreatePayload?: Record<string, unknown>
+  searchPlaceholder?: string
+  renderMeta?: (data: CrudListResponse<T>) => ReactNode
+  toolbarActions?: CrudToolbarAction[]
 }
 
 const prettifyJson = (value: Record<string, unknown>) =>
@@ -60,6 +72,9 @@ const CrudSection = <T extends { id: string }>({
   updateFn,
   deleteFn,
   defaultCreatePayload,
+  searchPlaceholder = "Search records",
+  renderMeta,
+  toolbarActions = [],
 }: CrudSectionProps<T>) => {
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
@@ -67,8 +82,9 @@ const CrudSection = <T extends { id: string }>({
   const [editOpen, setEditOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [selected, setSelected] = useState<T | null>(null)
+  const [search, setSearch] = useState("")
   const [createJson, setCreateJson] = useState(
-    prettifyJson(defaultCreatePayload),
+    prettifyJson(defaultCreatePayload ?? {}),
   )
   const [editJson, setEditJson] = useState("{}")
 
@@ -77,14 +93,33 @@ const CrudSection = <T extends { id: string }>({
     queryFn: () => listFn({ skip: 0, limit: 100 }),
   })
 
-  const rows = data?.data ?? []
+  const sourceRows = data?.data ?? []
+  const normalizedSearch = search.trim().toLowerCase()
+  const rows = useMemo(() => {
+    if (!normalizedSearch) {
+      return sourceRows
+    }
+
+    return sourceRows.filter((item) => {
+      const haystack = `${item.id} ${JSON.stringify(
+        stripId(item as Record<string, unknown>),
+      )}`.toLowerCase()
+      return haystack.includes(normalizedSearch)
+    })
+  }, [normalizedSearch, sourceRows])
+
   const countLabel = useMemo(
     () => `${rows.length} of ${data?.count ?? 0}`,
     [rows.length, data?.count],
   )
 
   const createMutation = useMutation({
-    mutationFn: (payload: Record<string, unknown>) => createFn(payload),
+    mutationFn: async (payload: Record<string, unknown>) => {
+      if (!createFn) {
+        throw new Error(`${title} creation is not available`)
+      }
+      return createFn(payload)
+    },
     onSuccess: () => {
       showSuccessToast(`${title} created successfully`)
       setCreateOpen(false)
@@ -100,7 +135,12 @@ const CrudSection = <T extends { id: string }>({
     }: {
       id: string
       payload: Record<string, unknown>
-    }) => updateFn(id, payload),
+    }) => {
+      if (!updateFn) {
+        throw new Error(`${title} update is not available`)
+      }
+      return updateFn(id, payload)
+    },
     onSuccess: () => {
       showSuccessToast(`${title} updated successfully`)
       setEditOpen(false)
@@ -110,7 +150,12 @@ const CrudSection = <T extends { id: string }>({
   })
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => deleteFn(id),
+    mutationFn: async (id: string) => {
+      if (!deleteFn) {
+        throw new Error(`${title} deletion is not available`)
+      }
+      return deleteFn(id)
+    },
     onSuccess: () => {
       showSuccessToast(`${title} removed successfully`)
       setDeleteOpen(false)
@@ -136,6 +181,14 @@ const CrudSection = <T extends { id: string }>({
     createMutation.mutate(payload)
   }
 
+  const handleFormatCreateJson = () => {
+    const payload = parseJson(createJson)
+    if (!payload) {
+      return
+    }
+    setCreateJson(prettifyJson(payload))
+  }
+
   const handleEdit = () => {
     if (!selected) {
       return
@@ -147,6 +200,14 @@ const CrudSection = <T extends { id: string }>({
     updateMutation.mutate({ id: selected.id, payload })
   }
 
+  const handleFormatEditJson = () => {
+    const payload = parseJson(editJson)
+    if (!payload) {
+      return
+    }
+    setEditJson(prettifyJson(payload))
+  }
+
   const handleDelete = () => {
     if (!selected) {
       return
@@ -155,61 +216,114 @@ const CrudSection = <T extends { id: string }>({
   }
 
   const openEdit = (item: T) => {
+    if (!updateFn) {
+      return
+    }
     setSelected(item)
     setEditJson(prettifyJson(stripId(item as Record<string, unknown>)))
     setEditOpen(true)
   }
 
   const openDelete = (item: T) => {
+    if (!deleteFn) {
+      return
+    }
     setSelected(item)
     setDeleteOpen(true)
   }
 
+  const hasRowActions = Boolean(updateFn || deleteFn)
+
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h2 className="text-xl font-semibold">{title}</h2>
           {description && (
             <p className="text-sm text-muted-foreground">{description}</p>
           )}
         </div>
-        <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-          <DialogTrigger asChild>
-            <Button>Add</Button>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-xl">
-            <DialogHeader>
-              <DialogTitle>New {title}</DialogTitle>
-              <DialogDescription>
-                Provide the JSON payload to create.
-              </DialogDescription>
-            </DialogHeader>
-            <textarea
-              value={createJson}
-              onChange={(event) => setCreateJson(event.target.value)}
-              rows={12}
-              className={cn(
-                "w-full rounded-md border border-input bg-transparent p-3 text-sm font-mono shadow-xs",
-                "focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]",
-              )}
-            />
-            <DialogFooter>
-              <DialogClose asChild>
-                <Button variant="outline">Cancel</Button>
-              </DialogClose>
-              <Button
-                onClick={handleCreate}
-                disabled={createMutation.isPending}
-              >
-                Save
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        <div className="flex flex-wrap items-center gap-2">
+          {toolbarActions.map((action) => (
+            <Button
+              key={action.label}
+              variant={action.variant ?? "outline"}
+              onClick={action.onClick}
+              disabled={action.disabled || action.isPending}
+            >
+              {action.isPending ? `${action.label}...` : action.label}
+            </Button>
+          ))}
+          {createFn && (
+            <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+              <DialogTrigger asChild>
+                <Button>Add</Button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-xl">
+                <DialogHeader>
+                  <DialogTitle>New {title}</DialogTitle>
+                  <DialogDescription>
+                    Provide the JSON payload to create.
+                  </DialogDescription>
+                </DialogHeader>
+                <textarea
+                  value={createJson}
+                  onChange={(event) => setCreateJson(event.target.value)}
+                  rows={12}
+                  className={cn(
+                    "w-full rounded-md border border-input bg-transparent p-3 text-sm font-mono shadow-xs",
+                    "focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]",
+                  )}
+                />
+                <DialogFooter className="gap-2 sm:justify-between">
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="ghost"
+                      onClick={handleFormatCreateJson}
+                      type="button"
+                    >
+                      Format JSON
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() =>
+                        setCreateJson(prettifyJson(defaultCreatePayload ?? {}))
+                      }
+                      type="button"
+                    >
+                      Reset template
+                    </Button>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <DialogClose asChild>
+                      <Button variant="outline">Cancel</Button>
+                    </DialogClose>
+                    <Button
+                      onClick={handleCreate}
+                      disabled={createMutation.isPending}
+                    >
+                      Save
+                    </Button>
+                  </div>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          )}
+        </div>
       </div>
 
-      <div className="text-sm text-muted-foreground">Total: {countLabel}</div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="text-sm text-muted-foreground">Total: {countLabel}</div>
+        <div className="w-full sm:max-w-sm">
+          <Input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder={searchPlaceholder}
+          />
+        </div>
+      </div>
+
+      {data && renderMeta ? <div>{renderMeta(data)}</div> : null}
 
       <div className="rounded-lg border">
         <Table>
@@ -241,22 +355,30 @@ const CrudSection = <T extends { id: string }>({
                     </pre>
                   </TableCell>
                   <TableCell className="text-right">
-                    <div className="flex justify-end gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => openEdit(item)}
-                      >
-                        Edit
-                      </Button>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        onClick={() => openDelete(item)}
-                      >
-                        Delete
-                      </Button>
-                    </div>
+                    {hasRowActions ? (
+                      <div className="flex justify-end gap-2">
+                        {updateFn ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openEdit(item)}
+                          >
+                            Edit
+                          </Button>
+                        ) : null}
+                        {deleteFn ? (
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            onClick={() => openDelete(item)}
+                          >
+                            Delete
+                          </Button>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">No actions</span>
+                    )}
                   </TableCell>
                 </TableRow>
               ))
@@ -265,56 +387,69 @@ const CrudSection = <T extends { id: string }>({
         </Table>
       </div>
 
-      <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent className="sm:max-w-xl">
-          <DialogHeader>
-            <DialogTitle>Edit {title}</DialogTitle>
-            <DialogDescription>
-              Update the JSON of the selected record.
-            </DialogDescription>
-          </DialogHeader>
-          <textarea
-            value={editJson}
-            onChange={(event) => setEditJson(event.target.value)}
-            rows={12}
-            className={cn(
-              "w-full rounded-md border border-input bg-transparent p-3 text-sm font-mono shadow-xs",
-              "focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]",
-            )}
-          />
-          <DialogFooter>
-            <DialogClose asChild>
-              <Button variant="outline">Cancel</Button>
-            </DialogClose>
-            <Button onClick={handleEdit} disabled={updateMutation.isPending}>
-              Save
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {updateFn ? (
+        <Dialog open={editOpen} onOpenChange={setEditOpen}>
+          <DialogContent className="sm:max-w-xl">
+            <DialogHeader>
+              <DialogTitle>Edit {title}</DialogTitle>
+              <DialogDescription>
+                Update the JSON of the selected record.
+              </DialogDescription>
+            </DialogHeader>
+            <textarea
+              value={editJson}
+              onChange={(event) => setEditJson(event.target.value)}
+              rows={12}
+              className={cn(
+                "w-full rounded-md border border-input bg-transparent p-3 text-sm font-mono shadow-xs",
+                "focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]",
+              )}
+            />
+            <DialogFooter className="gap-2 sm:justify-between">
+              <Button
+                variant="ghost"
+                onClick={handleFormatEditJson}
+                type="button"
+              >
+                Format JSON
+              </Button>
+              <div className="flex flex-wrap gap-2">
+                <DialogClose asChild>
+                  <Button variant="outline">Cancel</Button>
+                </DialogClose>
+                <Button onClick={handleEdit} disabled={updateMutation.isPending}>
+                  Save
+                </Button>
+              </div>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      ) : null}
 
-      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Delete {title}</DialogTitle>
-            <DialogDescription>
-              Confirm deletion of the selected record?
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <DialogClose asChild>
-              <Button variant="outline">Cancel</Button>
-            </DialogClose>
-            <Button
-              variant="destructive"
-              onClick={handleDelete}
-              disabled={deleteMutation.isPending}
-            >
-              Delete
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {deleteFn ? (
+        <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Delete {title}</DialogTitle>
+              <DialogDescription>
+                Confirm deletion of the selected record?
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <DialogClose asChild>
+                <Button variant="outline">Cancel</Button>
+              </DialogClose>
+              <Button
+                variant="destructive"
+                onClick={handleDelete}
+                disabled={deleteMutation.isPending}
+              >
+                Delete
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      ) : null}
     </div>
   )
 }

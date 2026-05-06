@@ -14,11 +14,13 @@ const searchSchema = z.object({
   buildingName: z.string().optional().catch(""),
 })
 
-const IN_OUT_BUILDING_NAME = "general"
-const IN_OUT_LABEL = "In/Out"
+const SPECIAL_CLEANER_BUILDING_NAMES = new Set(["general", "cleaner"])
+const IN_OUT_LABEL = "Cleaner"
 
 const formatBuildingLabel = (label: string) =>
-  label.trim().toLowerCase() === IN_OUT_BUILDING_NAME ? IN_OUT_LABEL : label
+  SPECIAL_CLEANER_BUILDING_NAMES.has(label.trim().toLowerCase())
+    ? IN_OUT_LABEL
+    : label
 
 const publicApiCall = async (
   endpoint: string,

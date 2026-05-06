@@ -94,6 +94,27 @@ def ensure_cleaner_building(session: Session, condominio: Condominio) -> None:
     logger.info("Ensured Cleaner building exists")
 
 
+def ensure_caretaker_building(session: Session, condominio: Condominio) -> None:
+    existing_caretaker = session.exec(
+        select(Building).where(
+            Building.condominio_id == condominio.id,
+            Building.nome == "Caretaker",
+        )
+    ).first()
+    if existing_caretaker:
+        return
+
+    session.add(
+        Building(
+            nome="Caretaker",
+            condominio_id=condominio.id,
+            reading_types=0,
+        )
+    )
+    session.commit()
+    logger.info("Ensured Caretaker building exists")
+
+
 def init() -> None:
     with Session(engine) as session:
         init_db(session)
@@ -163,6 +184,7 @@ def create_initial_data() -> None:
             session.commit()
             ensure_northwood_flat_1a(session, condominio)
             ensure_cleaner_building(session, condominio)
+            ensure_caretaker_building(session, condominio)
             ensure_fire_alarm_schedule_seed(session)
             ensure_default_manager_user(session, condominio)
             logger.info("Initial data already exists, ensured default staff are active")
@@ -183,6 +205,7 @@ def create_initial_data() -> None:
             "Oak Lodge": 14,
             "Office": 0,  # Office doesn't have flats
             "Cleaner": 0,
+            "Caretaker": 0,
         }
 
         buildings = {}
@@ -194,6 +217,8 @@ def create_initial_data() -> None:
             # Others have Low + Normal (1 + 2 = 3)
             if building_name == "Office":
                 reading_types = 2
+            elif building_name in {"Cleaner", "Caretaker"}:
+                reading_types = 0
             elif building_name in {"Merlin", "Northwood", "Oak Lodge"}:
                 reading_types = 7
             else:

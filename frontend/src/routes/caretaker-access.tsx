@@ -15,14 +15,7 @@ const searchSchema = z.object({
   buildingName: z.string().optional().catch(""),
 })
 
-const SPECIAL_CLEANER_BUILDING_NAMES = new Set(["general", "cleaner"])
-const IN_OUT_LABEL = "Cleaner"
 const WORK_TIME_LABEL = "Work Time"
-
-const formatBuildingLabel = (label: string) =>
-  SPECIAL_CLEANER_BUILDING_NAMES.has(label.trim().toLowerCase())
-    ? IN_OUT_LABEL
-    : label
 
 type QueryParams = Record<string, string | number | boolean | null | undefined>
 type RequestOptions = { method?: string; body?: unknown }
@@ -110,9 +103,7 @@ function CaretakerAccess() {
         ? "Exit"
         : ""
 
-  const buildingLabel = formatBuildingLabel(
-    building || buildingName || buildingId || "",
-  )
+  const buildingLabel = building || buildingName || buildingId || ""
 
   const hasActiveSessionInBuilding =
     hasOpenSession &&

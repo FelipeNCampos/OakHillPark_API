@@ -64,15 +64,19 @@ interface Building {
 }
 
 const QR_SPECIAL_CLEANER_BUILDING_NAMES = new Set(["general", "cleaner"])
+const QR_CARETAKER_BUILDING_NAME = "caretaker"
 const QR_SPECIAL_CLEANER_BUILDING_LABEL = "Cleaner"
 const QR_IN_OUT_LABEL = "In/Out"
 const QR_WORK_TIME_LABEL = "Work Time"
 
-const isInOutQrBuilding = (building: Building) =>
+const isCleanerQrBuilding = (building: Building) =>
   QR_SPECIAL_CLEANER_BUILDING_NAMES.has(building.nome.trim().toLowerCase())
 
-const getQrBuildingLabel = (building: Building) =>
-  isInOutQrBuilding(building)
+const isCaretakerQrBuilding = (building: Building) =>
+  building.nome.trim().toLowerCase() === QR_CARETAKER_BUILDING_NAME
+
+const getCleanerQrBuildingLabel = (building: Building) =>
+  isCleanerQrBuilding(building)
     ? QR_SPECIAL_CLEANER_BUILDING_LABEL
     : building.nome || "Building"
 
@@ -8153,7 +8157,7 @@ function BinsQrCodesContent() {
 
   const buildings = (buildingsData?.data || []) as Building[]
   const defaultBuilding = useMemo(
-    () => buildings.find(isInOutQrBuilding) || null,
+    () => buildings.find(isCleanerQrBuilding) || null,
     [buildingsData?.data],
   )
 
@@ -8943,7 +8947,7 @@ function CleanerQrCodesContent() {
   >({})
   const [isGenerating, setIsGenerating] = useState(false)
   const visibleBuildings = useMemo(
-    () => buildings.filter(isInOutQrBuilding),
+    () => buildings.filter(isCleanerQrBuilding),
     [buildingsData?.data],
   )
 
@@ -9024,7 +9028,7 @@ function CleanerQrCodesContent() {
               >
                 <div>
                   <h3 className="text-lg font-semibold text-[#55311c]">
-                    {getQrBuildingLabel(building)}
+                    {getCleanerQrBuildingLabel(building)}
                   </h3>
                 </div>
 
@@ -9032,7 +9036,7 @@ function CleanerQrCodesContent() {
                   {qrItem?.dataUrl ? (
                     <img
                       src={qrItem.dataUrl}
-                      alt={`QR Code ${getQrBuildingLabel(building)}`}
+                      alt={`QR Code ${getCleanerQrBuildingLabel(building)}`}
                       className="h-48 w-48 rounded-lg border border-[#e5e0dc] bg-white p-2"
                     />
                   ) : (
@@ -10127,9 +10131,14 @@ function ContractorQrCodesContent() {
           User is not linked to a condominio.
         </div>
       )}
-
+  
       {user?.condominio_id && !isGenerating && (
         <div className="mx-auto max-w-md rounded-lg bg-white p-6 shadow-md">
+          <div>
+            <h3 className="text-lg font-semibold text-[#55311c]">
+              Contractor IN/OUT
+            </h3>
+          </div>
           <div className="flex flex-col items-center justify-center gap-4">
             {qrItem?.dataUrl ? (
               <img
@@ -10194,7 +10203,7 @@ function CaretakerQrCodesContent() {
   >({})
   const [isGenerating, setIsGenerating] = useState(false)
   const inOutBuildings = useMemo(
-    () => buildings.filter(isInOutQrBuilding),
+    () => buildings.filter(isCaretakerQrBuilding),
     [buildingsData?.data],
   )
 
@@ -10336,7 +10345,7 @@ function CaretakerQrCodesContent() {
             >
               <div>
                 <h3 className="text-lg font-semibold text-[#55311c]">
-                  {getQrBuildingLabel(building)}
+                  {building.nome || "Caretaker"}
                 </h3>
                 <p className="text-sm text-[rgba(0,0,0,0.6)]">
                   Caretaker IN/OUT
@@ -10347,7 +10356,7 @@ function CaretakerQrCodesContent() {
                 {qrItem?.dataUrl ? (
                   <img
                     src={qrItem.dataUrl}
-                    alt={`QR Code ${getQrBuildingLabel(building)}`}
+                    alt={`QR Code ${building.nome || "Caretaker"}`}
                     className="h-48 w-48 rounded-lg border border-[#e5e0dc] bg-white p-2"
                   />
                 ) : (

@@ -7,10 +7,20 @@ import {
 import { createFileRoute, redirect } from "@tanstack/react-router"
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
-import { CheckIcon } from "lucide-react"
+import { GlobalWorkerOptions, getDocument } from "pdfjs-dist"
+import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url"
+import {
+  CircleDollarSign,
+  FileSpreadsheet,
+  Pencil,
+  Plus,
+  Search,
+  Upload,
+  X,
+} from "lucide-react"
 import QRCode from "qrcode"
 import type { ChangeEvent, KeyboardEvent } from "react"
-import { useDeferredValue, useEffect, useMemo, useState } from "react"
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react"
 import {
   Bar,
   BarChart,
@@ -39,6 +49,8 @@ import {
 } from "@/components/ui/dropdown-menu"
 import useAuth, { isLoggedIn } from "@/hooks/useAuth"
 import useCustomToast from "@/hooks/useCustomToast"
+
+GlobalWorkerOptions.workerSrc = pdfjsWorker
 
 type EntityId = string | number
 
@@ -196,12 +208,41 @@ interface CashFlowRecordsResponse {
 }
 
 interface CashFlowFormState {
-  hasInvoice: boolean
+  invoice: "Yes" | "No"
+  date: string
+  value: string
+  description: string
   invoiceMediaName: string
   invoiceMediaData: string | null
-  recordDate: string
-  amount: string
+}
+
+interface CashFlowPreviewState {
+  url: string
+  contentType: string
+  fileName: string
+  revokeOnDispose: boolean
+}
+
+interface CashFlowInvoiceEditorState {
+  record: CashFlowRecord
+  preview: CashFlowPreviewState | null
+  selectedFileName: string
+  selectedFileData: string | null
+  error: string | null
+}
+
+interface CashFlowTextEditorState {
+  record: CashFlowRecord
+  value: string
   description: string
+  error: string | null
+}
+
+interface CashFlowReportFormState {
+  email: string
+  startMonth: string
+  endMonth: string
+  includeInvoiceTable: boolean
 }
 
 interface CaretakerRecordEditState {
@@ -1650,12 +1691,12 @@ const buildMonthRangeLabel = (monthFrom: string, monthTo: string) => {
 }
 
 const getEmptyCashFlowForm = (): CashFlowFormState => ({
-  hasInvoice: false,
+  invoice: "No",
+  date: getTodayDateInputValue(),
+  value: "",
+  description: "",
   invoiceMediaName: "",
   invoiceMediaData: null,
-  recordDate: getTodayDateInputValue(),
-  amount: "",
-  description: "",
 })
 
 const CARETAKER_INVOICE_HOURS_STORAGE_KEY = "oakhill-caretaker-invoice-hours"
@@ -1732,6 +1773,63 @@ const getDataUrlMimeType = (value?: string | null) => {
 
 const isPdfDataUrl = (value?: string | null) =>
   getDataUrlMimeType(value) === "application/pdf"
+
+const dataUrlToUint8Array = (value: string) => {
+  const base64 = value.split(",")[1] || ""
+  const normalized = base64.replace(/\s/g, "")
+  const binary = atob(normalized)
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index)
+  }
+  return bytes
+}
+
+const createBlobUrlFromDataUrl = (value: string) => {
+  const mimeType = getDataUrlMimeType(value) || "application/octet-stream"
+  const blob = new Blob([dataUrlToUint8Array(value)], { type: mimeType })
+  return URL.createObjectURL(blob)
+}
+
+const revokePreviewState = (preview?: CashFlowPreviewState | null) => {
+  if (preview?.revokeOnDispose) {
+    URL.revokeObjectURL(preview.url)
+  }
+}
+
+const renderPdfDataUrlPages = async (value: string) => {
+  const pdf = await getDocument({ data: dataUrlToUint8Array(value) }).promise
+  const pages: Array<{ dataUrl: string; width: number; height: number }> = []
+
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    const page = await pdf.getPage(pageNumber)
+    const baseViewport = page.getViewport({ scale: 1 })
+    const scale = Math.min(
+      2,
+      1800 / Math.max(baseViewport.width, baseViewport.height, 1),
+    )
+    const viewport = page.getViewport({ scale: Math.max(scale, 1) })
+    const canvas = document.createElement("canvas")
+    canvas.width = Math.max(1, Math.ceil(viewport.width))
+    canvas.height = Math.max(1, Math.ceil(viewport.height))
+    const context = canvas.getContext("2d")
+    if (!context) {
+      throw new Error("Could not prepare PDF preview")
+    }
+
+    context.fillStyle = "#ffffff"
+    context.fillRect(0, 0, canvas.width, canvas.height)
+    await page.render({ canvas, canvasContext: context, viewport }).promise
+
+    pages.push({
+      dataUrl: canvas.toDataURL("image/jpeg", 0.82),
+      width: viewport.width,
+      height: viewport.height,
+    })
+  }
+
+  return pages
+}
 
 const CONTRACTOR_MEDIA_SLOT_COUNT = 4
 
@@ -2440,48 +2538,87 @@ function OverviewContent({
 
 function CashFlowContent() {
   const queryClient = useQueryClient()
-  const { showSuccessToast, showErrorToast } = useCustomToast()
+  const title = "Cashflow"
+  const monthInputRef = useRef<HTMLInputElement | null>(null)
+  const createInvoiceFileInputRef = useRef<HTMLInputElement | null>(null)
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonthInputValue)
   const [search, setSearch] = useState("")
-  const [isDialogOpen, setIsDialogOpen] = useState(false)
-  const [invoicePreview, setInvoicePreview] = useState<CashFlowRecord | null>(
+  const [isCreateOpen, setIsCreateOpen] = useState(false)
+  const [form, setForm] = useState<CashFlowFormState>(getEmptyCashFlowForm)
+  const [formError, setFormError] = useState<string | null>(null)
+  const [feedback, setFeedback] = useState<{
+    type: "success" | "error"
+    message: string
+  } | null>(null)
+  const [isReportOpen, setIsReportOpen] = useState(false)
+  const [reportForm, setReportForm] = useState<CashFlowReportFormState>({
+    email: "",
+    startMonth: getCurrentMonthInputValue(),
+    endMonth: getCurrentMonthInputValue(),
+    includeInvoiceTable: false,
+  })
+  const [reportError, setReportError] = useState<string | null>(null)
+  const [reportPreviewUrl, setReportPreviewUrl] = useState<string | null>(null)
+  const [reportPreviewLoading, setReportPreviewLoading] = useState(false)
+  const [reportPreviewError, setReportPreviewError] = useState<string | null>(
     null,
   )
-  const [invoiceUploadRecord, setInvoiceUploadRecord] =
-    useState<CashFlowRecord | null>(null)
-  const [invoiceUploadMediaName, setInvoiceUploadMediaName] = useState("")
-  const [invoiceUploadMediaData, setInvoiceUploadMediaData] = useState<
-    string | null
-  >(null)
-  const [editingDescriptionRecord, setEditingDescriptionRecord] =
-    useState<CashFlowRecord | null>(null)
-  const [editingDescriptionValue, setEditingDescriptionValue] = useState("")
-  const [form, setForm] = useState<CashFlowFormState>(getEmptyCashFlowForm)
-  const [isReportDialogOpen, setIsReportDialogOpen] = useState(false)
-  const [reportMonthFrom, setReportMonthFrom] = useState(
-    getCurrentMonthInputValue,
-  )
-  const [reportMonthTo, setReportMonthTo] = useState(getCurrentMonthInputValue)
-  const [reportEmail, setReportEmail] = useState("")
-  const [reportPdfDataUrl, setReportPdfDataUrl] = useState("")
-  const [reportPdfPreviewUrl, setReportPdfPreviewUrl] = useState("")
-  const [reportFileName, setReportFileName] = useState("")
-  const [reportInvoiceCount, setReportInvoiceCount] = useState(0)
-  const [includeInvoiceReportTable, setIncludeInvoiceReportTable] =
-    useState(false)
-  const [isGeneratingInvoiceReport, setIsGeneratingInvoiceReport] =
-    useState(false)
-  const [isSendingInvoiceReport, setIsSendingInvoiceReport] = useState(false)
+  const [sendingReport, setSendingReport] = useState(false)
+  const [reportFile, setReportFile] = useState<{
+    dataUrl: string
+    fileName: string
+    invoiceCount: number
+    periodLabel: string
+  } | null>(null)
+  const [invoiceEditor, setInvoiceEditor] =
+    useState<CashFlowInvoiceEditorState | null>(null)
+  const [textEditor, setTextEditor] =
+    useState<CashFlowTextEditorState | null>(null)
+  const [createInvoicePreview, setCreateInvoicePreview] =
+    useState<CashFlowPreviewState | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [savingInvoice, setSavingInvoice] = useState(false)
+  const [savingText, setSavingText] = useState(false)
   const { dateFrom, dateTo } = useMemo(
     () => getMonthDateRange(selectedMonth),
     [selectedMonth],
   )
   const deferredSearch = useDeferredValue(search.trim())
+  const labelClass =
+    "text-[11px] font-extrabold uppercase tracking-[0.08em] text-[rgba(85,49,28,0.72)]"
+  const inputClass =
+    "h-11 w-full rounded-lg border border-[#d9d0ca] bg-white px-3.5 text-sm font-semibold text-[#55311c] outline-none transition focus:ring-2 focus:ring-[#8c7569]"
+  const cardClass = "rounded-2xl border border-[#e5e0dc] bg-white shadow-md"
+  const secondaryButtonClass =
+    "inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-[#d9d0ca] bg-white px-4 py-2 text-sm font-extrabold text-[#55311c] transition hover:bg-[#f5f1ee] disabled:cursor-not-allowed disabled:opacity-60"
+  const primaryButtonClass =
+    "inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-extrabold text-white transition hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60"
 
   useEffect(() => {
-    if (!reportPdfPreviewUrl) return undefined
-    return () => URL.revokeObjectURL(reportPdfPreviewUrl)
-  }, [reportPdfPreviewUrl])
+    if (!reportPreviewUrl) return undefined
+    return () => URL.revokeObjectURL(reportPreviewUrl)
+  }, [reportPreviewUrl])
+
+  useEffect(() => {
+    return () => revokePreviewState(createInvoicePreview)
+  }, [createInvoicePreview])
+
+  useEffect(() => {
+    return () => revokePreviewState(invoiceEditor?.preview)
+  }, [invoiceEditor?.preview])
+
+  useEffect(() => {
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape") return
+      setIsCreateOpen(false)
+      setIsReportOpen(false)
+      setTextEditor(null)
+      setInvoiceEditor(null)
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [])
 
   const recordsQuery = useQuery<CashFlowRecordsResponse>({
     queryKey: ["cash-flow", selectedMonth, deferredSearch],
@@ -2496,271 +2633,243 @@ function CashFlowContent() {
     placeholderData: keepPreviousData,
   })
 
-  const monthSummaryQuery = useQuery<CashFlowRecordsResponse>({
-    queryKey: ["cash-flow", selectedMonth, "summary"],
+  const cumulativeBalanceQuery = useQuery<CashFlowRecordsResponse>({
+    queryKey: ["cash-flow-summary", selectedMonth, deferredSearch],
     queryFn: () =>
       apiCall("/api/v1/cash-flow/", {
         skip: 0,
         limit: 1,
-        date_from: dateFrom,
         date_to: dateTo,
+        search: deferredSearch || undefined,
       }),
     placeholderData: keepPreviousData,
   })
 
   const records = recordsQuery.data?.data || []
-  const monthBalance = monthSummaryQuery.data?.balance || 0
+  const currentBalanceValue = Number(cumulativeBalanceQuery.data?.balance || 0)
+  const thisMonthValue = Number(recordsQuery.data?.balance || 0)
+  const openingBalanceValue = currentBalanceValue - thisMonthValue
+  const currentBalance = formatCurrencyGbp(Math.abs(currentBalanceValue))
+  const thisMonth = formatCurrencyGbp(thisMonthValue)
+  const openingBalance = formatCurrencyGbp(openingBalanceValue)
 
   const recordsWithBalance = useMemo(() => {
-    let runningBalance = 0
+    let runningBalance = openingBalanceValue
     return records.map((record) => {
       runningBalance += Number(record.amount)
       return { ...record, balance: runningBalance }
     })
-  }, [records])
+  }, [openingBalanceValue, records])
 
-  const createCashFlowMutation = useMutation({
-    mutationFn: (payload: {
-      has_invoice: boolean
-      invoice_media_name?: string | null
-      invoice_media_data?: string | null
-      record_date: string
-      amount: number
-      description: string
-    }) =>
-      apiCall("/api/v1/cash-flow/", {
-        method: "POST",
-        body: payload,
-      }),
-    onSuccess: () => {
-      showSuccessToast("Cash flow record saved")
-      setIsDialogOpen(false)
-      setForm(getEmptyCashFlowForm())
-      queryClient.invalidateQueries({ queryKey: ["cash-flow"] })
-    },
-    onError: (error: unknown) => {
-      showErrorToast(
-        error instanceof Error ? error.message : "Could not save record",
-      )
-    },
-  })
+  const tableColumnCount = 7
 
-  const deleteCashFlowMutation = useMutation({
-    mutationFn: (id: EntityId) =>
-      apiCall(`/api/v1/cash-flow/${id}`, {
-        method: "DELETE",
-      }),
-    onSuccess: () => {
-      showSuccessToast("Cash flow record deleted")
-      queryClient.invalidateQueries({ queryKey: ["cash-flow"] })
-    },
-    onError: (error: unknown) => {
-      showErrorToast(
-        error instanceof Error ? error.message : "Could not delete record",
-      )
-    },
-  })
-
-  const updateCashFlowMutation = useMutation({
-    mutationFn: ({
-      id,
-      payload,
-    }: {
-      id: EntityId
-      payload: Record<string, unknown>
-    }) =>
-      apiCall(`/api/v1/cash-flow/${id}`, {
-        method: "PATCH",
-        body: payload,
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["cash-flow"] })
-    },
-    onError: (error: unknown) => {
-      showErrorToast(
-        error instanceof Error ? error.message : "Could not update record",
-      )
-    },
-  })
-
-  const updateForm = <K extends keyof CashFlowFormState>(
-    key: K,
-    value: CashFlowFormState[K],
-  ) => {
-    setForm((previous) => ({ ...previous, [key]: value }))
+  const formatCashFlowDate = (value: string) => {
+    const [year, month, day] = value.split("-")
+    return day && month && year ? `${day}-${month}-${year}` : value
   }
 
-  const handleDialogChange = (open: boolean) => {
-    setIsDialogOpen(open)
-    if (!open) {
-      setForm(getEmptyCashFlowForm())
+  const resolvePreviewState = (
+    mediaData: string,
+    fileName: string,
+  ): CashFlowPreviewState => {
+    const contentType =
+      getDataUrlMimeType(mediaData) || "application/octet-stream"
+
+    if (contentType === "application/pdf") {
+      return {
+        url: createBlobUrlFromDataUrl(mediaData),
+        contentType,
+        fileName,
+        revokeOnDispose: true,
+      }
+    }
+
+    return {
+      url: mediaData,
+      contentType,
+      fileName,
+      revokeOnDispose: false,
     }
   }
 
-  const resetInvoiceReportPreview = () => {
-    setReportPdfDataUrl("")
-    setReportPdfPreviewUrl("")
-    setReportFileName("")
-    setReportInvoiceCount(0)
+  const reload = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["cash-flow"] }),
+      queryClient.invalidateQueries({ queryKey: ["cash-flow-summary"] }),
+    ])
   }
 
-  const handleReportDialogChange = (open: boolean) => {
-    setIsReportDialogOpen(open)
-    if (!open) {
-      resetInvoiceReportPreview()
+  const openMonthPicker = () => {
+    const input = monthInputRef.current
+    if (!input) return
+    input.focus()
+    if (typeof input.showPicker === "function") {
+      input.showPicker()
     }
   }
 
-  const handleInvoiceFileChange = async (
-    event: ChangeEvent<HTMLInputElement>,
-  ) => {
-    const file = event.target.files?.[0]
-    if (!file) return
-
-    try {
-      const dataUrl = await readFileAsDataUrl(file)
-      setForm((previous) => ({
-        ...previous,
-        invoiceMediaName: file.name,
-        invoiceMediaData: dataUrl,
-      }))
-    } catch (error) {
-      showErrorToast(
-        error instanceof Error ? error.message : "Could not read invoice media",
-      )
-    } finally {
-      event.target.value = ""
+  const clearCreateInvoiceMedia = () => {
+    setCreateInvoicePreview((current) => {
+      revokePreviewState(current)
+      return null
+    })
+    setForm((current) => ({
+      ...current,
+      invoice: "No",
+      invoiceMediaName: "",
+      invoiceMediaData: null,
+    }))
+    if (createInvoiceFileInputRef.current) {
+      createInvoiceFileInputRef.current.value = ""
     }
   }
 
-  const resetInvoiceUploadDialog = () => {
-    setInvoiceUploadRecord(null)
-    setInvoiceUploadMediaName("")
-    setInvoiceUploadMediaData(null)
+  const closeCreateRecord = () => {
+    clearCreateInvoiceMedia()
+    setForm(getEmptyCashFlowForm())
+    setFormError(null)
+    setIsCreateOpen(false)
   }
 
-  const handleExistingInvoiceFileChange = async (
-    event: ChangeEvent<HTMLInputElement>,
-  ) => {
-    const file = event.target.files?.[0]
-    if (!file) return
-
-    try {
-      const dataUrl = await readFileAsDataUrl(file)
-      setInvoiceUploadMediaName(file.name)
-      setInvoiceUploadMediaData(dataUrl)
-    } catch (error) {
-      showErrorToast(
-        error instanceof Error ? error.message : "Could not read invoice media",
-      )
-    } finally {
-      event.target.value = ""
-    }
-  }
-
-  const handleSaveExistingInvoice = async () => {
-    if (!invoiceUploadRecord) return
-    if (!invoiceUploadMediaData) {
-      showErrorToast("Select invoice media")
-      return
-    }
-
-    try {
-      await updateCashFlowMutation.mutateAsync({
-        id: invoiceUploadRecord.id,
-        payload: {
-          has_invoice: true,
-          invoice_media_name: invoiceUploadMediaName || null,
-          invoice_media_data: invoiceUploadMediaData,
-        },
-      })
-      showSuccessToast("Invoice media added")
-      resetInvoiceUploadDialog()
-    } catch {
-      // The mutation already shows the error toast.
-    }
-  }
-
-  const handleOpenDescriptionEdit = (record: CashFlowRecord) => {
-    setEditingDescriptionRecord(record)
-    setEditingDescriptionValue(record.description || "")
-  }
-
-  const resetDescriptionEditDialog = () => {
-    setEditingDescriptionRecord(null)
-    setEditingDescriptionValue("")
-  }
-
-  const handleSaveDescriptionEdit = async () => {
-    if (!editingDescriptionRecord) return
-
-    try {
-      await updateCashFlowMutation.mutateAsync({
-        id: editingDescriptionRecord.id,
-        payload: {
-          description: editingDescriptionValue.trim(),
-        },
-      })
-      showSuccessToast("Description updated")
-      resetDescriptionEditDialog()
-    } catch {
-      // The mutation already shows the error toast.
-    }
-  }
-
-  const handleSubmit = () => {
-    const rawAmount = Number(form.amount)
-    if (!form.recordDate) {
-      showErrorToast("Date is required")
-      return
-    }
-    if (!form.amount.trim() || !Number.isFinite(rawAmount)) {
-      showErrorToast("Amount must be a valid number")
-      return
-    }
-    if (rawAmount === 0) {
-      showErrorToast("Amount must be different from zero")
-      return
-    }
-
-    createCashFlowMutation.mutate({
-      has_invoice: form.hasInvoice,
-      invoice_media_name: form.hasInvoice ? form.invoiceMediaName || null : null,
-      invoice_media_data: form.hasInvoice ? form.invoiceMediaData : null,
-      record_date: form.recordDate,
-      amount: rawAmount,
-      description: form.description.trim(),
+  const closeReportModal = () => {
+    setIsReportOpen(false)
+    setReportError(null)
+    setReportPreviewError(null)
+    setReportFile(null)
+    setReportPreviewUrl((current) => {
+      if (current) URL.revokeObjectURL(current)
+      return null
     })
   }
 
-  const handleDelete = (record: CashFlowRecord) => {
-    if (deleteCashFlowMutation.isPending) return
-
-    const confirmed =
-      typeof window === "undefined"
-        ? true
-        : window.confirm(
-            `Delete payment #${record.payment_number} from ${formatDateToGb(record.record_date)}?`,
-          )
-    if (!confirmed) return
-    deleteCashFlowMutation.mutate(record.id)
+  const closeInvoiceEditor = () => {
+    setInvoiceEditor((current) => {
+      revokePreviewState(current?.preview)
+      return null
+    })
   }
 
-  const generateInvoiceReportPdf = async () => {
-    if (!reportMonthFrom || !reportMonthTo) {
-      showErrorToast("Select the month range")
-      return null
+  const handleCreateInvoiceFileSelect = async (file: File | null) => {
+    clearCreateInvoiceMedia()
+    setFormError(null)
+    if (!file) return
+
+    try {
+      const dataUrl = await readFileAsDataUrl(file)
+      setForm((current) => ({
+        ...current,
+        invoice: "Yes",
+        invoiceMediaName: file.name,
+        invoiceMediaData: dataUrl,
+      }))
+      setCreateInvoicePreview(
+        resolvePreviewState(dataUrl, file.name || "invoice-media"),
+      )
+    } catch (error) {
+      setFormError(
+        error instanceof Error ? error.message : "Unable to load invoice media.",
+      )
     }
-    if (reportMonthFrom > reportMonthTo) {
-      showErrorToast("Start month must be before end month")
+  }
+
+  const handleInvoiceFileSelect = async (file: File | null) => {
+    if (!invoiceEditor || !file) return
+
+    try {
+      const dataUrl = await readFileAsDataUrl(file)
+      setInvoiceEditor((current) =>
+        current
+          ? (() => {
+              revokePreviewState(current.preview)
+              return {
+                ...current,
+                selectedFileName: file.name,
+                selectedFileData: dataUrl,
+                preview: resolvePreviewState(
+                  dataUrl,
+                  file.name || "invoice-media",
+                ),
+                error: null,
+              }
+            })()
+          : current,
+      )
+    } catch (error) {
+      setInvoiceEditor((current) =>
+        current
+          ? {
+              ...current,
+              error:
+                error instanceof Error
+                  ? error.message
+                  : "Unable to load invoice media.",
+            }
+          : current,
+      )
+    }
+  }
+
+  const handleOpenInvoiceEditor = (record: CashFlowRecord) => {
+    setFeedback(null)
+    setInvoiceEditor({
+      record,
+      preview:
+        record.invoice_media_data && record.invoice_media_name
+          ? resolvePreviewState(record.invoice_media_data, record.invoice_media_name)
+          : record.invoice_media_data
+            ? resolvePreviewState(record.invoice_media_data, "invoice-media")
+            : null,
+      selectedFileName: "",
+      selectedFileData: null,
+      error: null,
+    })
+  }
+
+  const openTextEditor = (record: CashFlowRecord) => {
+    setFeedback(null)
+    setTextEditor({
+      record,
+      value: String(record.amount),
+      description: record.description || "",
+      error: null,
+    })
+  }
+
+  const openReportModal = () => {
+    setReportError(null)
+    setReportForm((current) => ({
+      ...current,
+      startMonth: current.startMonth || selectedMonth,
+      endMonth: current.endMonth || selectedMonth,
+    }))
+    setIsReportOpen(true)
+  }
+
+  const generateInvoiceReport = async () => {
+    if (
+      !isReportOpen ||
+      !reportForm.startMonth ||
+      !reportForm.endMonth ||
+      reportForm.startMonth > reportForm.endMonth
+    ) {
+      setReportPreviewUrl((current) => {
+        if (current) URL.revokeObjectURL(current)
+        return null
+      })
+      setReportFile(null)
       return null
     }
 
-    const rangeFrom = getMonthDateRange(reportMonthFrom)
-    const rangeTo = getMonthDateRange(reportMonthTo)
-    const periodLabel = buildMonthRangeLabel(reportMonthFrom, reportMonthTo)
+    const rangeFrom = getMonthDateRange(reportForm.startMonth)
+    const rangeTo = getMonthDateRange(reportForm.endMonth)
+    const periodLabel = buildMonthRangeLabel(
+      reportForm.startMonth,
+      reportForm.endMonth,
+    )
 
-    setIsGeneratingInvoiceReport(true)
+    setReportPreviewLoading(true)
+    setReportPreviewError(null)
+
     try {
       const pageLimit = 500
       const firstPage = (await apiCall("/api/v1/cash-flow/", {
@@ -2768,14 +2877,17 @@ function CashFlowContent() {
         limit: pageLimit,
         date_from: rangeFrom.dateFrom,
         date_to: rangeTo.dateTo,
+        search: deferredSearch || undefined,
       })) as CashFlowRecordsResponse
       const allRecords = [...(firstPage.data || [])]
+
       for (let skip = pageLimit; skip < (firstPage.count || 0); skip += pageLimit) {
         const nextPage = (await apiCall("/api/v1/cash-flow/", {
           skip,
           limit: pageLimit,
           date_from: rangeFrom.dateFrom,
           date_to: rangeTo.dateTo,
+          search: deferredSearch || undefined,
         })) as CashFlowRecordsResponse
         allRecords.push(...(nextPage.data || []))
       }
@@ -2785,35 +2897,37 @@ function CashFlowContent() {
       )
 
       if (invoiceRecords.length === 0) {
-        showErrorToast("No invoices found in the selected range")
-        resetInvoiceReportPreview()
-        return null
+        throw new Error("No invoice media found for the selected period.")
       }
 
-      const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" })
+      const doc = new jsPDF({
+        orientation: "portrait",
+        unit: "pt",
+        format: "a4",
+      })
       const pageWidth = doc.internal.pageSize.getWidth()
       const pageHeight = doc.internal.pageSize.getHeight()
-      const margin = 40
+      const margin = 20
 
       const renderInvoiceTable = (
-        records: CashFlowRecord[],
+        tableRecords: CashFlowRecord[],
         tablePeriodLabel: string,
       ) => {
         doc.setFontSize(16)
-        doc.text("Cash Flow Invoice Report", margin, 42)
+        doc.text(`${title} Report`, margin, 42)
         doc.setFontSize(10)
         doc.text(`Period: ${tablePeriodLabel}`, margin, 62)
         doc.text(`Generated: ${new Date().toLocaleString("en-GB")}`, margin, 78)
 
         autoTable(doc, {
           startY: 98,
-          head: [["Payment #", "Date", "Amount", "Description", "Invoice"]],
-          body: records.map((record) => [
+          head: [["Payment Number", "Date", "Amount", "Comments", "Invoice"]],
+          body: tableRecords.map((record) => [
             record.payment_number,
-            formatDateToGb(record.record_date),
+            formatCashFlowDate(record.record_date),
             formatCurrencyGbp(record.amount),
             record.description || "-",
-            record.invoice_media_name || "Invoice",
+            record.invoice_media_name || "Invoice media",
           ]),
           theme: "grid",
           styles: {
@@ -2834,26 +2948,33 @@ function CashFlowContent() {
         record: CashFlowRecord,
         monthLabel?: string,
       ) => {
-        doc.setFontSize(13)
-        doc.text(`Invoice #${record.payment_number}`, margin, 38)
-        doc.setFontSize(9)
-        doc.text(`Date: ${formatDateToGb(record.record_date)}`, margin, 56)
-        doc.text(`Amount: ${formatCurrencyGbp(record.amount)}`, margin, 72)
-        doc.text(`Description: ${record.description || "-"}`, margin, 88, {
-          maxWidth: pageWidth - margin * 2,
-        })
-        if (monthLabel) {
-          doc.text(`Month: ${monthLabel}`, margin, 108)
+        const renderRecordHeader = () => {
+          doc.setFontSize(13)
+          doc.text(`Payment #${record.payment_number}`, margin, 38)
+          doc.setFontSize(9)
+          doc.text(`Date: ${formatCashFlowDate(record.record_date)}`, margin, 56)
+          doc.text(`Amount: ${formatCurrencyGbp(record.amount)}`, margin, 72)
+          doc.text(`Comments: ${record.description || "-"}`, margin, 88, {
+            maxWidth: pageWidth - margin * 2,
+          })
+          if (monthLabel) {
+            doc.text(`Month: ${monthLabel}`, margin, 108)
+          }
         }
+
+        renderRecordHeader()
+
         const mediaData = record.invoice_media_data || ""
         if (isImageDataUrl(mediaData)) {
           try {
             const image = new Image()
             await new Promise<void>((resolve, reject) => {
               image.onload = () => resolve()
-              image.onerror = () => reject(new Error("Could not load invoice image"))
+              image.onerror = () =>
+                reject(new Error("Could not load invoice image"))
               image.src = mediaData
             })
+
             const maxWidth = pageWidth - margin * 2
             const maxHeight = pageHeight - 180
             const ratio = Math.min(
@@ -2870,8 +2991,14 @@ function CashFlowContent() {
               1800 / Math.max(image.naturalHeight, 1),
             )
             const canvas = document.createElement("canvas")
-            canvas.width = Math.max(1, Math.round(image.naturalWidth * canvasRatio))
-            canvas.height = Math.max(1, Math.round(image.naturalHeight * canvasRatio))
+            canvas.width = Math.max(
+              1,
+              Math.round(image.naturalWidth * canvasRatio),
+            )
+            canvas.height = Math.max(
+              1,
+              Math.round(image.naturalHeight * canvasRatio),
+            )
             const context = canvas.getContext("2d")
             if (!context) throw new Error("Could not prepare invoice image")
             context.fillStyle = "#ffffff"
@@ -2881,23 +3008,41 @@ function CashFlowContent() {
             doc.addImage(compressedImage, "JPEG", x, y, width, height)
           } catch {
             doc.setFontSize(11)
-            doc.text("Invoice image could not be added to the PDF.", margin, 150)
+            doc.text("Invoice image could not be added to the report.", margin, 150)
           }
         } else if (isPdfDataUrl(mediaData)) {
-          doc.setFontSize(11)
-          doc.text(
-            "This invoice was uploaded as a PDF. Its file is listed in this report, but PDF pages cannot be merged in the browser preview.",
-            margin,
-            150,
-            { maxWidth: pageWidth - margin * 2 },
-          )
+          try {
+            const pdfPages = await renderPdfDataUrlPages(mediaData)
+            const maxWidth = pageWidth - margin * 2
+            const maxHeight = pageHeight - 180
+
+            for (const [pageIndex, pdfPage] of pdfPages.entries()) {
+              if (pageIndex > 0) {
+                doc.addPage()
+                renderRecordHeader()
+              }
+
+              const ratio = Math.min(
+                maxWidth / Math.max(pdfPage.width, 1),
+                maxHeight / Math.max(pdfPage.height, 1),
+              )
+              const width = pdfPage.width * ratio
+              const height = pdfPage.height * ratio
+              const x = margin + (maxWidth - width) / 2
+              const y = 130 + (maxHeight - height) / 2
+              doc.addImage(pdfPage.dataUrl, "JPEG", x, y, width, height)
+            }
+          } catch {
+            doc.setFontSize(11)
+            doc.text("PDF pages could not be added to the report.", margin, 150)
+          }
         } else {
           doc.setFontSize(11)
           doc.text("Invoice preview is not available for this file type.", margin, 150)
         }
       }
 
-      if (includeInvoiceReportTable) {
+      if (reportForm.includeInvoiceTable) {
         const recordsByMonth = new Map<string, CashFlowRecord[]>()
         for (const record of invoiceRecords) {
           const monthKey = record.record_date.slice(0, 7)
@@ -2907,18 +3052,18 @@ function CashFlowContent() {
           ])
         }
 
-        for (const [groupIndex, [monthKey, records]] of Array.from(
+        for (const [groupIndex, [monthKey, monthRecords]] of Array.from(
           recordsByMonth.entries(),
         ).entries()) {
           const monthLabel =
-            reportMonthFrom === reportMonthTo
+            reportForm.startMonth === reportForm.endMonth
               ? periodLabel
               : buildMonthRangeLabel(monthKey, monthKey)
           if (groupIndex > 0) {
             doc.addPage()
           }
-          renderInvoiceTable(records, monthLabel)
-          for (const record of records) {
+          renderInvoiceTable(monthRecords, monthLabel)
+          for (const record of monthRecords) {
             doc.addPage()
             await renderInvoiceMediaPage(record, monthLabel)
           }
@@ -2933,736 +3078,1029 @@ function CashFlowContent() {
       }
 
       const pdfBlob = doc.output("blob")
+      const nextPreviewUrl = URL.createObjectURL(pdfBlob)
       const dataUrl = doc.output("datauristring")
-      const fileName = `cash-flow-invoices-${reportMonthFrom}-to-${reportMonthTo}.pdf`
-      setReportPdfDataUrl(dataUrl)
-      setReportPdfPreviewUrl(URL.createObjectURL(pdfBlob))
-      setReportFileName(fileName)
-      setReportInvoiceCount(invoiceRecords.length)
-      return { dataUrl, fileName, invoiceCount: invoiceRecords.length, periodLabel }
+      const fileName = `cashflow-${reportForm.startMonth}-to-${reportForm.endMonth}.pdf`
+      const nextReportFile = {
+        dataUrl,
+        fileName,
+        invoiceCount: invoiceRecords.length,
+        periodLabel,
+      }
+
+      setReportPreviewUrl((current) => {
+        if (current) URL.revokeObjectURL(current)
+        return nextPreviewUrl
+      })
+      setReportFile(nextReportFile)
+      return nextReportFile
     } catch (error) {
-      showErrorToast(
-        error instanceof Error ? error.message : "Failed to generate invoice report",
-      )
+      const message =
+        error instanceof Error ? error.message : "Unable to load report preview."
+      setReportPreviewError(message)
+      setReportFile(null)
+      setReportPreviewUrl((current) => {
+        if (current) URL.revokeObjectURL(current)
+        return null
+      })
       return null
     } finally {
-      setIsGeneratingInvoiceReport(false)
-    }
-  }
-
-  const handleSendInvoiceReport = async () => {
-    if (!reportEmail.trim()) {
-      showErrorToast("Email is required")
-      return
-    }
-
-    const report =
-      reportPdfDataUrl && reportFileName
-        ? {
-            dataUrl: reportPdfDataUrl,
-            fileName: reportFileName,
-            invoiceCount: reportInvoiceCount,
-            periodLabel: buildMonthRangeLabel(reportMonthFrom, reportMonthTo),
-          }
-        : await generateInvoiceReportPdf()
-    if (!report) return
-
-    const fileDataBase64 = report.dataUrl.split(",")[1] || ""
-    if (!fileDataBase64) {
-      showErrorToast("Failed to prepare report file")
-      return
-    }
-
-    try {
-      setIsSendingInvoiceReport(true)
-      await apiCall("/api/v1/utils/send-report-email/", {
-        method: "POST",
-        body: {
-          email_to: reportEmail.trim(),
-          subject: "Cash Flow Invoice Report",
-          html_content: `<p>Hello,</p><p>Please find attached the cash flow invoice report for ${report.periodLabel}.</p><p>Invoices included: ${report.invoiceCount}</p>`,
-          file_name: report.fileName,
-          file_data_base64: fileDataBase64,
-        },
-      })
-      showSuccessToast("Invoice report sent successfully")
-      handleReportDialogChange(false)
-    } catch (error) {
-      showErrorToast(
-        error instanceof Error ? error.message : "Failed to send invoice report",
-      )
-    } finally {
-      setIsSendingInvoiceReport(false)
+      setReportPreviewLoading(false)
     }
   }
 
   useEffect(() => {
-    if (!isReportDialogOpen) return
-    if (!reportMonthFrom || !reportMonthTo) return
-    if (reportMonthFrom > reportMonthTo) return
+    if (
+      !isReportOpen ||
+      !reportForm.startMonth ||
+      !reportForm.endMonth ||
+      reportForm.startMonth > reportForm.endMonth
+    ) {
+      setReportPreviewError(null)
+      setReportFile(null)
+      setReportPreviewUrl((current) => {
+        if (current) URL.revokeObjectURL(current)
+        return null
+      })
+      return
+    }
 
-    const timeoutId = window.setTimeout(() => {
-      generateInvoiceReportPdf()
-    }, 200)
+    void generateInvoiceReport()
+  }, [
+    deferredSearch,
+    isReportOpen,
+    reportForm.endMonth,
+    reportForm.includeInvoiceTable,
+    reportForm.startMonth,
+  ])
 
-    return () => window.clearTimeout(timeoutId)
-  }, [isReportDialogOpen, reportMonthFrom, reportMonthTo, includeInvoiceReportTable])
+  const handleCreateRecord = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setFormError(null)
+    setFeedback(null)
+
+    if (!form.date || !form.value.trim()) {
+      setFormError("Please fill all required fields.")
+      return
+    }
+
+    const parsedValue = Number(form.value)
+    if (!Number.isFinite(parsedValue)) {
+      setFormError("Enter a valid value.")
+      return
+    }
+
+    if (parsedValue === 0) {
+      setFormError("Value must be different from zero.")
+      return
+    }
+
+    setSaving(true)
+    try {
+      await apiCall("/api/v1/cash-flow/", {
+        method: "POST",
+        body: {
+          has_invoice: Boolean(form.invoiceMediaData),
+          invoice_media_name: form.invoiceMediaData ? form.invoiceMediaName : null,
+          invoice_media_data: form.invoiceMediaData,
+          record_date: form.date,
+          amount: parsedValue,
+          description: form.description.trim(),
+        },
+      })
+      closeCreateRecord()
+      setFeedback({
+        type: "success",
+        message: "Cash flow record created successfully.",
+      })
+      await reload()
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unable to create record."
+      setFormError(message)
+      setFeedback({ type: "error", message })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDeleteRecord = async (recordId: EntityId) => {
+    if (!window.confirm("Delete this record?")) return
+
+    setFeedback(null)
+    try {
+      await apiCall(`/api/v1/cash-flow/${recordId}`, {
+        method: "DELETE",
+      })
+      setFeedback({
+        type: "success",
+        message: "Record deleted successfully.",
+      })
+      await reload()
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unable to delete record."
+      setFeedback({ type: "error", message })
+    }
+  }
+
+  const handleSaveInvoice = async () => {
+    if (!invoiceEditor?.selectedFileData) {
+      setInvoiceEditor((current) =>
+        current
+          ? { ...current, error: "Select an image or PDF first." }
+          : current,
+      )
+      return
+    }
+
+    setSavingInvoice(true)
+    try {
+      await apiCall(`/api/v1/cash-flow/${invoiceEditor.record.id}`, {
+        method: "PATCH",
+        body: {
+          has_invoice: true,
+          invoice_media_name: invoiceEditor.selectedFileName || null,
+          invoice_media_data: invoiceEditor.selectedFileData,
+        },
+      })
+      closeInvoiceEditor()
+      setFeedback({
+        type: "success",
+        message: "Invoice media updated successfully.",
+      })
+      await reload()
+    } catch (error) {
+      setInvoiceEditor((current) =>
+        current
+          ? {
+              ...current,
+              error:
+                error instanceof Error
+                  ? error.message
+                  : "Unable to update invoice media.",
+            }
+          : current,
+      )
+    } finally {
+      setSavingInvoice(false)
+    }
+  }
+
+  const handleSaveText = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!textEditor) return
+
+    const parsedValue = Number(textEditor.value)
+    if (!textEditor.value.trim() || !Number.isFinite(parsedValue)) {
+      setTextEditor((current) =>
+        current ? { ...current, error: "Enter a valid value." } : current,
+      )
+      return
+    }
+
+    if (parsedValue === 0) {
+      setTextEditor((current) =>
+        current
+          ? { ...current, error: "Value must be different from zero." }
+          : current,
+      )
+      return
+    }
+
+    setSavingText(true)
+    try {
+      await apiCall(`/api/v1/cash-flow/${textEditor.record.id}`, {
+        method: "PATCH",
+        body: {
+          amount: parsedValue,
+          description: textEditor.description.trim(),
+        },
+      })
+      setTextEditor(null)
+      setFeedback({
+        type: "success",
+        message: "Record updated successfully.",
+      })
+      await reload()
+    } catch (error) {
+      setTextEditor((current) =>
+        current
+          ? {
+              ...current,
+              error:
+                error instanceof Error
+                  ? error.message
+                  : "Unable to update record.",
+            }
+          : current,
+      )
+    } finally {
+      setSavingText(false)
+    }
+  }
+
+  const handleSendReport = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setReportError(null)
+    setFeedback(null)
+
+    if (!reportForm.email.trim()) {
+      setReportError("Please enter an email address.")
+      return
+    }
+
+    if (!reportForm.startMonth || !reportForm.endMonth) {
+      setReportError("Please select a report period.")
+      return
+    }
+
+    if (reportForm.startMonth > reportForm.endMonth) {
+      setReportError("Start month must be before or equal to end month.")
+      return
+    }
+
+    setSendingReport(true)
+    try {
+      const report = reportFile || (await generateInvoiceReport())
+      if (!report) {
+        setReportError("Unable to generate the report.")
+        return
+      }
+
+      const fileDataBase64 = report.dataUrl.split(",")[1] || ""
+      if (!fileDataBase64) {
+        setReportError("Unable to prepare the report file.")
+        return
+      }
+
+      await apiCall("/api/v1/utils/send-report-email/", {
+        method: "POST",
+        body: {
+          email_to: reportForm.email.trim(),
+          subject: `${title} Report`,
+          html_content: `<p>Hello,</p><p>Please find attached the ${escapeHtml(title.toLowerCase())} report for ${escapeHtml(report.periodLabel)}.</p><p>Invoices included: ${report.invoiceCount}</p>`,
+          file_name: report.fileName,
+          file_data_base64: fileDataBase64,
+        },
+      })
+
+      closeReportModal()
+      setReportForm({
+        email: "",
+        startMonth: selectedMonth,
+        endMonth: selectedMonth,
+        includeInvoiceTable: false,
+      })
+      setFeedback({
+        type: "success",
+        message: "Report sent successfully.",
+      })
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unable to send report."
+      setReportError(message)
+      setFeedback({ type: "error", message })
+    } finally {
+      setSendingReport(false)
+    }
+  }
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
-      <div className="rounded-lg bg-white p-6 shadow-md">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
-              Cash Flow Control
-            </h2>
-            <p className="mt-1 text-[rgba(0,0,0,0.7)]">
-              Monthly register for payments, invoices and descriptions.
-            </p>
-          </div>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
-            <button
-              type="button"
-              onClick={() => setIsReportDialogOpen(true)}
-              className="rounded-lg border border-[#8c7569] px-4 py-3 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
-            >
-              Invoice report
-            </button>
-            <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] px-5 py-4">
-              <p className="text-xs font-bold uppercase tracking-wide text-[rgba(85,49,28,0.7)]">
-                Month balance
-              </p>
-              <p
-                className={`mt-1 font-mono text-2xl font-bold ${
-                  monthBalance < 0 ? "text-[#b42318]" : "text-[#217a4b]"
-                }`}
-              >
-                {formatCurrencyGbp(monthBalance)}
-              </p>
-            </div>
-          </div>
+      <section className="grid gap-4 xl:grid-cols-2 xl:items-end">
+        <div className="flex w-full justify-center xl:justify-center">
+          <h2 className="text-3xl font-extrabold text-[#55311c]">{title}</h2>
         </div>
-      </div>
-
-      <div className="rounded-lg bg-white p-6 shadow-md">
-        <div className="grid gap-3 lg:grid-cols-[170px_minmax(220px,1fr)_auto] lg:items-end">
-          <div>
-            <label
-              htmlFor="cash-flow-month"
-              className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
-            >
-              Month
-            </label>
+        <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-end">
+          <label className="grid gap-2" onClick={openMonthPicker}>
+            <span className={labelClass}>Month</span>
             <input
-              id="cash-flow-month"
+              ref={monthInputRef}
+              className={`${inputClass} cursor-pointer`}
               type="month"
               value={selectedMonth}
               onChange={(event) => setSelectedMonth(event.target.value)}
-              className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
             />
+          </label>
+          <label className="grid min-w-0 gap-2 sm:flex-1 sm:min-w-72">
+            <span className={`${labelClass} invisible`}>Search</span>
+            <span className="relative block">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#8c7569]" />
+              <input
+                className={`${inputClass} pl-9`}
+                placeholder="Search by Comments"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+              />
+            </span>
+          </label>
+        </div>
+      </section>
+
+      <section className="grid gap-4 md:grid-cols-[minmax(0,1fr)_220px]">
+        <article className={`${cardClass} p-6`}>
+          <div className="grid overflow-hidden rounded-xl border border-[#e5e0dc] bg-[#faf8f6] sm:grid-cols-2">
+            <div className="p-4 text-center sm:border-r sm:border-[#e5e0dc]">
+              <p className={labelClass}>Last Month</p>
+              <p className="mt-2 text-2xl font-extrabold text-[#55311c]">
+                {openingBalance}
+              </p>
+            </div>
+            <div className="p-4 text-center">
+              <p className={labelClass}>This Month</p>
+              <p
+                className={`mt-2 text-2xl font-extrabold ${
+                  thisMonthValue >= 0 ? "text-[#217a4b]" : "text-[#b42318]"
+                }`}
+              >
+                {thisMonth}
+              </p>
+            </div>
           </div>
-          <div>
-            <label
-              htmlFor="cash-flow-search"
-              className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
-            >
-              Search
-            </label>
-            <input
-              id="cash-flow-search"
-              type="text"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Description"
-              className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
-            />
-          </div>
+        </article>
+
+        <div className="grid gap-3 md:h-full">
           <button
+            className={`${primaryButtonClass} min-h-12 w-full`}
             type="button"
-            onClick={() => setIsDialogOpen(true)}
-            className="rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c]"
+            onClick={() => setIsCreateOpen(true)}
           >
+            <CircleDollarSign size={18} />
             New record
           </button>
+          <button
+            className={`${secondaryButtonClass} min-h-12 w-full md:flex-1`}
+            type="button"
+            onClick={openReportModal}
+          >
+            <FileSpreadsheet size={18} />
+            Report
+          </button>
         </div>
-      </div>
+      </section>
 
-      <div className="rounded-lg bg-white p-6 shadow-md">
+      {feedback ? (
+        <section
+          className={`rounded-xl border p-4 text-sm font-bold ${
+            feedback.type === "success"
+              ? "border-[#8ed0aa] bg-[#edf8f1] text-[#1f6a41]"
+              : "border-[#f3c3ad] bg-[#fff3ee] text-[#b42318]"
+          }`}
+        >
+          {feedback.message}
+        </section>
+      ) : null}
+
+      <section className={`${cardClass} overflow-hidden`}>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[980px] border-collapse">
-            <thead>
-              <tr className="bg-[#bdb7b2]">
-                <th className="border border-[#7e6a5f] px-3 py-2 text-center text-sm font-bold text-[#333]">
-                  Payment Number
-                </th>
-                <th className="border border-[#7e6a5f] px-3 py-2 text-center text-sm font-bold text-[#333]">
-                  Invoice
-                </th>
-                <th className="border border-[#7e6a5f] px-3 py-2 text-center text-sm font-bold text-[#333]">
-                  Date
-                </th>
-                <th className="border border-[#7e6a5f] px-3 py-2 text-right text-sm font-bold text-[#333]">
-                  Amount
-                </th>
-                <th className="border border-[#7e6a5f] px-3 py-2 text-center text-sm font-bold text-[#333]">
-                  Description
-                </th>
-                <th className="border border-[#7e6a5f] px-3 py-2 text-right text-sm font-bold text-[#333]">
-                  Balance
-                </th>
-                <th className="border border-[#7e6a5f] px-3 py-2 text-center text-sm font-bold text-[#333]">
-                  Action
-                </th>
+          <table className="w-full min-w-[860px] text-left">
+            <thead className="bg-[#faf8f6] text-[11px] uppercase text-[rgba(85,49,28,0.72)]">
+              <tr>
+                <th className="px-4 py-3 font-extrabold">Payment Number</th>
+                <th className="px-4 py-3 font-extrabold">Invoice</th>
+                <th className="px-4 py-3 font-extrabold">Date</th>
+                <th className="px-4 py-3 text-right font-extrabold">Amount</th>
+                <th className="px-4 py-3 font-extrabold">Comments</th>
+                <th className="px-4 py-3 text-right font-extrabold">Balance</th>
+                <th className="px-4 py-3 font-extrabold">Action</th>
               </tr>
             </thead>
-            <tbody>
-              {recordsQuery.isLoading && (
+
+            <tbody className="divide-y divide-[#e5e0dc]">
+              {recordsQuery.isLoading ? (
                 <tr>
                   <td
-                    colSpan={7}
-                    className="border border-[#e5e0dc] px-3 py-4 text-center text-sm text-[rgba(0,0,0,0.7)]"
+                    className="px-4 py-6 text-sm font-semibold text-black/60"
+                    colSpan={tableColumnCount}
                   >
                     Loading cash flow records...
                   </td>
                 </tr>
-              )}
-              {!recordsQuery.isLoading && records.length === 0 && (
+              ) : recordsQuery.error ? (
                 <tr>
                   <td
-                    colSpan={7}
-                    className="border border-[#e5e0dc] px-3 py-4 text-center text-sm text-[rgba(0,0,0,0.7)]"
+                    className="px-4 py-6 text-sm font-bold text-[#b42318]"
+                    colSpan={tableColumnCount}
                   >
-                    No cash flow records found for this month.
+                    {recordsQuery.error instanceof Error
+                      ? recordsQuery.error.message
+                      : "Unable to load monthly cash flow."}
                   </td>
                 </tr>
-              )}
-              {!recordsQuery.isLoading &&
-                recordsWithBalance.map((record) => (
-                  <tr key={record.id} className="bg-white hover:bg-[#f8f5f3]">
-                    <td className="border border-[#e5e0dc] px-3 py-2 text-center font-mono text-sm text-[#55311c]">
-                      {record.payment_number}
-                    </td>
-                    <td className="border border-[#e5e0dc] px-3 py-2 text-center text-sm text-[#55311c]">
-                      {record.has_invoice ? (
-                        record.invoice_media_data ? (
+              ) : recordsWithBalance.length > 0 ? (
+                <>
+                  {recordsWithBalance.map((record) => (
+                    <tr
+                      key={record.id}
+                      className="cursor-pointer bg-white transition-colors hover:bg-[#faf8f6]"
+                      onClick={() => openTextEditor(record)}
+                    >
+                      <td className="px-4 py-3 text-sm font-bold text-[#55311c]">
+                        #{record.payment_number}
+                      </td>
+                      <td className="px-4 py-3 text-sm font-semibold text-[#55311c]">
+                        {record.has_invoice ? (
                           <button
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-[#d9d0ca] px-2.5 py-1.5 text-xs font-extrabold text-[#55311c] transition-colors hover:bg-[#faf8f6]"
                             type="button"
-                            onClick={() => setInvoicePreview(record)}
-                            aria-label="Open invoice preview"
-                            className="inline-flex items-center justify-center rounded border border-black bg-white p-1 text-black transition-all duration-200 hover:bg-[#f0f0f0] focus:outline-none focus:ring-2 focus:ring-black"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              handleOpenInvoiceEditor(record)
+                            }}
                           >
-                            <CheckIcon className="h-4 w-4" strokeWidth={2.5} />
+                            <Pencil size={14} />
+                            View / update
                           </button>
                         ) : (
-                          <span
-                            aria-label="Invoice attached"
-                            className="inline-flex items-center justify-center rounded border border-black bg-white p-1 text-black"
+                          <button
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-[#8c7569] px-2.5 py-1.5 text-xs font-extrabold text-[#55311c] transition-colors hover:bg-[#faf8f6]"
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              handleOpenInvoiceEditor(record)
+                            }}
                           >
-                            <CheckIcon className="h-4 w-4" strokeWidth={2.5} />
-                          </span>
-                        )
-                      ) : (
+                            <Plus size={14} />
+                            Add
+                          </button>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-sm font-semibold text-black/65">
+                        {formatCashFlowDate(record.record_date)}
+                      </td>
+                      <td
+                        className={`px-4 py-3 text-right text-sm font-extrabold ${
+                          Number(record.amount) >= 0
+                            ? "text-[#217a4b]"
+                            : "text-[#b42318]"
+                        }`}
+                      >
+                        {formatCurrencyGbp(record.amount)}
+                      </td>
+                      <td className="px-4 py-3 text-sm font-semibold text-black/70">
                         <button
+                          className="inline-flex max-w-72 items-center gap-1.5 rounded-lg px-2 py-1 text-left transition-colors hover:bg-[#faf8f6]"
                           type="button"
-                          onClick={() => {
-                            setInvoiceUploadRecord(record)
-                            setInvoiceUploadMediaName("")
-                            setInvoiceUploadMediaData(null)
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            openTextEditor(record)
                           }}
-                          className="rounded border border-[#8c7569] px-3 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
                         >
-                          Add
+                          {record.description ? (
+                            <Pencil className="shrink-0" size={14} />
+                          ) : (
+                            <Plus className="shrink-0" size={14} />
+                          )}
+                          <span className="truncate">
+                            {record.description || "Add"}
+                          </span>
                         </button>
-                      )}
-                    </td>
-                    <td className="border border-[#e5e0dc] px-3 py-2 text-center text-sm text-[#55311c]">
-                      {formatDateToGb(record.record_date)}
+                      </td>
+                      <td
+                        className={`px-4 py-3 text-right text-sm font-extrabold ${
+                          Number(record.balance) >= 0
+                            ? "text-[#217a4b]"
+                            : "text-[#b42318]"
+                        }`}
+                      >
+                        {formatCurrencyGbp(Math.abs(record.balance))}
+                      </td>
+                      <td className="px-4 py-3 text-sm font-semibold text-black/70">
+                        <button
+                          className={`${secondaryButtonClass} !min-h-9 !px-3 !py-1.5`}
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            void handleDeleteRecord(record.id)
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  <tr className="bg-[#faf8f6]/70">
+                    <td className="px-4 py-3" colSpan={4} />
+                    <td className="bg-[#faf8f6] px-4 py-3 text-sm font-extrabold uppercase tracking-[0.08em] text-[#55311c]">
+                      Total:
                     </td>
                     <td
-                      className={`border border-[#e5e0dc] px-3 py-2 text-right font-mono text-sm font-bold ${
-                        record.amount < 0 ? "text-[#d92d20]" : "text-[#217a4b]"
+                      className={`px-4 py-3 text-right text-sm font-extrabold ${
+                        currentBalanceValue >= 0
+                          ? "text-[#217a4b]"
+                          : "text-[#b42318]"
                       }`}
                     >
-                      {formatCurrencyGbp(record.amount)}
+                      {currentBalance}
                     </td>
-                    <td className="border border-[#e5e0dc] px-3 py-2 text-center text-sm text-[#55311c]">
-                      <button
-                        type="button"
-                        onClick={() => handleOpenDescriptionEdit(record)}
-                        className="w-full rounded px-2 py-1 text-sm text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
-                      >
-                        {record.description || "-"}
-                      </button>
-                    </td>
-                    <td className="border border-[#e5e0dc] px-3 py-2 text-right font-mono text-sm font-bold text-[#55311c]">
-                      {formatCurrencyGbp(record.balance)}
-                    </td>
-                    <td className="border border-[#e5e0dc] px-3 py-2 text-center text-sm">
-                      <button
-                        type="button"
-                        onClick={() => handleDelete(record)}
-                        disabled={deleteCashFlowMutation.isPending}
-                        className="rounded border border-[#8c7569] px-3 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        Delete
-                      </button>
-                    </td>
+                    <td className="bg-[#faf8f6] px-4 py-3" />
                   </tr>
-                ))}
-            </tbody>
-            {records.length > 0 && (
-              <tfoot>
+                </>
+              ) : (
                 <tr>
                   <td
-                    colSpan={5}
-                    className="border border-[#7e6a5f] bg-[#bdb7b2] px-3 py-3 text-right text-sm font-bold text-[#333]"
+                    className="px-4 py-8 text-sm font-semibold text-black/60"
+                    colSpan={tableColumnCount}
                   >
-                    Month total
+                    No records for this month.
                   </td>
-                  <td className="border border-[#7e6a5f] bg-[#ffff00] px-3 py-3 text-right font-mono text-sm font-bold text-[#333]">
-                    {formatCurrencyGbp(monthBalance)}
-                  </td>
-                  <td className="border border-[#7e6a5f] bg-[#bdb7b2]" />
                 </tr>
-              </tfoot>
-            )}
+              )}
+            </tbody>
           </table>
         </div>
-      </div>
+      </section>
 
-      <Dialog open={isDialogOpen} onOpenChange={handleDialogChange}>
-        <DialogContent className="border-[#e5e0dc] bg-white text-[#55311c] sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="text-[#55311c]">
-              New cash flow record
-            </DialogTitle>
-            <DialogDescription className="text-[rgba(0,0,0,0.7)]">
-              Payment number will be assigned automatically based on the record
-              date.
-            </DialogDescription>
-          </DialogHeader>
+      {isCreateOpen ? (
+        <div className="fixed inset-0 z-30 grid place-items-center bg-black/40 p-4">
+          <article className="w-full max-w-2xl rounded-2xl border border-[#e5e0dc] bg-white shadow-2xl">
+            <header className="flex items-center justify-between border-b border-[#e5e0dc] px-6 py-4">
+              <div>
+                <p className={labelClass}>{title}</p>
+                <h2 className="text-xl font-extrabold text-[#55311c]">
+                  Add record
+                </h2>
+              </div>
+              <button
+                className="grid h-9 w-9 place-items-center rounded-lg border border-[#d9d0ca] text-black"
+                type="button"
+                onClick={closeCreateRecord}
+              >
+                <X size={17} />
+              </button>
+            </header>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <label
-                htmlFor="cash-flow-form-date"
-                className="mb-1 block text-sm font-semibold text-[#55311c]"
-              >
-                Date
-              </label>
-              <input
-                id="cash-flow-form-date"
-                type="date"
-                value={form.recordDate}
-                onChange={(event) =>
-                  updateForm("recordDate", event.target.value)
-                }
-                className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
-              />
-            </div>
-            <div>
-              <label
-                htmlFor="cash-flow-form-amount"
-                className="mb-1 block text-sm font-semibold text-[#55311c]"
-              >
-                Value
-              </label>
-              <input
-                id="cash-flow-form-amount"
-                type="number"
-                step="0.01"
-                inputMode="decimal"
-                value={form.amount}
-                onChange={(event) => updateForm("amount", event.target.value)}
-                placeholder="-610.00"
-                className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
-              />
-              <p className="mt-1 text-xs text-[rgba(0,0,0,0.6)]">
-                Use negative values for money out and positive values for money in.
-              </p>
-            </div>
-            <div className="sm:col-span-2">
-              <label
-                htmlFor="cash-flow-form-description"
-                className="mb-1 block text-sm font-semibold text-[#55311c]"
-              >
-                Description
-              </label>
-              <textarea
-                id="cash-flow-form-description"
-                value={form.description}
-                onChange={(event) =>
-                  updateForm("description", event.target.value)
-                }
-                rows={3}
-                placeholder="Council tax control"
-                className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
-              />
-            </div>
-            <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
-              <label className="flex items-center gap-2 text-sm font-semibold text-[#55311c]">
-                <input
-                  type="checkbox"
-                  checked={form.hasInvoice}
-                  onChange={(event) =>
-                    updateForm("hasInvoice", event.target.checked)
-                  }
-                  className="h-4 w-4 accent-[#8c7569]"
-                />
-                Invoice
-              </label>
-              {form.hasInvoice && (
-                <div className="mt-3 space-y-3">
+            <form className="grid gap-4 p-6" onSubmit={handleCreateRecord}>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="grid gap-2">
+                  <span className={labelClass}>Date</span>
                   <input
+                    className={inputClass}
+                    type="date"
+                    value={form.date}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        date: event.target.value,
+                      }))
+                    }
+                    required
+                  />
+                </label>
+              </div>
+
+              <div className="grid gap-4">
+                <label className="grid gap-2">
+                  <span className={labelClass}>Value</span>
+                  <input
+                    className={inputClass}
+                    type="number"
+                    step="0.01"
+                    value={form.value}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        value: event.target.value,
+                      }))
+                    }
+                    required
+                  />
+                </label>
+              </div>
+
+              <div className="grid gap-4">
+                <label className="grid gap-2">
+                  <span className={labelClass}>Description</span>
+                  <input
+                    className={inputClass}
+                    value={form.description}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        description: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+              </div>
+
+              <label className="grid gap-2">
+                <span className={labelClass}>Invoice media</span>
+                <label className="flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border border-dashed border-[#8c7569] bg-[#faf8f6] px-3.5 py-2.5 text-sm font-semibold text-[#55311c]">
+                  <Upload size={16} />
+                  <span>{form.invoiceMediaName || "Upload image or PDF"}</span>
+                  <input
+                    ref={createInvoiceFileInputRef}
+                    className="hidden"
                     type="file"
                     accept="image/*,application/pdf"
-                    onChange={handleInvoiceFileChange}
-                    className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c]"
-                  />
-                  {form.invoiceMediaData && (
-                    <div className="rounded border border-[#e5e0dc] bg-white p-2 text-xs text-[#55311c]">
-                      <p className="font-semibold">
-                        {form.invoiceMediaName || "Invoice media"}
-                      </p>
-                      {isImageDataUrl(form.invoiceMediaData) && (
-                        <img
-                          src={form.invoiceMediaData}
-                          alt="Invoice preview"
-                          className="mt-2 max-h-24 rounded border border-[#d9d0ca]"
-                        />
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-
-          <DialogFooter>
-            <button
-              type="button"
-              onClick={() => handleDialogChange(false)}
-              disabled={createCashFlowMutation.isPending}
-              className="rounded border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={handleSubmit}
-              disabled={createCashFlowMutation.isPending}
-              className="rounded bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {createCashFlowMutation.isPending ? "Saving..." : "Save record"}
-            </button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog
-        open={Boolean(invoiceUploadRecord)}
-        onOpenChange={(open) => {
-          if (!open) resetInvoiceUploadDialog()
-        }}
-      >
-        <DialogContent className="border-[#e5e0dc] bg-white text-[#55311c] sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="text-[#55311c]">
-              Add invoice media
-            </DialogTitle>
-            <DialogDescription className="text-[rgba(0,0,0,0.7)]">
-              Select the invoice file for payment #
-              {invoiceUploadRecord?.payment_number}.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4">
-            <input
-              type="file"
-              accept="image/*,application/pdf"
-              onChange={handleExistingInvoiceFileChange}
-              className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c]"
-            />
-            {invoiceUploadMediaData && (
-              <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-3 text-sm text-[#55311c]">
-                <p className="font-semibold">
-                  {invoiceUploadMediaName || "Invoice media"}
-                </p>
-                {isImageDataUrl(invoiceUploadMediaData) && (
-                  <img
-                    src={invoiceUploadMediaData}
-                    alt="Invoice preview"
-                    className="mt-3 max-h-48 rounded border border-[#d9d0ca] bg-white"
-                  />
-                )}
-                {isPdfDataUrl(invoiceUploadMediaData) && (
-                  <p className="mt-2 text-xs text-[rgba(0,0,0,0.65)]">
-                    PDF selected.
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
-
-          <DialogFooter>
-            <button
-              type="button"
-              onClick={resetInvoiceUploadDialog}
-              disabled={updateCashFlowMutation.isPending}
-              className="rounded border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={handleSaveExistingInvoice}
-              disabled={updateCashFlowMutation.isPending}
-              className="rounded bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {updateCashFlowMutation.isPending ? "Saving..." : "Save invoice"}
-            </button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog
-        open={Boolean(editingDescriptionRecord)}
-        onOpenChange={(open) => {
-          if (!open) resetDescriptionEditDialog()
-        }}
-      >
-        <DialogContent className="border-[#e5e0dc] bg-white text-[#55311c] sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="text-[#55311c]">
-              Edit description
-            </DialogTitle>
-            <DialogDescription className="text-[rgba(0,0,0,0.7)]">
-              Update the description for payment #
-              {editingDescriptionRecord?.payment_number}.
-            </DialogDescription>
-          </DialogHeader>
-
-          <textarea
-            value={editingDescriptionValue}
-            onChange={(event) => setEditingDescriptionValue(event.target.value)}
-            rows={4}
-            placeholder="Description"
-            className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
-          />
-
-          <DialogFooter>
-            <button
-              type="button"
-              onClick={resetDescriptionEditDialog}
-              disabled={updateCashFlowMutation.isPending}
-              className="rounded border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={handleSaveDescriptionEdit}
-              disabled={updateCashFlowMutation.isPending}
-              className="rounded bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {updateCashFlowMutation.isPending ? "Saving..." : "Save"}
-            </button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={isReportDialogOpen} onOpenChange={handleReportDialogChange}>
-        <DialogContent className="border-[#e5e0dc] bg-white text-[#55311c] sm:max-w-5xl">
-          <DialogHeader>
-            <DialogTitle className="text-[#55311c]">
-              Cash flow invoice report
-            </DialogTitle>
-            <DialogDescription className="text-[rgba(0,0,0,0.7)]">
-              Select the month range, preview the PDF, and send it by email.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
-            <div className="space-y-4">
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
-                <div>
-                  <label
-                    htmlFor="cash-flow-report-month-from"
-                    className="mb-1 block text-sm font-semibold text-[#55311c]"
-                  >
-                    From
-                  </label>
-                  <input
-                    id="cash-flow-report-month-from"
-                    type="month"
-                    value={reportMonthFrom}
                     onChange={(event) => {
-                      setReportMonthFrom(event.target.value)
-                      resetInvoiceReportPreview()
+                      void handleCreateInvoiceFileSelect(
+                        event.target.files?.[0] || null,
+                      )
                     }}
-                    className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
                   />
-                </div>
-                <div>
-                  <label
-                    htmlFor="cash-flow-report-month-to"
-                    className="mb-1 block text-sm font-semibold text-[#55311c]"
-                  >
-                    To
-                  </label>
-                  <input
-                    id="cash-flow-report-month-to"
-                    type="month"
-                    value={reportMonthTo}
-                    onChange={(event) => {
-                      setReportMonthTo(event.target.value)
-                      resetInvoiceReportPreview()
-                    }}
-                    className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label
-                  htmlFor="cash-flow-report-email"
-                  className="mb-1 block text-sm font-semibold text-[#55311c]"
-                >
-                  Email
                 </label>
-                <input
-                  id="cash-flow-report-email"
-                  type="email"
-                  value={reportEmail}
-                  onChange={(event) => setReportEmail(event.target.value)}
-                  placeholder="report@email.com"
-                  className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
-                />
-              </div>
 
-              <label className="flex items-center gap-2 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-3 text-sm font-semibold text-[#55311c]">
-                <input
-                  type="checkbox"
-                  checked={includeInvoiceReportTable}
-                  onChange={(event) => {
-                    setIncludeInvoiceReportTable(event.target.checked)
-                    resetInvoiceReportPreview()
-                  }}
-                  className="h-4 w-4 accent-[#8c7569]"
-                />
-                Include table before invoices
+                {createInvoicePreview ? (
+                  <div className="max-h-72 overflow-auto rounded-lg border border-[#e5e0dc] bg-white p-3">
+                    {createInvoicePreview.contentType.startsWith("image/") ? (
+                      <img
+                        alt="Invoice preview"
+                        className="mx-auto max-h-64 rounded-md border border-[#e5e0dc]"
+                        src={createInvoicePreview.url}
+                      />
+                    ) : (
+                      <iframe
+                        className="h-64 w-full rounded-md border border-[#e5e0dc]"
+                        src={createInvoicePreview.url}
+                        title="Invoice preview"
+                      />
+                    )}
+                  </div>
+                ) : null}
               </label>
 
-              {reportPdfDataUrl && (
-                <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-3 text-sm text-[#55311c]">
-                  <p className="font-semibold">{reportFileName}</p>
-                  <p className="mt-1 text-xs text-[rgba(0,0,0,0.65)]">
-                    {reportInvoiceCount} invoice(s) included
-                  </p>
-                </div>
-              )}
-              {isGeneratingInvoiceReport && (
-                <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-3 text-sm font-semibold text-[#55311c]">
-                  Generating preview...
-                </div>
-              )}
-            </div>
+              {formError ? (
+                <p className="text-sm font-bold text-[#b42318]">{formError}</p>
+              ) : null}
 
-            <div className="min-h-[520px] rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-3">
-              {reportPdfPreviewUrl ? (
-                <iframe
-                  title="Cash flow invoice report preview"
-                  src={reportPdfPreviewUrl}
-                  className="h-[520px] w-full rounded border border-[#d9d0ca] bg-white"
-                />
-              ) : (
-                <div className="flex h-[520px] items-center justify-center rounded border border-dashed border-[#d9d0ca] bg-white px-6 text-center text-sm text-[rgba(0,0,0,0.65)]">
-                  Generate the report to preview the PDF here.
-                </div>
-              )}
-            </div>
-          </div>
-
-          <DialogFooter>
-            <button
-              type="button"
-              onClick={() => handleReportDialogChange(false)}
-              disabled={isGeneratingInvoiceReport || isSendingInvoiceReport}
-              className="rounded border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={handleSendInvoiceReport}
-              disabled={isGeneratingInvoiceReport || isSendingInvoiceReport}
-              className="rounded bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isSendingInvoiceReport ? "Sending..." : "Send PDF"}
-            </button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog
-        open={Boolean(invoicePreview)}
-        onOpenChange={(open) => {
-          if (!open) setInvoicePreview(null)
-        }}
-      >
-        <DialogContent className="border-[#e5e0dc] bg-white text-[#55311c] sm:max-w-4xl">
-          <DialogHeader>
-            <DialogTitle className="text-[#55311c]">
-              Invoice #{invoicePreview?.payment_number}
-            </DialogTitle>
-            <DialogDescription className="text-[rgba(0,0,0,0.7)]">
-              {invoicePreview
-                ? `${invoicePreview.description} | ${formatDateToGb(invoicePreview.record_date)}`
-                : "Invoice media"}
-            </DialogDescription>
-          </DialogHeader>
-
-          {invoicePreview?.invoice_media_data && (
-            <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-3">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <p className="text-sm font-semibold text-[#55311c]">
-                  {invoicePreview.invoice_media_name || "Invoice media"}
-                </p>
-                <a
-                  href={invoicePreview.invoice_media_data}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="rounded border border-[#8c7569] bg-white px-3 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+              <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                <button
+                  className={secondaryButtonClass}
+                  type="button"
+                  onClick={closeCreateRecord}
+                  disabled={saving}
                 >
-                  Open in new tab
-                </a>
+                  Cancel
+                </button>
+                <button
+                  className={primaryButtonClass}
+                  type="submit"
+                  disabled={saving}
+                >
+                  {saving ? "Saving..." : "Save record"}
+                </button>
+              </div>
+            </form>
+          </article>
+        </div>
+      ) : null}
+
+      {isReportOpen ? (
+        <div className="fixed inset-0 z-30 grid place-items-center bg-black/40 p-4">
+          <article className="flex h-[90dvh] w-[90vw] max-w-[90vw] flex-col rounded-2xl border border-[#e5e0dc] bg-white shadow-2xl">
+            <header className="flex items-center justify-between border-b border-[#e5e0dc] px-6 py-4">
+              <div>
+                <p className={labelClass}>{title}</p>
+                <h2 className="text-xl font-extrabold text-[#55311c]">
+                  Send report
+                </h2>
+              </div>
+              <button
+                className="grid h-9 w-9 place-items-center rounded-lg border border-[#d9d0ca] text-black"
+                type="button"
+                onClick={closeReportModal}
+                disabled={sendingReport}
+              >
+                <X size={17} />
+              </button>
+            </header>
+
+            <form
+              className="grid min-h-0 flex-1 gap-4 overflow-hidden p-6 lg:grid-cols-[320px_minmax(0,1fr)]"
+              onSubmit={handleSendReport}
+            >
+              <div className="grid content-start gap-4 overflow-y-auto pr-1">
+                <label className="grid gap-2">
+                  <span className={labelClass}>Email</span>
+                  <input
+                    className={inputClass}
+                    type="email"
+                    placeholder="name@example.com"
+                    value={reportForm.email}
+                    onChange={(event) =>
+                      setReportForm((current) => ({
+                        ...current,
+                        email: event.target.value,
+                      }))
+                    }
+                    required
+                  />
+                </label>
+
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1">
+                  <label className="grid gap-2">
+                    <span className={labelClass}>Start month</span>
+                    <input
+                      className={inputClass}
+                      type="month"
+                      value={reportForm.startMonth}
+                      onChange={(event) =>
+                        setReportForm((current) => ({
+                          ...current,
+                          startMonth: event.target.value,
+                        }))
+                      }
+                      required
+                    />
+                  </label>
+
+                  <label className="grid gap-2">
+                    <span className={labelClass}>End month</span>
+                    <input
+                      className={inputClass}
+                      type="month"
+                      value={reportForm.endMonth}
+                      onChange={(event) =>
+                        setReportForm((current) => ({
+                          ...current,
+                          endMonth: event.target.value,
+                        }))
+                      }
+                      required
+                    />
+                  </label>
+                </div>
+
+                <label className="flex items-center gap-3 rounded-xl border border-[#e5e0dc] bg-[#faf8f6] p-3 text-sm font-bold text-[#55311c]">
+                  <input
+                    className="h-4 w-4 accent-[#8c7569]"
+                    type="checkbox"
+                    checked={reportForm.includeInvoiceTable}
+                    onChange={(event) =>
+                      setReportForm((current) => ({
+                        ...current,
+                        includeInvoiceTable: event.target.checked,
+                      }))
+                    }
+                  />
+                  Add invoice table before media pages
+                </label>
+
+                <div className="rounded-xl bg-[#faf8f6] p-4 text-sm font-semibold text-black/60">
+                  Report period: {reportForm.startMonth} to {reportForm.endMonth}
+                  {deferredSearch ? ` | Filter: ${deferredSearch}` : ""}
+                </div>
+
+                {reportError ? (
+                  <p className="text-sm font-bold text-[#b42318]">
+                    {reportError}
+                  </p>
+                ) : null}
+
+                <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end lg:flex-col-reverse">
+                  <button
+                    className={secondaryButtonClass}
+                    type="button"
+                    onClick={closeReportModal}
+                    disabled={sendingReport}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className={primaryButtonClass}
+                    type="submit"
+                    disabled={sendingReport}
+                  >
+                    {sendingReport ? "Sending..." : "Send report"}
+                  </button>
+                </div>
               </div>
 
-              {isImageDataUrl(invoicePreview.invoice_media_data) ? (
-                <img
-                  src={invoicePreview.invoice_media_data}
-                  alt={invoicePreview.invoice_media_name || "Invoice media"}
-                  className="max-h-[70vh] w-full rounded border border-[#d9d0ca] bg-white object-contain"
+              <div className="min-h-[420px] overflow-hidden rounded-xl border border-[#e5e0dc] bg-[#faf8f6]">
+                {reportPreviewLoading ? (
+                  <div className="grid h-full min-h-[420px] place-items-center text-sm font-bold text-black/55">
+                    Loading preview...
+                  </div>
+                ) : reportPreviewError ? (
+                  <div className="grid h-full min-h-[420px] place-items-center p-6 text-center text-sm font-bold text-[#b42318]">
+                    {reportPreviewError}
+                  </div>
+                ) : reportPreviewUrl ? (
+                  <iframe
+                    className="h-full min-h-[420px] w-full bg-white"
+                    src={reportPreviewUrl}
+                    title={`${title} report preview`}
+                  />
+                ) : (
+                  <div className="grid h-full min-h-[420px] place-items-center text-sm font-bold text-black/55">
+                    Select a period to preview.
+                  </div>
+                )}
+              </div>
+            </form>
+          </article>
+        </div>
+      ) : null}
+
+      {textEditor ? (
+        <div className="fixed inset-0 z-40 grid place-items-center bg-black/50 p-4">
+          <article className="w-full max-w-md rounded-2xl border border-[#e5e0dc] bg-white shadow-2xl">
+            <header className="flex items-center justify-between border-b border-[#e5e0dc] px-6 py-4">
+              <div>
+                <p className={labelClass}>{title}</p>
+                <h2 className="text-lg font-extrabold text-[#55311c]">
+                  Edit record
+                </h2>
+              </div>
+              <button
+                className="grid h-9 w-9 place-items-center rounded-lg border border-[#d9d0ca] text-black"
+                type="button"
+                onClick={() => setTextEditor(null)}
+                disabled={savingText}
+              >
+                <X size={17} />
+              </button>
+            </header>
+
+            <form className="grid gap-4 p-6" onSubmit={handleSaveText}>
+              <label className="grid gap-2">
+                <span className={labelClass}>Value</span>
+                <input
+                  className={inputClass}
+                  step="0.01"
+                  type="number"
+                  value={textEditor.value}
+                  onChange={(event) =>
+                    setTextEditor((current) =>
+                      current
+                        ? {
+                            ...current,
+                            value: event.target.value,
+                            error: null,
+                          }
+                        : current,
+                    )
+                  }
+                  required
                 />
-              ) : isPdfDataUrl(invoicePreview.invoice_media_data) ? (
-                <iframe
-                  title={invoicePreview.invoice_media_name || "Invoice PDF"}
-                  src={invoicePreview.invoice_media_data}
-                  className="h-[70vh] w-full rounded border border-[#d9d0ca] bg-white"
+              </label>
+
+              <label className="grid gap-2">
+                <span className={labelClass}>Comments</span>
+                <textarea
+                  className="min-h-28 w-full resize-y rounded-lg border border-[#d9d0ca] bg-white px-3.5 py-3 text-sm font-semibold text-[#55311c] outline-none transition focus:ring-2 focus:ring-[#8c7569]"
+                  maxLength={255}
+                  value={textEditor.description}
+                  onChange={(event) =>
+                    setTextEditor((current) =>
+                      current
+                        ? {
+                            ...current,
+                            description: event.target.value,
+                            error: null,
+                          }
+                        : current,
+                    )
+                  }
                 />
+              </label>
+
+              {textEditor.error ? (
+                <p className="text-sm font-bold text-[#b42318]">
+                  {textEditor.error}
+                </p>
+              ) : null}
+
+              <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                <button
+                  className={secondaryButtonClass}
+                  type="button"
+                  onClick={() => setTextEditor(null)}
+                  disabled={savingText}
+                >
+                  Cancel
+                </button>
+                <button
+                  className={primaryButtonClass}
+                  type="submit"
+                  disabled={savingText}
+                >
+                  {savingText ? "Saving..." : "Save"}
+                </button>
+              </div>
+            </form>
+          </article>
+        </div>
+      ) : null}
+
+      {invoiceEditor ? (
+        <div className="fixed inset-0 z-40 grid place-items-center bg-black/50 p-4">
+          <article className="w-full max-w-4xl rounded-2xl border border-[#e5e0dc] bg-white shadow-2xl">
+            <header className="flex items-center justify-between border-b border-[#e5e0dc] px-6 py-4">
+              <div>
+                <p className={labelClass}>Invoice media</p>
+                <h2 className="text-lg font-extrabold text-[#55311c]">
+                  {invoiceEditor.preview?.fileName ||
+                    `Payment #${invoiceEditor.record.payment_number}`}
+                </h2>
+              </div>
+              <button
+                className="grid h-9 w-9 place-items-center rounded-lg border border-[#d9d0ca] text-black"
+                type="button"
+                onClick={closeInvoiceEditor}
+                disabled={savingInvoice}
+              >
+                <X size={17} />
+              </button>
+            </header>
+
+            <div className="grid gap-4 p-4">
+              <label className="flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border border-dashed border-[#8c7569] bg-[#faf8f6] px-3.5 py-2.5 text-sm font-semibold text-[#55311c]">
+                <Upload size={16} />
+                <span>
+                  {invoiceEditor.selectedFileName ||
+                    (invoiceEditor.record.has_invoice
+                      ? "Replace image or PDF"
+                      : "Add image or PDF")}
+                </span>
+                <input
+                  className="hidden"
+                  type="file"
+                  accept="image/*,application/pdf"
+                  onChange={(event) => {
+                    void handleInvoiceFileSelect(
+                      event.target.files?.[0] || null,
+                    )
+                  }}
+                />
+              </label>
+
+              {invoiceEditor.preview ? (
+                <div className="max-h-[62dvh] overflow-auto">
+                  {invoiceEditor.preview.contentType.startsWith("image/") ? (
+                    <img
+                      alt="Invoice preview"
+                      className="mx-auto max-h-[58dvh] rounded-lg border border-[#e5e0dc]"
+                      src={invoiceEditor.preview.url}
+                    />
+                  ) : (
+                    <iframe
+                      className="h-[58dvh] w-full rounded-lg border border-[#e5e0dc]"
+                      src={invoiceEditor.preview.url}
+                      title="Invoice preview"
+                    />
+                  )}
+                </div>
               ) : (
-                <div className="rounded border border-[#d9d0ca] bg-white p-6 text-center text-sm text-[rgba(0,0,0,0.7)]">
-                  Preview is not available for this file type. Use Open in new
-                  tab to view the media.
+                <div className="grid min-h-44 place-items-center rounded-lg border border-dashed border-[#d9d0ca] bg-[#faf8f6] text-sm font-semibold text-black/55">
+                  No invoice media added yet.
                 </div>
               )}
+
+              {invoiceEditor.error ? (
+                <p className="text-sm font-bold text-[#b42318]">
+                  {invoiceEditor.error}
+                </p>
+              ) : null}
             </div>
-          )}
-        </DialogContent>
-      </Dialog>
+
+            <footer className="flex justify-end gap-3 border-t border-[#e5e0dc] px-6 py-4">
+              <button
+                className={secondaryButtonClass}
+                type="button"
+                onClick={closeInvoiceEditor}
+                disabled={savingInvoice}
+              >
+                Close
+              </button>
+              {invoiceEditor.preview ? (
+                <button
+                  className={secondaryButtonClass}
+                  type="button"
+                  onClick={() =>
+                    window.open(
+                      invoiceEditor.preview?.url,
+                      "_blank",
+                      "noopener,noreferrer",
+                    )
+                  }
+                >
+                  Open in new tab
+                </button>
+              ) : null}
+              <button
+                className={primaryButtonClass}
+                type="button"
+                onClick={() => void handleSaveInvoice()}
+                disabled={savingInvoice}
+              >
+                {savingInvoice
+                  ? "Saving..."
+                  : invoiceEditor.record.has_invoice
+                    ? "Update media"
+                    : "Add media"}
+              </button>
+            </footer>
+          </article>
+        </div>
+      ) : null}
     </div>
   )
 }
+
 
 function BuildingsReadingsContent({
   initialShowForm = false,
@@ -19368,3 +19806,4 @@ function AddResidentForm({
     </div>
   )
 }
+

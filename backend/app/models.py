@@ -169,6 +169,8 @@ class Morador(SQLModel, table=True):
     cargo: int = Field(default=0, ge=0, le=4)  # 0 owner 1 | 1 owner 2 | 2 tenant | 3 agent
     nome: str = Field(default="", max_length=255)
     email: EmailStr | None = Field(default=None, max_length=255)
+    tenant_nome_2: str | None = Field(default=None, max_length=255)
+    tenant_email_2: EmailStr | None = Field(default=None, max_length=255)
     mobile: str = Field(default="", max_length=20)
     receives_flat_reading_sms: bool = Field(default=False)
     receives_twilio_sms: bool = Field(default=False)
@@ -383,7 +385,7 @@ class Task(SQLModel, table=True):
     code: str = Field(max_length=32, index=True)
     title: str = Field(max_length=255)
     description: str = Field(default="")
-    status: str = Field(default="todo", max_length=20)  # todo | in_progress | done
+    status: str = Field(default="todo", max_length=20)  # todo | done
     condominio_id: uuid.UUID = Field(
         foreign_key="condominio.id", nullable=False, ondelete="CASCADE"
     )
@@ -796,6 +798,8 @@ class MoradorBase(SQLModel):
     cargo: int = Field(default=0)
     nome: str = Field(default="", max_length=255)
     email: EmailStr | None = Field(default=None, max_length=255)
+    tenant_nome_2: str | None = Field(default=None, max_length=255)
+    tenant_email_2: EmailStr | None = Field(default=None, max_length=255)
     mobile: str = Field(default="", max_length=20)  # Changed to str for phone numbers
     receives_flat_reading_sms: bool = Field(default=False)
     receives_twilio_sms: bool = Field(default=False)
@@ -812,6 +816,8 @@ class MoradorUpdate(SQLModel):
     cargo: int | None = None
     nome: str | None = Field(default=None, max_length=255)
     email: EmailStr | None = Field(default=None, max_length=255)
+    tenant_nome_2: str | None = Field(default=None, max_length=255)
+    tenant_email_2: EmailStr | None = Field(default=None, max_length=255)
     mobile: str | None = Field(default=None, max_length=20)
     receives_flat_reading_sms: bool | None = None
     receives_twilio_sms: bool | None = None
@@ -1326,7 +1332,7 @@ class TaskCreate(SQLModel):
 
 
 class TaskStatusUpdate(SQLModel):
-    status: str = Field(min_length=1, max_length=20)  # todo | in_progress | done
+    status: str = Field(min_length=1, max_length=20)  # todo | done
     image_data: str | None = None
 
 

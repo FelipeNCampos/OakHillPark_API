@@ -31,7 +31,7 @@ from app.models import (
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
-TASK_ALLOWED_STATUSES = {"todo", "in_progress", "done"}
+TASK_ALLOWED_STATUSES = {"todo", "done"}
 STATUS_EVENT_PREFIX = "[STATUS]"
 COVER_IMAGE_PREFIX = "[COVER_IMAGE]"
 TASK_CODE_PATTERN = re.compile(r"^task-(\d+)$")
@@ -120,9 +120,10 @@ def _resolve_active_caretaker_user(
 
 
 def _normalize_task_status(status: str) -> str:
-    if status == "paused":
-        return "in_progress"
-    return status
+    normalized = status.strip().lower()
+    if normalized in {"paused", "in_progress"}:
+        return "todo"
+    return normalized
 
 
 def _task_to_public(
@@ -132,9 +133,13 @@ def _task_to_public(
     assigned_name: str | None = None,
     building_label: str | None = None,
     cover_image_data: str | None = None,
+    requires_completion_image: bool | None = None,
+    include_cover_image_data: bool = True,
 ) -> TaskPublic:
-    if cover_image_data is None:
+    if include_cover_image_data and cover_image_data is None:
         cover_image_data = _get_task_cover_image_data(session, task.id)
+    if requires_completion_image is None:
+        requires_completion_image = bool(cover_image_data)
     if assigned_name is None:
         assigned_user = session.get(User, task.assigned_to_user_id)
         assigned_name = (
@@ -157,7 +162,7 @@ def _task_to_public(
         title=task.title,
         description=task.description,
         cover_image_data=cover_image_data,
-        requires_completion_image=bool(cover_image_data),
+        requires_completion_image=requires_completion_image,
         status=_normalize_task_status(task.status),
         condominio_id=task.condominio_id,
         building_id=task.building_id,
@@ -184,6 +189,24 @@ def _get_task_cover_image_data(session: SessionDep, task_id) -> str | None:
         .limit(1)
     )
     return session.exec(statement).first()
+
+
+def _get_task_ids_with_cover_image(
+    session: SessionDep, task_ids: list[uuid.UUID]
+) -> set[uuid.UUID]:
+    if not task_ids:
+        return set()
+    statement = (
+        select(TaskMessage.task_id)
+        .distinct()
+        .where(
+            TaskMessage.task_id.in_(task_ids),
+            TaskMessage.text.is_not(None),
+            TaskMessage.text.like(f"{COVER_IMAGE_PREFIX}%"),
+            TaskMessage.image_data.is_not(None),
+        )
+    )
+    return set(session.exec(statement).all())
 
 
 def _next_task_code(session: SessionDep, condominio_id) -> str:
@@ -216,7 +239,7 @@ def _check_task_access(task: Task, current_user: User) -> None:
 
 
 def _ensure_caretaker_can_modify_task(task: Task, current_user: User) -> None:
-    if _is_caretaker(current_user) and task.status == "done":
+    if _is_caretaker(current_user) and _normalize_task_status(task.status) == "done":
         raise HTTPException(
             status_code=400,
             detail="Completed tasks cannot be changed by caretaker",
@@ -226,16 +249,15 @@ def _ensure_caretaker_can_modify_task(task: Task, current_user: User) -> None:
 def _status_label(status: str) -> str:
     labels = {
         "todo": "To Do",
-        "in_progress": "In Progress",
         "done": "Done",
     }
-    return labels.get(status, status)
+    return labels.get(_normalize_task_status(status), status)
 
 
 def _status_from_label(label: str) -> str | None:
     mapping = {
         "To Do": "todo",
-        "In Progress": "in_progress",
+        "In Progress": "todo",
         "Done": "done",
     }
     return mapping.get(label.strip())
@@ -245,6 +267,9 @@ def _parse_status_event_next_status(text: str | None) -> str | None:
     if not text or not text.startswith(STATUS_EVENT_PREFIX):
         return None
     payload = text.replace(STATUS_EVENT_PREFIX, "", 1).strip()
+    direct_status = _status_from_label(payload)
+    if direct_status is not None:
+        return direct_status
     parts = payload.split("->")
     if len(parts) != 2:
         return None
@@ -459,21 +484,7 @@ def read_tasks(
     tasks = session.exec(statement).all()
 
     task_ids = [task.id for task in tasks]
-    cover_image_map: dict[Any, str] = {}
-    if task_ids:
-        cover_images = session.exec(
-            select(TaskMessage.task_id, TaskMessage.image_data)
-            .where(
-                TaskMessage.task_id.in_(task_ids),
-                TaskMessage.text.is_not(None),
-                TaskMessage.text.like(f"{COVER_IMAGE_PREFIX}%"),
-                TaskMessage.image_data.is_not(None),
-            )
-            .order_by(TaskMessage.task_id.asc(), TaskMessage.created_at.asc())
-        ).all()
-        for task_id, image_data in cover_images:
-            if task_id not in cover_image_map and image_data:
-                cover_image_map[task_id] = image_data
+    task_ids_with_cover_image = _get_task_ids_with_cover_image(session, task_ids)
 
     assigned_user_ids = list({task.assigned_to_user_id for task in tasks})
     assigned_user_map: dict[Any, User] = {}
@@ -514,8 +525,8 @@ def read_tasks(
                 code=task.code,
                 title=task.title,
                 description=task.description,
-                cover_image_data=cover_image_map.get(task.id),
-                requires_completion_image=bool(cover_image_map.get(task.id)),
+                cover_image_data=None,
+                requires_completion_image=task.id in task_ids_with_cover_image,
                 status=_normalize_task_status(task.status),
                 condominio_id=task.condominio_id,
                 building_id=task.building_id,
@@ -529,6 +540,27 @@ def read_tasks(
             )
         )
     return TasksPublic(data=data, count=count)
+
+
+@router.get(
+    "/{task_id}",
+    response_model=TaskPublic,
+    dependencies=[Depends(require_cargo(1))],
+)
+def read_task(
+    *, session: SessionDep, current_user: CurrentUser, task_id: str
+) -> TaskPublic:
+    try:
+        task_uuid = uuid.UUID(task_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid task id") from exc
+
+    task = session.get(Task, task_uuid)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    _check_task_access(task, current_user)
+    return _task_to_public(session, task)
 
 
 @router.patch(
@@ -571,7 +603,7 @@ def update_task_status(
             detail="A completion photo is required to finish this task",
         )
 
-    previous_status = task.status
+    previous_status = _normalize_task_status(task.status)
     task.status = next_status
     task.updated_at = datetime.now(timezone.utc)
     session.add(task)
@@ -582,10 +614,7 @@ def update_task_status(
             task_id=task.id,
             sender_user_id=current_user.id,
             sender_role=sender_role,
-            text=(
-                f"{STATUS_EVENT_PREFIX} {_status_label(previous_status)} -> "
-                f"{_status_label(next_status)}"
-            ),
+            text=f"{STATUS_EVENT_PREFIX} {_status_label(next_status)}",
             image_data=image_data if next_status == "done" else None,
             created_at=task.updated_at,
         )

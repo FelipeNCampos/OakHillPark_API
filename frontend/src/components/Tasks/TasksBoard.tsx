@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { OpenAPI } from "@/client"
 import useCustomToast from "@/hooks/useCustomToast"
 
-type TaskStatus = "todo" | "in_progress" | "done"
+type TaskStatus = "todo" | "done"
 type ApiTaskStatus = TaskStatus | "paused"
 type BoardMode = "manager" | "caretaker"
 
@@ -111,15 +111,35 @@ const apiCall = async (
 
 const statusLabel: Record<TaskStatus, string> = {
   todo: "To Do",
-  in_progress: "In Progress",
   done: "Done",
 }
+
+const TASK_STATUS_ORDER: TaskStatus[] = ["todo", "done"]
 
 const STATUS_EVENT_PREFIX = "[STATUS]"
 const COVER_IMAGE_PREFIX = "[COVER_IMAGE]"
 
 const normalizeTaskStatus = (status: ApiTaskStatus): TaskStatus =>
-  status === "paused" ? "in_progress" : status
+  status === "paused" ? "todo" : status
+
+const getStatusEventLabel = (text?: string | null): string => {
+  if (!text) return ""
+  const payload = text.replace(STATUS_EVENT_PREFIX, "").trim()
+  const [, nextStatus] = payload.split("->")
+  const normalizedLabel = (nextStatus || payload).trim()
+  return normalizedLabel === "In Progress" ? "To Do" : normalizedLabel
+}
+
+const formatTaskEventTimestamp = (value: string) => {
+  const date = new Date(value)
+  return `Created at ${date.toLocaleDateString("en-GB")} ${date.toLocaleTimeString(
+    "en-GB",
+    {
+      hour: "2-digit",
+      minute: "2-digit",
+    },
+  )}`
+}
 
 export function TasksBoard({ mode }: { mode: BoardMode }) {
   const { showErrorToast, showSuccessToast } = useCustomToast()
@@ -161,7 +181,7 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
       })),
     [tasksData],
   )
-  const selectedTask = tasks.find((t) => t.id === selectedTaskId) || null
+  const selectedTaskSummary = tasks.find((t) => t.id === selectedTaskId) || null
   const commonAreaLabel = taskBoardMetadata?.common_area_label || "Common areas"
   const buildingOptions = taskBoardMetadata?.buildings || []
   const filteredTasks = useMemo(() => {
@@ -180,10 +200,26 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
       refetchInterval: selectedTaskId ? 8000 : false,
     })
 
+  const { data: selectedTaskData, isLoading: selectedTaskLoading } =
+    useQuery<ApiTask>({
+      queryKey: ["task", selectedTaskId],
+      queryFn: () => apiCall(`/api/v1/tasks/${selectedTaskId}`),
+      enabled: Boolean(selectedTaskId),
+      refetchInterval: selectedTaskId ? 8000 : false,
+    })
+
+  const selectedTask = useMemo(() => {
+    const task = selectedTaskData || selectedTaskSummary
+    if (!task) return null
+    return {
+      ...task,
+      status: normalizeTaskStatus(task.status as ApiTaskStatus),
+    }
+  }, [selectedTaskData, selectedTaskSummary])
+
   const groupedTasks = useMemo(() => {
     const groups: Record<TaskStatus, Task[]> = {
       todo: [],
-      in_progress: [],
       done: [],
     }
     filteredTasks.forEach((task) => {
@@ -257,6 +293,9 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
       setChatImageData(null)
       queryClient.invalidateQueries({ queryKey: ["tasks"] })
       if (selectedTaskId) {
+        queryClient.invalidateQueries({
+          queryKey: ["task", selectedTaskId],
+        })
         queryClient.invalidateQueries({
           queryKey: ["task-messages", selectedTaskId],
         })
@@ -402,8 +441,7 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
     })
   }
 
-  const canMarkTaskAsDone = (task: Task) =>
-    task.status !== "done" && (isManager || task.status === "in_progress")
+  const canMarkTaskAsDone = (task: Task) => task.status !== "done"
 
   const isCaretakerTaskLocked = Boolean(
     selectedTask && !isManager && selectedTask.status === "done",
@@ -414,18 +452,6 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
 
     return (
       <div className="mt-3 flex gap-2">
-        {task.status !== "in_progress" && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              moveTaskToStatus(task, "in_progress")
-            }}
-            className="rounded bg-[#8c7569] px-2 py-1 text-xs font-semibold text-white hover:bg-[#55311c]"
-          >
-            Start
-          </button>
-        )}
         {canMarkTaskAsDone(task) && (
           <button
             type="button"
@@ -550,8 +576,8 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
         </div>
       )}
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {(Object.keys(groupedTasks) as TaskStatus[]).map((status) => (
+      <div className="grid gap-4 md:grid-cols-2">
+        {TASK_STATUS_ORDER.map((status) => (
           <div
             key={status}
             className="rounded-lg bg-white p-4 shadow-md"
@@ -594,13 +620,6 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
                       : "border-[#e6ddd7] bg-white hover:bg-[#faf7f4]"
                   }`}
                 >
-                  {task.cover_image_data && (
-                    <img
-                      src={task.cover_image_data}
-                      alt={`${task.title} cover`}
-                      className="mb-3 h-32 w-full rounded object-cover"
-                    />
-                  )}
                   <p className="text-[11px] font-semibold uppercase tracking-wide text-[#8c7569]">
                     {task.code}
                   </p>
@@ -608,11 +627,9 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
                   <p className="mt-1 text-xs text-[#8c7569]">
                     Building: {task.building_label}
                   </p>
-                  {!task.cover_image_data && (
-                    <p className="mt-1 line-clamp-2 text-xs text-[rgba(0,0,0,0.65)]">
-                      {task.description || "No description"}
-                    </p>
-                  )}
+                  <p className="mt-1 line-clamp-2 text-xs text-[rgba(0,0,0,0.65)]">
+                    {task.description || "No description"}
+                  </p>
                   <p className="mt-2 text-xs text-[#8c7569]">
                     Assigned: {task.assigned_to_name}
                   </p>
@@ -641,6 +658,10 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
                     alt={`${selectedTask.title} cover`}
                     className="mx-auto mt-3 max-h-60 w-full rounded border border-[#ddd] object-cover sm:max-w-xl"
                   />
+                ) : selectedTaskLoading && selectedTask.requires_completion_image ? (
+                  <p className="mt-3 text-sm text-[rgba(0,0,0,0.7)]">
+                    Loading cover photo...
+                  </p>
                 ) : (
                   <p className="text-sm text-[rgba(0,0,0,0.7)]">
                     {selectedTask.description || "No description"}
@@ -668,7 +689,7 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
                   {statusEvents.map((event) => (
                     <div key={event.id} className="rounded bg-white p-2">
                       <p className="text-xs font-semibold text-[#55311c]">
-                        {event.text?.replace(STATUS_EVENT_PREFIX, "").trim()}
+                        {getStatusEventLabel(event.text)}
                       </p>
                       {event.image_data && (
                         <img
@@ -677,10 +698,10 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
                           className="mt-2 max-h-48 rounded border border-[#ddd]"
                         />
                       )}
-                      <p className="mt-1 text-xs text-[rgba(0,0,0,0.55)]">
-                        {event.sender_name} |{" "}
-                        {new Date(event.created_at).toLocaleString("en-GB")}
-                      </p>
+                      <div className="mt-1 text-xs text-[rgba(0,0,0,0.55)]">
+                        <p>{event.sender_name}</p>
+                        <p>{formatTaskEventTimestamp(event.created_at)}</p>
+                      </div>
                     </div>
                   ))}
                   {statusEvents.length === 0 && (

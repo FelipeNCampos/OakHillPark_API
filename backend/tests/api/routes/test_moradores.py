@@ -50,6 +50,8 @@ def _create_test_morador(db: Session, flat_id: uuid.UUID) -> Morador:
         cargo=1,
         nome="Test Morador",
         email=random_email(),
+        tenant_nome_2=None,
+        tenant_email_2=None,
         mobile="1234567890",
         receives_flat_reading_sms=False,
         flat_id=flat_id
@@ -107,6 +109,8 @@ def test_read_morador_by_id(
     assert data["nome"] == morador.nome
     assert data["cargo"] == morador.cargo
     assert data["email"] == morador.email
+    assert data["tenant_nome_2"] is None
+    assert data["tenant_email_2"] is None
     assert data["flat_id"] == str(morador.flat_id)
     assert data["receives_flat_reading_sms"] is False
     assert data["receives_twilio_sms"] is False
@@ -134,9 +138,11 @@ def test_create_morador(
 
     email = random_email()
     data = {
-        "cargo": 1,
+        "cargo": 2,
         "nome": "New Morador",
         "email": email,
+        "tenant_nome_2": "Second Tenant",
+        "tenant_email_2": random_email(),
         "mobile": "987654",
         "car1": "XYZ9999",
         "flat_id": str(flat.id)
@@ -151,6 +157,8 @@ def test_create_morador(
     assert created_morador["nome"] == data["nome"]
     assert created_morador["cargo"] == data["cargo"]
     assert created_morador["email"] == data["email"]
+    assert created_morador["tenant_nome_2"] == data["tenant_nome_2"]
+    assert created_morador["tenant_email_2"] == data["tenant_email_2"]
     assert created_morador["receives_flat_reading_sms"] is False
     assert created_morador["receives_twilio_sms"] is False
     assert created_morador["car1"] == data["car1"]
@@ -188,9 +196,11 @@ def test_update_morador(
 
     new_email = random_email()
     update_data = {
-        "cargo": 3,
+        "cargo": 2,
         "nome": "Updated Morador",
         "email": new_email,
+        "tenant_nome_2": "Updated Tenant",
+        "tenant_email_2": random_email(),
         "mobile": "555555555",
         "car1": "UPD1111",
         "flat_id": str(flat.id)
@@ -205,6 +215,8 @@ def test_update_morador(
     assert updated_morador["nome"] == update_data["nome"]
     assert updated_morador["cargo"] == update_data["cargo"]
     assert updated_morador["email"] == update_data["email"]
+    assert updated_morador["tenant_nome_2"] == update_data["tenant_nome_2"]
+    assert updated_morador["tenant_email_2"] == update_data["tenant_email_2"]
     assert updated_morador["car1"] == update_data["car1"]
     db.refresh(flat)
     assert flat.car1 == update_data["car1"]

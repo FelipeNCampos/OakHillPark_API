@@ -25,6 +25,9 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  Cell,
+  Pie,
+  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -78,7 +81,7 @@ interface Building {
 const QR_SPECIAL_CLEANER_BUILDING_NAMES = new Set(["general", "cleaner"])
 const QR_CARETAKER_BUILDING_NAME = "caretaker"
 const QR_SPECIAL_CLEANER_BUILDING_LABEL = "Cleaner"
-const QR_IN_OUT_LABEL = "In/Out"
+const QR_CARETAKER_BINS_LABEL = "Caretaker Bins"
 const QR_WORK_TIME_LABEL = "Work Time"
 
 const isCleanerQrBuilding = (building: Building) =>
@@ -87,10 +90,60 @@ const isCleanerQrBuilding = (building: Building) =>
 const isCaretakerQrBuilding = (building: Building) =>
   building.nome.trim().toLowerCase() === QR_CARETAKER_BUILDING_NAME
 
+const isCaretakerBinsQrBuilding = (building: Building) =>
+  !isCleanerQrBuilding(building) && !isCaretakerQrBuilding(building)
+
 const getCleanerQrBuildingLabel = (building: Building) =>
   isCleanerQrBuilding(building)
     ? QR_SPECIAL_CLEANER_BUILDING_LABEL
     : building.nome || "Building"
+
+type BinsDashboardGroupId =
+  | "falcon-martlett-merlin-oaklodge"
+  | "northwood"
+
+const BINS_DASHBOARD_GROUP_OPTIONS: Array<{
+  id: BinsDashboardGroupId
+  label: string
+}> = [
+  {
+    id: "falcon-martlett-merlin-oaklodge",
+    label: "Falcon - Martlett - Merlin - OakLogde",
+  },
+  {
+    id: "northwood",
+    label: "Northwood",
+  },
+]
+
+const normalizeBinsBuildingName = (value: string) =>
+  value.trim().toLowerCase().replace(/[\s_-]+/g, "")
+
+const getBinsDashboardGroupForBuilding = (
+  buildingName: string,
+): BinsDashboardGroupId | null => {
+  const normalized = normalizeBinsBuildingName(buildingName)
+
+  if (normalized.includes("northwood")) return "northwood"
+
+  if (
+    ["falcon", "martlett", "merlin", "oaklodge", "oaklogde"].some((token) =>
+      normalized.includes(token),
+    )
+  ) {
+    return "falcon-martlett-merlin-oaklodge"
+  }
+
+  return null
+}
+
+const filterBinRecordsByDashboardGroup = <T extends { building_nome: string }>(
+  items: T[],
+  groupId: BinsDashboardGroupId,
+) =>
+  items.filter(
+    (item) => getBinsDashboardGroupForBuilding(item.building_nome) === groupId,
+  )
 
 interface Flat {
   id: EntityId
@@ -290,6 +343,8 @@ interface Morador {
   flat_id: EntityId
   nome: string
   email?: string | null
+  tenant_nome_2?: string | null
+  tenant_email_2?: string | null
   mobile?: string | number | null
   car1?: string | null
   car2?: string | null
@@ -468,6 +523,8 @@ type ResidentEditContext = {
 interface MoradorDetail {
   nome: string
   email?: string | null
+  tenant_nome_2?: string | null
+  tenant_email_2?: string | null
   mobile?: string | number | null
   cargo: number
   car1?: string | null
@@ -1489,6 +1546,7 @@ const FIRE_ALARM_BUILDINGS: FireAlarmBuildingConfig[] = [
       "031",
       "023",
       "024",
+      "L1/40",
       "048",
       "056",
       "064",
@@ -1508,6 +1566,7 @@ const FIRE_ALARM_BUILDINGS: FireAlarmBuildingConfig[] = [
       "GF REAR",
       "Garage Front Door",
       "Garage Back Door",
+      "1F REAR",
       "2F REAR",
       "3F REAR",
       "4F REAR",
@@ -2159,7 +2218,7 @@ function ClientDashboard() {
         { label: "Cleaner", id: "qr-cleaner" },
         { label: "Contractor", id: "qr-contractor" },
         { label: "Caretaker", id: "qr-caretaker" },
-        { label: QR_IN_OUT_LABEL, id: "qr-bins" },
+        { label: QR_CARETAKER_BINS_LABEL, id: "qr-bins" },
       ],
     },
     {
@@ -2444,7 +2503,7 @@ function OverviewContent({
         { label: "Cleaner", tabId: "qr-cleaner" },
         { label: "Contractor", tabId: "qr-contractor" },
         { label: "Caretaker", tabId: "qr-caretaker" },
-        { label: QR_IN_OUT_LABEL, tabId: "qr-bins" },
+        { label: QR_CARETAKER_BINS_LABEL, tabId: "qr-bins" },
       ],
     },
     {
@@ -8594,8 +8653,11 @@ function BinsQrCodesContent() {
   })
 
   const buildings = (buildingsData?.data || []) as Building[]
-  const defaultBuilding = useMemo(
-    () => buildings.find(isCleanerQrBuilding) || null,
+  const qrBuildings = useMemo(
+    () =>
+      buildings
+        .filter(isCaretakerBinsQrBuilding)
+        .sort((a, b) => a.nome.localeCompare(b.nome)),
     [buildingsData?.data],
   )
 
@@ -8604,52 +8666,59 @@ function BinsQrCodesContent() {
     return window.location.origin
   }, [])
 
-  const [qrData, setQrData] = useState<{
-    dataUrl: string
-    link: string
-  } | null>(null)
+  const [qrMap, setQrMap] = useState<
+    Record<string, { dataUrl: string; link: string }>
+  >({})
   const [isGenerating, setIsGenerating] = useState(false)
 
   useEffect(() => {
     let isActive = true
 
-    const generateQRCode = async () => {
-      if (!baseUrl || !defaultBuilding) {
-        setQrData(null)
+    const generateQRCodes = async () => {
+      if (!baseUrl || qrBuildings.length === 0) {
+        setQrMap({})
         return
       }
+
       setIsGenerating(true)
 
-      const params = new URLSearchParams()
-      params.set("buildingId", String(defaultBuilding.id))
-      params.set("buildingName", String(defaultBuilding.nome))
-      const link = `${baseUrl}/bins-access?${params.toString()}`
-      const dataUrl = await QRCode.toDataURL(link, { width: 280, margin: 1 })
+      const entries = await Promise.all(
+        qrBuildings.map(async (building) => {
+          const params = new URLSearchParams()
+          params.set("buildingId", String(building.id))
+          if (building.nome) params.set("buildingName", String(building.nome))
+          const link = `${baseUrl}/bins-access?${params.toString()}`
+          const dataUrl = await QRCode.toDataURL(link, { width: 240, margin: 1 })
+
+          return [String(building.id), { dataUrl, link }] as const
+        }),
+      )
 
       if (!isActive) return
-      setQrData({ dataUrl, link })
+
+      setQrMap(Object.fromEntries(entries))
       setIsGenerating(false)
     }
 
-    generateQRCode().catch(() => {
+    generateQRCodes().catch(() => {
       if (!isActive) return
-      setQrData(null)
+      setQrMap({})
       setIsGenerating(false)
     })
 
     return () => {
       isActive = false
     }
-  }, [baseUrl, defaultBuilding])
+  }, [baseUrl, qrBuildings])
 
   return (
     <div className="mx-auto max-w-7xl">
       <div className="mb-6 rounded-lg bg-white p-6 shadow-md">
         <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
-          {QR_IN_OUT_LABEL}
+          {QR_CARETAKER_BINS_LABEL}
         </h2>
         <p className="mt-2 text-[rgba(0,0,0,0.7)]">
-          Single QR Code for In/Out reporting.
+          One QR code per building for caretaker bin collection reporting.
         </p>
       </div>
 
@@ -8659,54 +8728,73 @@ function BinsQrCodesContent() {
         </div>
       )}
 
-      {!isLoading && !defaultBuilding && (
+      {!isLoading && qrBuildings.length === 0 && (
         <div className="rounded-lg bg-white p-6 text-center text-sm text-[#55311c] shadow-md">
-          No In/Out QR code found.
+          No caretaker bins QR codes found.
         </div>
       )}
 
-      {defaultBuilding && (
-        <div className="rounded-lg bg-white p-6 shadow-md">
-          <div className="mb-4">
-            <h3 className="font-['Nunito',sans-serif] text-xl font-bold text-[#55311c]">
-              {QR_IN_OUT_LABEL}
-            </h3>
-            <p className="text-sm text-[rgba(0,0,0,0.65)]">
-              Use this QR code to register In/Out.
-            </p>
-          </div>
-
-          <div className="flex min-h-[300px] items-center justify-center rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
-            {qrData ? (
-              <img
-                src={qrData.dataUrl}
-                alt="QR Code - In/Out"
-                className="h-64 w-64"
-              />
-            ) : (
-              <p className="text-sm text-[rgba(0,0,0,0.6)]">Generating...</p>
-            )}
-          </div>
-
-          {qrData && (
-            <div className="mt-4 grid gap-2 md:grid-cols-2">
-              <a
-                href={qrData.dataUrl}
-                download="qr-in-out.png"
-                className="block rounded-lg bg-[#8c7569] px-4 py-2 text-center text-sm font-semibold text-white transition-all duration-300 hover:bg-[#55311c]"
+      {qrBuildings.length > 0 && (
+        <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+          {qrBuildings.map((building) => {
+            const qrItem = qrMap[String(building.id)]
+            return (
+              <div
+                key={building.id}
+                className="flex h-full flex-col justify-between rounded-lg bg-white p-6 shadow-md"
               >
-                Download PNG
-              </a>
-              <a
-                href={qrData.link}
-                target="_blank"
-                rel="noreferrer"
-                className="block rounded-lg border border-[#8c7569] px-4 py-2 text-center text-sm font-semibold text-[#55311c] transition-all duration-300 hover:bg-[#f3eeea]"
-              >
-                Open link
-              </a>
-            </div>
-          )}
+                <div>
+                  <h3 className="text-lg font-semibold text-[#55311c]">
+                    {building.nome || "Building"}
+                  </h3>
+                  <p className="text-sm text-[rgba(0,0,0,0.6)]">
+                    Caretaker bins QR code
+                  </p>
+                </div>
+
+                <div className="mt-4 flex flex-col items-center justify-center gap-4">
+                  {qrItem?.dataUrl ? (
+                    <img
+                      src={qrItem.dataUrl}
+                      alt={`QR Code ${building.nome || "Building"}`}
+                      className="h-48 w-48 rounded-lg border border-[#e5e0dc] bg-white p-2"
+                    />
+                  ) : (
+                    <div className="flex h-48 w-48 items-center justify-center rounded-lg border border-dashed border-[#e5e0dc] text-xs text-[rgba(0,0,0,0.6)]">
+                      QR Code unavailable
+                    </div>
+                  )}
+
+                  <div className="flex w-full flex-col gap-2">
+                    <a
+                      href={qrItem?.dataUrl || "#"}
+                      download={`qr-caretaker-bins-${(building.nome || "building").trim().toLowerCase().replace(/\s+/g, "-")}.png`}
+                      className={`w-full rounded-lg px-4 py-2 text-center text-sm font-semibold transition-all duration-200 ${
+                        qrItem?.dataUrl
+                          ? "bg-[#8c7569] text-white hover:bg-[#55311c]"
+                          : "cursor-not-allowed bg-[#e5e0dc] text-[#8c7569]"
+                      }`}
+                      onClick={(event) => {
+                        if (!qrItem?.dataUrl) event.preventDefault()
+                      }}
+                    >
+                      Download QR Code
+                    </a>
+                    {qrItem?.link && (
+                      <a
+                        href={qrItem.link}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="block rounded-lg border border-[#8c7569] px-4 py-2 text-center text-sm font-semibold text-[#55311c] transition-all duration-300 hover:bg-[#f3eeea]"
+                      >
+                        Open link
+                      </a>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )
+          })}
         </div>
       )}
     </div>
@@ -8716,6 +8804,8 @@ function BinsQrCodesContent() {
 function BinsContent() {
   const { showErrorToast, showSuccessToast } = useCustomToast()
   const queryClient = useQueryClient()
+  const [selectedGroup, setSelectedGroup] =
+    useState<BinsDashboardGroupId>("falcon-martlett-merlin-oaklodge")
   const [page, setPage] = useState(0)
   const [typeFilter, setTypeFilter] = useState<"" | "general" | "recycle">("")
   const [statusFilter, setStatusFilter] = useState<"" | "miss" | "late">("")
@@ -8748,14 +8838,14 @@ function BinsContent() {
     [dateFrom, dateTo, typeFilter, statusFilter],
   )
 
-  const { data, isLoading, error } = useQuery<
+  const { data: filteredData, isLoading, error } = useQuery<
     ApiListResponse<BinMissCollectionRecord>
   >({
-    queryKey: ["bins", page, pageSize, filterParams],
+    queryKey: ["bins", "all-for-table", filterParams],
     queryFn: () =>
       apiCall("/api/v1/bins/", {
-        skip: page * pageSize,
-        limit: pageSize,
+        skip: 0,
+        limit: 5000,
         ...filterParams,
       }),
     placeholderData: keepPreviousData,
@@ -8766,15 +8856,33 @@ function BinsContent() {
     queryFn: () =>
       apiCall("/api/v1/bins/", {
         skip: 0,
-        limit: 1000,
+        limit: 5000,
         collection_type: typeFilter || undefined,
       }),
   })
 
-  const items = data?.data || []
-  const count = data?.count || 0
+  const filteredItems = useMemo(
+    () =>
+      filterBinRecordsByDashboardGroup(filteredData?.data || [], selectedGroup),
+    [filteredData?.data, selectedGroup],
+  )
+
+  const allItems = useMemo(
+    () => filterBinRecordsByDashboardGroup(allData?.data || [], selectedGroup),
+    [allData?.data, selectedGroup],
+  )
+
+  const count = filteredItems.length
   const totalPages = Math.max(1, Math.ceil(count / pageSize))
-  const allItems = allData?.data || []
+  const currentPage = Math.min(page, totalPages - 1)
+  const items = useMemo(
+    () =>
+      filteredItems.slice(
+        currentPage * pageSize,
+        currentPage * pageSize + pageSize,
+      ),
+    [filteredItems, currentPage],
+  )
 
   const formatDate = (value: string) => {
     const dt = new Date(value)
@@ -8847,33 +8955,60 @@ function BinsContent() {
     }>
   }, [allItems])
 
+  const binsSummary = useMemo(() => {
+    const collectedCount = filteredItems.filter(
+      (item) => item.collection_status === "late",
+    ).length
+    const missCount = filteredItems.filter(
+      (item) => item.collection_status === "miss",
+    ).length
+    const generalCount = filteredItems.filter(
+      (item) => item.collection_type === "general",
+    ).length
+    const recycleCount = filteredItems.filter(
+      (item) => item.collection_type === "recycle",
+    ).length
+
+    return {
+      totalRecords: filteredItems.length,
+      collectedCount,
+      missCount,
+      generalCount,
+      recycleCount,
+    }
+  }, [filteredItems])
+
+  const statusPieData = useMemo(
+    () => [
+      { name: "Collects", value: binsSummary.collectedCount, color: "#2d8659" },
+      { name: "Miss", value: binsSummary.missCount, color: "#c75b39" },
+    ],
+    [binsSummary.collectedCount, binsSummary.missCount],
+  )
+
+  const typePieData = useMemo(
+    () => [
+      { name: "General", value: binsSummary.generalCount, color: "#8c7569" },
+      { name: "Recycle", value: binsSummary.recycleCount, color: "#4f8fc0" },
+    ],
+    [binsSummary.generalCount, binsSummary.recycleCount],
+  )
+
   const handleDownloadReport = async () => {
     setIsDownloadingReport(true)
     try {
-      const firstPage = (await apiCall("/api/v1/bins/", {
-        skip: 0,
-        limit: 1,
-        ...filterParams,
-      })) as ApiListResponse<BinMissCollectionRecord>
-
-      const total = firstPage.count || 0
-      if (!total) {
+      if (filteredItems.length === 0) {
         showErrorToast("No results to generate the report.")
         return
       }
 
-      const fullResult = (await apiCall("/api/v1/bins/", {
-        skip: 0,
-        limit: total,
-        ...filterParams,
-      })) as ApiListResponse<BinMissCollectionRecord>
-
       const lines = [
-        ["Date", "Time", "Type", "Status"].join(","),
-        ...fullResult.data.map((item) =>
+        ["Date", "Time", "Building", "Type", "Status"].join(","),
+        ...filteredItems.map((item) =>
           [
             formatCsvValue(formatDate(item.data)),
             formatCsvValue(formatTime(item.data)),
+            formatCsvValue(item.building_nome || "-"),
             formatCsvValue(item.collection_type),
             formatCsvValue(item.collection_status),
           ].join(","),
@@ -8983,6 +9118,12 @@ function BinsContent() {
     }
   }
 
+  useEffect(() => {
+    if (page > totalPages - 1) {
+      setPage(Math.max(0, totalPages - 1))
+    }
+  }, [page, totalPages])
+
   if (isLoading) {
     return (
       <div className="mx-auto max-w-7xl">
@@ -9027,12 +9168,37 @@ function BinsContent() {
         </div>
       </div>
 
+      <div className="mb-6 rounded-lg bg-white p-3 shadow-md">
+        <div className="grid grid-cols-2 gap-3">
+          {BINS_DASHBOARD_GROUP_OPTIONS.map((option) => {
+            const isActive = selectedGroup === option.id
+            return (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => {
+                  setSelectedGroup(option.id)
+                  setPage(0)
+                }}
+                className={`w-full rounded-lg px-4 py-4 text-center text-sm font-semibold transition-all duration-200 ${
+                  isActive
+                    ? "bg-[#8c7569] text-white shadow-sm"
+                    : "border border-[#d9d0ca] bg-[#faf8f6] text-[#55311c] hover:bg-[#f0ebe7]"
+                }`}
+              >
+                {option.label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
       {oldMissAlerts.length > 0 && (
         <div className="mb-6 rounded-lg border border-yellow-300 bg-yellow-50 p-4 shadow-md">
-          <p className="font-semibold text-yellow-800">
+          <p className="text-center font-semibold text-yellow-800">
             Old miss collections pending collected:
           </p>
-          <div className="mt-2 space-y-1 text-sm text-yellow-700">
+          <div className="mt-2 space-y-1 text-center text-sm text-yellow-700">
             {oldMissAlerts.map((alert) => (
               <p key={`${alert.type}-${alert.oldest}`}>
                 {alert.type === "general" ? "General" : "Recycle"}:{" "}
@@ -9042,6 +9208,132 @@ function BinsContent() {
           </div>
         </div>
       )}
+
+      <div className="mb-6 grid gap-6 lg:grid-cols-3">
+        <div className="rounded-lg bg-white p-6 shadow-md">
+          <h3 className="mb-4 text-center text-lg font-semibold text-[#55311c]">
+            Analysis
+          </h3>
+          <div className="space-y-3">
+            <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] px-4 py-4 text-center">
+              <p className="text-sm font-semibold text-[rgba(85,49,28,0.7)]">
+                Total registros
+              </p>
+              <p className="mt-1 text-3xl font-bold text-[#55311c]">
+                {binsSummary.totalRecords}
+              </p>
+            </div>
+            <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] px-4 py-4 text-center">
+              <p className="text-sm font-semibold text-[rgba(85,49,28,0.7)]">
+                Collects
+              </p>
+              <p className="mt-1 text-3xl font-bold text-[#2d8659]">
+                {binsSummary.collectedCount}
+              </p>
+            </div>
+            <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] px-4 py-4 text-center">
+              <p className="text-sm font-semibold text-[rgba(85,49,28,0.7)]">
+                Miss
+              </p>
+              <p className="mt-1 text-3xl font-bold text-[#c75b39]">
+                {binsSummary.missCount}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-lg bg-white p-6 shadow-md">
+          <h3 className="mb-4 text-center text-lg font-semibold text-[#55311c]">
+            Collect x Miss
+          </h3>
+          <div className="h-64 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={statusPieData}
+                  dataKey="value"
+                  nameKey="name"
+                  cx="50%"
+                  cy="50%"
+                  outerRadius={80}
+                  label={({ name, value }) => `${name}: ${value}`}
+                  labelLine={false}
+                >
+                  {statusPieData.map((entry) => (
+                    <Cell key={entry.name} fill={entry.color} />
+                  ))}
+                </Pie>
+                <Tooltip
+                  formatter={(value: number, name: string) => {
+                    const total = statusPieData.reduce(
+                      (sum, item) => sum + item.value,
+                      0,
+                    )
+                    const percentage =
+                      total > 0 ? ((Number(value) / total) * 100).toFixed(1) : "0.0"
+                    return [
+                      `${value}\n${percentage}%`,
+                      String(name),
+                    ]
+                  }}
+                  contentStyle={{
+                    borderRadius: "10px",
+                    border: "1px solid #e5e0dc",
+                    backgroundColor: "#fff",
+                    whiteSpace: "pre-line",
+                  }}
+                />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        <div className="rounded-lg bg-white p-6 shadow-md">
+          <h3 className="mb-4 text-center text-lg font-semibold text-[#55311c]">
+            General x Recycle
+          </h3>
+          <div className="h-64 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={typePieData}
+                  dataKey="value"
+                  nameKey="name"
+                  cx="50%"
+                  cy="50%"
+                  outerRadius={80}
+                  label={({ name, value }) => `${name}: ${value}`}
+                  labelLine={false}
+                >
+                  {typePieData.map((entry) => (
+                    <Cell key={entry.name} fill={entry.color} />
+                  ))}
+                </Pie>
+                <Tooltip
+                  formatter={(value: number, name: string) => {
+                    const total = typePieData.reduce(
+                      (sum, item) => sum + item.value,
+                      0,
+                    )
+                    const percentage =
+                      total > 0 ? ((Number(value) / total) * 100).toFixed(1) : "0.0"
+                    return [
+                      `${value}\n${percentage}%`,
+                      String(name),
+                    ]
+                  }}
+                  contentStyle={{
+                    borderRadius: "10px",
+                    border: "1px solid #e5e0dc",
+                    backgroundColor: "#fff",
+                    whiteSpace: "pre-line",
+                  }}
+                />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
 
       <div className="rounded-lg bg-white p-6 shadow-md">
         <div className="mb-4 grid gap-4 md:grid-cols-4">
@@ -9133,16 +9425,19 @@ function BinsContent() {
           <table className="w-full border-collapse">
             <thead>
               <tr className="bg-[#8c7569]">
-                <th className="border border-gray-300 px-4 py-3 text-left text-sm font-semibold text-white">
+                <th className="border border-gray-300 px-4 py-3 text-center text-sm font-semibold text-white">
                   Date
                 </th>
-                <th className="border border-gray-300 px-4 py-3 text-left text-sm font-semibold text-white">
+                <th className="border border-gray-300 px-4 py-3 text-center text-sm font-semibold text-white">
                   Time
                 </th>
-                <th className="border border-gray-300 px-4 py-3 text-left text-sm font-semibold text-white">
+                <th className="border border-gray-300 px-4 py-3 text-center text-sm font-semibold text-white">
+                  Building
+                </th>
+                <th className="border border-gray-300 px-4 py-3 text-center text-sm font-semibold text-white">
                   Type
                 </th>
-                <th className="border border-gray-300 px-4 py-3 text-left text-sm font-semibold text-white">
+                <th className="border border-gray-300 px-4 py-3 text-center text-sm font-semibold text-white">
                   Status
                 </th>
               </tr>
@@ -9158,16 +9453,19 @@ function BinsContent() {
                   tabIndex={0}
                   title="Edit bin record"
                 >
-                  <td className="border border-gray-300 px-4 py-3 text-[#55311c]">
+                  <td className="border border-gray-300 px-4 py-3 text-center text-[#55311c]">
                     {formatDate(item.data)}
                   </td>
-                  <td className="border border-gray-300 px-4 py-3 text-[#55311c]">
+                  <td className="border border-gray-300 px-4 py-3 text-center text-[#55311c]">
                     {formatTime(item.data)}
                   </td>
-                  <td className="border border-gray-300 px-4 py-3 text-[#55311c]">
+                  <td className="border border-gray-300 px-4 py-3 text-center text-[#55311c]">
+                    {item.building_nome || "-"}
+                  </td>
+                  <td className="border border-gray-300 px-4 py-3 text-center text-[#55311c]">
                     {item.collection_type === "recycle" ? "Recycle" : "General"}
                   </td>
-                  <td className="border border-gray-300 px-4 py-3 text-[#55311c]">
+                  <td className="border border-gray-300 px-4 py-3 text-center text-[#55311c]">
                     {item.collection_status === "late"
                       ? "Collected"
                       : "Miss Collection"}
@@ -9177,7 +9475,7 @@ function BinsContent() {
               {items.length === 0 && (
                 <tr>
                   <td
-                    colSpan={4}
+                    colSpan={5}
                     className="border border-gray-300 px-4 py-8 text-center text-[rgba(0,0,0,0.65)]"
                   >
                     No miss collection records found.
@@ -9195,19 +9493,21 @@ function BinsContent() {
           <div className="flex gap-2">
             <button
               type="button"
-              onClick={() => setPage(Math.max(0, page - 1))}
-              disabled={page === 0}
+              onClick={() => setPage(Math.max(0, currentPage - 1))}
+              disabled={currentPage === 0}
               className="rounded bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 hover:bg-[#55311c]"
             >
               Previous
             </button>
             <span className="flex items-center px-3 text-sm text-[#55311c]">
-              {page + 1} / {totalPages}
+              {currentPage + 1} / {totalPages}
             </span>
             <button
               type="button"
-              onClick={() => setPage(Math.min(totalPages - 1, page + 1))}
-              disabled={page >= totalPages - 1}
+              onClick={() =>
+                setPage(Math.min(totalPages - 1, currentPage + 1))
+              }
+              disabled={currentPage >= totalPages - 1}
               className="rounded bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 hover:bg-[#55311c]"
             >
               Next
@@ -10624,13 +10924,6 @@ function ContractorQrCodesContent() {
 }
 
 function CaretakerQrCodesContent() {
-  const { data: buildingsData, isLoading } = useQuery({
-    queryKey: ["buildings", "qr-caretaker"],
-    queryFn: () => apiCall("/api/v1/buildings/condominio"),
-  })
-
-  const buildings = (buildingsData?.data || []) as Building[]
-
   const baseUrl = useMemo(() => {
     if (typeof window === "undefined") return ""
     return window.location.origin
@@ -10640,10 +10933,6 @@ function CaretakerQrCodesContent() {
     Record<string, { dataUrl: string; link: string }>
   >({})
   const [isGenerating, setIsGenerating] = useState(false)
-  const inOutBuildings = useMemo(
-    () => buildings.filter(isCaretakerQrBuilding),
-    [buildingsData?.data],
-  )
 
   useEffect(() => {
     let isActive = true
@@ -10662,15 +10951,6 @@ function CaretakerQrCodesContent() {
             key: "work-time",
             link: `${baseUrl}/caretaker-access?mode=work-time`,
           },
-          ...inOutBuildings.map((building) => {
-            const params = new URLSearchParams()
-            params.set("buildingId", String(building.id))
-            if (building.nome) params.set("buildingName", String(building.nome))
-            return {
-              key: String(building.id),
-              link: `${baseUrl}/caretaker-access?${params.toString()}`,
-            }
-          }),
         ].map(async (entry) => {
           const dataUrl = await QRCode.toDataURL(entry.link, {
             width: 240,
@@ -10695,7 +10975,7 @@ function CaretakerQrCodesContent() {
     return () => {
       isActive = false
     }
-  }, [baseUrl, inOutBuildings])
+  }, [baseUrl])
 
   return (
     <div className="mx-auto max-w-7xl">
@@ -10704,19 +10984,13 @@ function CaretakerQrCodesContent() {
           QR Code - Caretaker
         </h2>
         <p className="mt-2 text-[rgba(0,0,0,0.7)]">
-          QR codes for In/Out and Work Time.
+          QR code for Work Time.
         </p>
       </div>
 
-      {(isLoading || isGenerating) && (
+      {isGenerating && (
         <div className="rounded-lg bg-white p-6 text-center text-sm text-[#55311c] shadow-md">
           Generating QR Codes...
-        </div>
-      )}
-
-      {!isLoading && inOutBuildings.length === 0 && (
-        <div className="rounded-lg bg-white p-6 text-center text-sm text-[#55311c] shadow-md">
-          No In/Out QR code found.
         </div>
       )}
 
@@ -10729,7 +11003,7 @@ function CaretakerQrCodesContent() {
             <h3 className="text-lg font-semibold text-[#55311c]">
               {QR_WORK_TIME_LABEL}
             </h3>
-            <p className="text-sm text-[rgba(0,0,0,0.6)]">Caretaker IN/OUT</p>
+            <p className="text-sm text-[rgba(0,0,0,0.6)]">Caretaker Work Time</p>
           </div>
 
           <div className="mt-4 flex flex-col items-center justify-center gap-4">
@@ -10773,66 +11047,6 @@ function CaretakerQrCodesContent() {
             </div>
           </div>
         </div>
-
-        {inOutBuildings.map((building) => {
-          const qrItem = qrMap[String(building.id)]
-          return (
-            <div
-              key={building.id}
-              className="flex h-full flex-col justify-between rounded-lg bg-white p-6 shadow-md"
-            >
-              <div>
-                <h3 className="text-lg font-semibold text-[#55311c]">
-                  {building.nome || "Caretaker"}
-                </h3>
-                <p className="text-sm text-[rgba(0,0,0,0.6)]">
-                  Caretaker IN/OUT
-                </p>
-              </div>
-
-              <div className="mt-4 flex flex-col items-center justify-center gap-4">
-                {qrItem?.dataUrl ? (
-                  <img
-                    src={qrItem.dataUrl}
-                    alt={`QR Code ${building.nome || "Caretaker"}`}
-                    className="h-48 w-48 rounded-lg border border-[#e5e0dc] bg-white p-2"
-                  />
-                ) : (
-                  <div className="flex h-48 w-48 items-center justify-center rounded-lg border border-dashed border-[#e5e0dc] text-xs text-[rgba(0,0,0,0.6)]">
-                    QR Code unavailable
-                  </div>
-                )}
-
-                <div className="flex w-full flex-col gap-2">
-                  <a
-                    href={qrItem?.dataUrl || "#"}
-                    download="qr-caretaker-in-out.png"
-                    className={`w-full rounded-lg px-4 py-2 text-center text-sm font-semibold transition-all duration-200 ${
-                      qrItem?.dataUrl
-                        ? "bg-[#8c7569] text-white hover:bg-[#55311c]"
-                        : "cursor-not-allowed bg-[#e5e0dc] text-[#8c7569]"
-                    }`}
-                    onClick={(event) => {
-                      if (!qrItem?.dataUrl) event.preventDefault()
-                    }}
-                  >
-                    Download QR Code
-                  </a>
-                  {qrItem?.link && (
-                    <a
-                      href={qrItem.link}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="block rounded-lg border border-[#8c7569] px-4 py-2 text-center text-sm font-semibold text-[#55311c] transition-all duration-300 hover:bg-[#f3eeea]"
-                    >
-                      Open link
-                    </a>
-                  )}
-                </div>
-              </div>
-            </div>
-          )
-        })}
       </div>
     </div>
   )
@@ -11248,7 +11462,7 @@ function CleanerContent() {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <button
+            {/* <button
               type="button"
               onClick={() => setIsInvoiceDialogOpen(true)}
               className="rounded-lg border border-[#8c7569] bg-white px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
@@ -11261,7 +11475,7 @@ function CleanerContent() {
               className="rounded-lg border border-[#8c7569] bg-white px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
             >
               Invoice history
-            </button>
+            </button> */}
             <button
               type="button"
               onClick={() => setActiveSubTab("summary")}
@@ -18547,6 +18761,23 @@ function ResidentsContent() {
 
   const Residents = ResidentsData?.data || []
   const buildings = buildingsData?.data || []
+  const residentFilterBuildings = useMemo(
+    () =>
+      buildings.filter((building) => {
+        const normalizedName = building.nome.trim().toLowerCase()
+        return !["office", "cleaner", "caretaker"].includes(normalizedName)
+      }),
+    [buildings],
+  )
+
+  useEffect(() => {
+    if (
+      selectedBuilding &&
+      !residentFilterBuildings.some((building) => building.nome === selectedBuilding)
+    ) {
+      setSelectedBuilding(null)
+    }
+  }, [residentFilterBuildings, selectedBuilding])
 
   const sortedResidents = useMemo(
     () =>
@@ -18797,6 +19028,9 @@ function ResidentsContent() {
 
   const renderResidentIdentity = (morador?: Morador) => {
     if (!morador) return "-"
+    const hasSecondaryTenantIdentity =
+      morador.cargo === 2 &&
+      (morador.tenant_nome_2?.trim() || morador.tenant_email_2?.trim())
 
     return (
       <div className="flex min-w-0 flex-col leading-tight">
@@ -18804,6 +19038,16 @@ function ResidentsContent() {
         <span className="break-words text-[10px] text-[rgba(85,49,28,0.72)]">
           {morador.email || "no email"}
         </span>
+        {hasSecondaryTenantIdentity && (
+          <>
+            <span className="mt-1 break-words text-[10px] font-semibold text-[rgba(85,49,28,0.82)]">
+              {morador.tenant_nome_2}
+            </span>
+            <span className="break-words text-[10px] text-[rgba(85,49,28,0.72)]">
+              {morador.tenant_email_2 || "no email"}
+            </span>
+          </>
+        )}
       </div>
     )
   }
@@ -18935,7 +19179,7 @@ function ResidentsContent() {
               className="w-full text-[#000000] rounded-lg border border-gray-300 px-3 py-2 font-['Nunito',sans-serif] text-sm focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
             >
               <option value="">All buildings</option>
-              {buildings.map((building) => (
+              {residentFilterBuildings.map((building) => (
                 <option key={building.id} value={building.nome}>
                   {building.nome}
                 </option>
@@ -19280,6 +19524,8 @@ function getDefaultResidentFormData() {
   return {
     nome: "",
     email: "",
+    tenant_nome_2: "",
+    tenant_email_2: "",
     mobile: "",
     cargo: 0,
     receives_flat_reading_sms: false,
@@ -19355,6 +19601,9 @@ function AddResidentForm({
   const shouldShowCarFields = activeEditingId
     ? activePreviewResident?.cargo === 0
     : formData.cargo === 0
+  const shouldShowTenantSecondaryFields = activeEditingId
+    ? activePreviewResident?.cargo === 2
+    : formData.cargo === 2
   const activeEditTitle = activePreviewResident
     ? `Edit ${getResidentRoleEditToken(activePreviewResident.cargo)}`
     : (editContext?.editTitle ?? "Edit resident")
@@ -19406,6 +19655,8 @@ function AddResidentForm({
           setFormData({
             nome: morador.nome,
             email: morador.email || "",
+            tenant_nome_2: morador.tenant_nome_2 || "",
+            tenant_email_2: morador.tenant_email_2 || "",
             mobile: morador.mobile?.toString() || "",
             cargo: morador.cargo,
             receives_flat_reading_sms: morador.receives_flat_reading_sms,
@@ -19495,6 +19746,12 @@ function AddResidentForm({
       const payload = {
         nome: formData.nome,
         email: formData.email || null,
+        ...(shouldShowTenantSecondaryFields
+          ? {
+              tenant_nome_2: formData.tenant_nome_2 || null,
+              tenant_email_2: formData.tenant_email_2 || null,
+            }
+          : {}),
         mobile: formData.mobile || "",
         receives_flat_reading_sms: formData.receives_flat_reading_sms,
         receives_twilio_sms: formData.receives_twilio_sms,
@@ -19628,6 +19885,46 @@ function AddResidentForm({
                 placeholder="email@example.com"
               />
             </div>
+
+            {shouldShowTenantSecondaryFields && (
+              <>
+                <div>
+                  <label
+                    className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                    htmlFor="resident-tenant-nome-2"
+                  >
+                    Tenant Name 2
+                  </label>
+                  <input
+                    type="text"
+                    id="resident-tenant-nome-2"
+                    name="tenant_nome_2"
+                    value={formData.tenant_nome_2}
+                    onChange={handleInputChange}
+                    className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+                    placeholder="Second tenant name"
+                  />
+                </div>
+
+                <div>
+                  <label
+                    className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                    htmlFor="resident-tenant-email-2"
+                  >
+                    Tenant Email 2
+                  </label>
+                  <input
+                    type="email"
+                    id="resident-tenant-email-2"
+                    name="tenant_email_2"
+                    value={formData.tenant_email_2}
+                    onChange={handleInputChange}
+                    className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+                    placeholder="second.tenant@example.com"
+                  />
+                </div>
+              </>
+            )}
 
             <div>
               <label

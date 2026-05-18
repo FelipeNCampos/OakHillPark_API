@@ -121,10 +121,10 @@ def test_tasks_lifecycle(client: TestClient, db: Session) -> None:
     update_status = client.patch(
         f"{settings.API_V1_STR}/tasks/{task_id}/status",
         headers=caretaker_headers,
-        json={"status": "in_progress"},
+        json={"status": "done"},
     )
     assert update_status.status_code == 200
-    assert update_status.json()["status"] == "in_progress"
+    assert update_status.json()["status"] == "done"
 
     send_message = client.post(
         f"{settings.API_V1_STR}/tasks/{task_id}/messages",
@@ -236,6 +236,21 @@ def test_task_with_creation_photo_requires_completion_photo(
     assert payload["cover_image_data"] == "data:image/png;base64,AAA"
     assert payload["requires_completion_image"] is True
 
+    list_response = client.get(f"{settings.API_V1_STR}/tasks/", headers=manager_headers)
+    assert list_response.status_code == 200
+    listed_task = next(
+        item for item in list_response.json()["data"] if item["id"] == payload["id"]
+    )
+    assert listed_task["cover_image_data"] is None
+    assert listed_task["requires_completion_image"] is True
+
+    detail_response = client.get(
+        f"{settings.API_V1_STR}/tasks/{payload['id']}",
+        headers=manager_headers,
+    )
+    assert detail_response.status_code == 200
+    assert detail_response.json()["cover_image_data"] == "data:image/png;base64,AAA"
+
     caretaker_password = random_lower_string()
     caretaker = crud.update_user(
         session=db, db_user=caretaker, user_in=UserUpdate(password=caretaker_password)
@@ -245,13 +260,6 @@ def test_task_with_creation_photo_requires_completion_photo(
         email=caretaker.email,
         password=caretaker_password,
     )
-
-    start_task = client.patch(
-        f"{settings.API_V1_STR}/tasks/{payload['id']}/status",
-        headers=caretaker_headers,
-        json={"status": "in_progress"},
-    )
-    assert start_task.status_code == 200
 
     finish_without_photo = client.patch(
         f"{settings.API_V1_STR}/tasks/{payload['id']}/status",
@@ -275,7 +283,7 @@ def test_task_with_creation_photo_requires_completion_photo(
     reopen_after_done = client.patch(
         f"{settings.API_V1_STR}/tasks/{payload['id']}/status",
         headers=caretaker_headers,
-        json={"status": "in_progress"},
+        json={"status": "todo"},
     )
     assert reopen_after_done.status_code == 400
     assert (

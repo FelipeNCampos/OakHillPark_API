@@ -7,7 +7,7 @@ import {
 import { createFileRoute, redirect } from "@tanstack/react-router"
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
-import { GlobalWorkerOptions, getDocument } from "pdfjs-dist"
+import { GlobalWorkerOptions } from "pdfjs-dist"
 import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url"
 import {
   CircleDollarSign,
@@ -80,12 +80,20 @@ interface Building {
 
 const QR_SPECIAL_CLEANER_BUILDING_NAMES = new Set(["general", "cleaner"])
 const QR_CARETAKER_BUILDING_NAME = "caretaker"
+const CARETAKER_BINS_QR_HIDDEN_BUILDING_NAMES = new Set(["falcon", "office"])
 const READING_HIDDEN_BUILDING_NAMES = new Set([
   "cleaner",
   "contractor",
   "caretaker",
 ])
+const FLAT_READING_HIDDEN_BUILDING_NAMES = new Set([
+  "cleaner",
+  "contractor",
+  "caretaker",
+  "office",
+])
 const QR_SPECIAL_CLEANER_BUILDING_LABEL = "Cleaner"
+const QR_BINS_LABEL = "Bins"
 const QR_CARETAKER_BINS_LABEL = "Caretaker Bins"
 const QR_WORK_TIME_LABEL = "Work Time"
 
@@ -96,7 +104,11 @@ const isCaretakerQrBuilding = (building: Building) =>
   building.nome.trim().toLowerCase() === QR_CARETAKER_BUILDING_NAME
 
 const isCaretakerBinsQrBuilding = (building: Building) =>
-  !isCleanerQrBuilding(building) && !isCaretakerQrBuilding(building)
+  !isCleanerQrBuilding(building) &&
+  !isCaretakerQrBuilding(building) &&
+  !CARETAKER_BINS_QR_HIDDEN_BUILDING_NAMES.has(
+    building.nome.trim().toLowerCase(),
+  )
 
 const getCleanerQrBuildingLabel = (building: Building) =>
   isCleanerQrBuilding(building)
@@ -1831,8 +1843,10 @@ const isImageDataUrl = (value?: string | null) =>
 
 const getDataUrlMimeType = (value?: string | null) => {
   if (typeof value !== "string") return null
-  const match = value.match(/^data:([^;]+);base64,/i)
-  return match?.[1]?.toLowerCase() || null
+  const match = value.match(/^data:([^,]+),/i)
+  if (!match) return null
+  const [mimeType] = match[1].split(";")
+  return mimeType?.toLowerCase() || null
 }
 
 const isPdfDataUrl = (value?: string | null) =>
@@ -1859,40 +1873,6 @@ const revokePreviewState = (preview?: CashFlowPreviewState | null) => {
   if (preview?.revokeOnDispose) {
     URL.revokeObjectURL(preview.url)
   }
-}
-
-const renderPdfDataUrlPages = async (value: string) => {
-  const pdf = await getDocument({ data: dataUrlToUint8Array(value) }).promise
-  const pages: Array<{ dataUrl: string; width: number; height: number }> = []
-
-  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-    const page = await pdf.getPage(pageNumber)
-    const baseViewport = page.getViewport({ scale: 1 })
-    const scale = Math.min(
-      2,
-      1800 / Math.max(baseViewport.width, baseViewport.height, 1),
-    )
-    const viewport = page.getViewport({ scale: Math.max(scale, 1) })
-    const canvas = document.createElement("canvas")
-    canvas.width = Math.max(1, Math.ceil(viewport.width))
-    canvas.height = Math.max(1, Math.ceil(viewport.height))
-    const context = canvas.getContext("2d")
-    if (!context) {
-      throw new Error("Could not prepare PDF preview")
-    }
-
-    context.fillStyle = "#ffffff"
-    context.fillRect(0, 0, canvas.width, canvas.height)
-    await page.render({ canvas, canvasContext: context, viewport }).promise
-
-    pages.push({
-      dataUrl: canvas.toDataURL("image/jpeg", 0.82),
-      width: viewport.width,
-      height: viewport.height,
-    })
-  }
-
-  return pages
 }
 
 const CONTRACTOR_MEDIA_SLOT_COUNT = 4
@@ -2312,7 +2292,8 @@ function ClientDashboard() {
         { label: "Cleaner", id: "qr-cleaner" },
         { label: "Contractor", id: "qr-contractor" },
         { label: "Caretaker", id: "qr-caretaker" },
-        { label: QR_CARETAKER_BINS_LABEL, id: "qr-bins" },
+        { label: QR_BINS_LABEL, id: "qr-bins" },
+        { label: QR_CARETAKER_BINS_LABEL, id: "qr-caretaker-bins" },
       ],
     },
     {
@@ -2335,7 +2316,7 @@ function ClientDashboard() {
     { label: "Cleaner", id: "cleaner" },
     { label: "Caretaker", id: "caretaker" },
     { label: "Bins", id: "bins" },
-    { label: "Cash Flow", id: "cash-flow" },
+    { label: "Petty Cash", id: "cash-flow" },
     { label: "Twilio", id: "twillio" },
   ]
 
@@ -2358,7 +2339,9 @@ function ClientDashboard() {
       case "qr-caretaker":
         return <CaretakerQrCodesContent />
       case "qr-bins":
-        return <BinsQrCodesContent />
+        return <BinsQrCodesContent title={QR_BINS_LABEL} />
+      case "qr-caretaker-bins":
+        return <BinsQrCodesContent title={QR_CARETAKER_BINS_LABEL} />
       case "schedule-alarm":
         return <CaretakerSchedules initialTab="alarm" />
       case "schedule-lift":
@@ -2597,7 +2580,8 @@ function OverviewContent({
         { label: "Cleaner", tabId: "qr-cleaner" },
         { label: "Contractor", tabId: "qr-contractor" },
         { label: "Caretaker", tabId: "qr-caretaker" },
-        { label: QR_CARETAKER_BINS_LABEL, tabId: "qr-bins" },
+        { label: QR_BINS_LABEL, tabId: "qr-bins" },
+        { label: QR_CARETAKER_BINS_LABEL, tabId: "qr-caretaker-bins" },
       ],
     },
     {
@@ -2619,7 +2603,7 @@ function OverviewContent({
     { label: "Cleaner", tabId: "cleaner" },
     { label: "Caretaker", tabId: "caretaker" },
     { label: "Bins", tabId: "bins" },
-    { label: "Cash Flow", tabId: "cash-flow" },
+    { label: "Petty Cash", tabId: "cash-flow" },
     { label: "Twilio", tabId: "twillio" },
   ]
 
@@ -2691,7 +2675,7 @@ function OverviewContent({
 
 function CashFlowContent() {
   const queryClient = useQueryClient()
-  const title = "Cashflow"
+  const title = "Petty Cash"
   const monthInputRef = useRef<HTMLInputElement | null>(null)
   const createInvoiceFileInputRef = useRef<HTMLInputElement | null>(null)
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonthInputValue)
@@ -2717,10 +2701,8 @@ function CashFlowContent() {
     null,
   )
   const [sendingReport, setSendingReport] = useState(false)
-  const [reportFile, setReportFile] = useState<{
-    dataUrl: string
+  const [, setReportFile] = useState<{
     fileName: string
-    invoiceCount: number
     periodLabel: string
   } | null>(null)
   const [invoiceEditor, setInvoiceEditor] =
@@ -3013,8 +2995,6 @@ function CashFlowContent() {
       return null
     }
 
-    const rangeFrom = getMonthDateRange(reportForm.startMonth)
-    const rangeTo = getMonthDateRange(reportForm.endMonth)
     const periodLabel = buildMonthRangeLabel(
       reportForm.startMonth,
       reportForm.endMonth,
@@ -3024,220 +3004,56 @@ function CashFlowContent() {
     setReportPreviewError(null)
 
     try {
-      const pageLimit = 500
-      const firstPage = (await apiCall("/api/v1/cash-flow/", {
-        skip: 0,
-        limit: pageLimit,
-        date_from: rangeFrom.dateFrom,
-        date_to: rangeTo.dateTo,
-        search: deferredSearch || undefined,
-      })) as CashFlowRecordsResponse
-      const allRecords = [...(firstPage.data || [])]
-
-      for (let skip = pageLimit; skip < (firstPage.count || 0); skip += pageLimit) {
-        const nextPage = (await apiCall("/api/v1/cash-flow/", {
-          skip,
-          limit: pageLimit,
-          date_from: rangeFrom.dateFrom,
-          date_to: rangeTo.dateTo,
-          search: deferredSearch || undefined,
-        })) as CashFlowRecordsResponse
-        allRecords.push(...(nextPage.data || []))
+      const resolveApiBase = () => {
+        if (OpenAPI.BASE) return OpenAPI.BASE
+        const { protocol, hostname, port } = window.location
+        if (hostname.startsWith("dashboard.")) {
+          return `${protocol}//api.${hostname.slice("dashboard.".length)}`
+        }
+        if (hostname === "localhost" && port === "5173") {
+          return "http://localhost:8000"
+        }
+        return `${protocol}//${hostname}${port ? `:${port}` : ""}`
       }
 
-      const invoiceRecords = allRecords.filter(
-        (record) => record.has_invoice && record.invoice_media_data,
+      const url = new URL(`${resolveApiBase()}/api/v1/cash-flow/report/`)
+      url.searchParams.set("start_month", reportForm.startMonth)
+      url.searchParams.set("end_month", reportForm.endMonth)
+      url.searchParams.set(
+        "include_invoice_table",
+        String(reportForm.includeInvoiceTable),
       )
-
-      if (invoiceRecords.length === 0) {
-        throw new Error("No invoice media found for the selected period.")
+      if (deferredSearch) {
+        url.searchParams.set("search", deferredSearch)
       }
 
-      const doc = new jsPDF({
-        orientation: "portrait",
-        unit: "pt",
-        format: "a4",
+      const response = await fetch(url.toString(), {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("access_token")}`,
+        },
       })
-      const pageWidth = doc.internal.pageSize.getWidth()
-      const pageHeight = doc.internal.pageSize.getHeight()
-      const margin = 20
-
-      const renderInvoiceTable = (
-        tableRecords: CashFlowRecord[],
-        tablePeriodLabel: string,
-      ) => {
-        doc.setFontSize(16)
-        doc.text(`${title} Report`, margin, 42)
-        doc.setFontSize(10)
-        doc.text(`Period: ${tablePeriodLabel}`, margin, 62)
-        doc.text(`Generated: ${new Date().toLocaleString("en-GB")}`, margin, 78)
-
-        autoTable(doc, {
-          startY: 98,
-          head: [["Payment Number", "Date", "Amount", "Comments", "Invoice"]],
-          body: tableRecords.map((record) => [
-            record.payment_number,
-            formatCashFlowDate(record.record_date),
-            formatCurrencyGbp(record.amount),
-            record.description || "-",
-            record.invoice_media_name || "Invoice media",
-          ]),
-          theme: "grid",
-          styles: {
-            fontSize: 8,
-            cellPadding: 4,
-            lineColor: [180, 180, 180],
-            lineWidth: 0.4,
-          },
-          headStyles: {
-            fillColor: [140, 117, 105],
-            textColor: 255,
-            fontStyle: "bold",
-          },
-        })
+      if (!response.ok) {
+        let message = "Unable to load report preview."
+        try {
+          const payload = (await response.json()) as {
+            detail?: string
+            message?: string
+          }
+          message = payload.detail || payload.message || message
+        } catch {
+          // ignore parse errors
+        }
+        throw new Error(message)
       }
 
-      const renderInvoiceMediaPage = async (
-        record: CashFlowRecord,
-        monthLabel?: string,
-      ) => {
-        const renderRecordHeader = () => {
-          doc.setFontSize(13)
-          doc.text(`Payment #${record.payment_number}`, margin, 38)
-          doc.setFontSize(9)
-          doc.text(`Date: ${formatCashFlowDate(record.record_date)}`, margin, 56)
-          doc.text(`Amount: ${formatCurrencyGbp(record.amount)}`, margin, 72)
-          doc.text(`Comments: ${record.description || "-"}`, margin, 88, {
-            maxWidth: pageWidth - margin * 2,
-          })
-          if (monthLabel) {
-            doc.text(`Month: ${monthLabel}`, margin, 108)
-          }
-        }
-
-        renderRecordHeader()
-
-        const mediaData = record.invoice_media_data || ""
-        if (isImageDataUrl(mediaData)) {
-          try {
-            const image = new Image()
-            await new Promise<void>((resolve, reject) => {
-              image.onload = () => resolve()
-              image.onerror = () =>
-                reject(new Error("Could not load invoice image"))
-              image.src = mediaData
-            })
-
-            const maxWidth = pageWidth - margin * 2
-            const maxHeight = pageHeight - 180
-            const ratio = Math.min(
-              maxWidth / Math.max(image.naturalWidth, 1),
-              maxHeight / Math.max(image.naturalHeight, 1),
-            )
-            const width = image.naturalWidth * ratio
-            const height = image.naturalHeight * ratio
-            const x = margin + (maxWidth - width) / 2
-            const y = 130 + (maxHeight - height) / 2
-            const canvasRatio = Math.min(
-              1,
-              1400 / Math.max(image.naturalWidth, 1),
-              1800 / Math.max(image.naturalHeight, 1),
-            )
-            const canvas = document.createElement("canvas")
-            canvas.width = Math.max(
-              1,
-              Math.round(image.naturalWidth * canvasRatio),
-            )
-            canvas.height = Math.max(
-              1,
-              Math.round(image.naturalHeight * canvasRatio),
-            )
-            const context = canvas.getContext("2d")
-            if (!context) throw new Error("Could not prepare invoice image")
-            context.fillStyle = "#ffffff"
-            context.fillRect(0, 0, canvas.width, canvas.height)
-            context.drawImage(image, 0, 0, canvas.width, canvas.height)
-            const compressedImage = canvas.toDataURL("image/jpeg", 0.78)
-            doc.addImage(compressedImage, "JPEG", x, y, width, height)
-          } catch {
-            doc.setFontSize(11)
-            doc.text("Invoice image could not be added to the report.", margin, 150)
-          }
-        } else if (isPdfDataUrl(mediaData)) {
-          try {
-            const pdfPages = await renderPdfDataUrlPages(mediaData)
-            const maxWidth = pageWidth - margin * 2
-            const maxHeight = pageHeight - 180
-
-            for (const [pageIndex, pdfPage] of pdfPages.entries()) {
-              if (pageIndex > 0) {
-                doc.addPage()
-                renderRecordHeader()
-              }
-
-              const ratio = Math.min(
-                maxWidth / Math.max(pdfPage.width, 1),
-                maxHeight / Math.max(pdfPage.height, 1),
-              )
-              const width = pdfPage.width * ratio
-              const height = pdfPage.height * ratio
-              const x = margin + (maxWidth - width) / 2
-              const y = 130 + (maxHeight - height) / 2
-              doc.addImage(pdfPage.dataUrl, "JPEG", x, y, width, height)
-            }
-          } catch {
-            doc.setFontSize(11)
-            doc.text("PDF pages could not be added to the report.", margin, 150)
-          }
-        } else {
-          doc.setFontSize(11)
-          doc.text("Invoice preview is not available for this file type.", margin, 150)
-        }
-      }
-
-      if (reportForm.includeInvoiceTable) {
-        const recordsByMonth = new Map<string, CashFlowRecord[]>()
-        for (const record of invoiceRecords) {
-          const monthKey = record.record_date.slice(0, 7)
-          recordsByMonth.set(monthKey, [
-            ...(recordsByMonth.get(monthKey) || []),
-            record,
-          ])
-        }
-
-        for (const [groupIndex, [monthKey, monthRecords]] of Array.from(
-          recordsByMonth.entries(),
-        ).entries()) {
-          const monthLabel =
-            reportForm.startMonth === reportForm.endMonth
-              ? periodLabel
-              : buildMonthRangeLabel(monthKey, monthKey)
-          if (groupIndex > 0) {
-            doc.addPage()
-          }
-          renderInvoiceTable(monthRecords, monthLabel)
-          for (const record of monthRecords) {
-            doc.addPage()
-            await renderInvoiceMediaPage(record, monthLabel)
-          }
-        }
-      } else {
-        for (const [index, record] of invoiceRecords.entries()) {
-          if (index > 0) {
-            doc.addPage()
-          }
-          await renderInvoiceMediaPage(record)
-        }
-      }
-
-      const pdfBlob = doc.output("blob")
+      const pdfBlob = await response.blob()
       const nextPreviewUrl = URL.createObjectURL(pdfBlob)
-      const dataUrl = doc.output("datauristring")
-      const fileName = `cashflow-${reportForm.startMonth}-to-${reportForm.endMonth}.pdf`
+      const disposition = response.headers.get("content-disposition") || ""
+      const fileName =
+        disposition.match(/filename=\"?([^"]+)\"?/i)?.[1] ||
+        `cashflow-report-${reportForm.startMonth}${reportForm.startMonth === reportForm.endMonth ? "" : `_to_${reportForm.endMonth}`}.pdf`
       const nextReportFile = {
-        dataUrl,
         fileName,
-        invoiceCount: invoiceRecords.length,
         periodLabel,
       }
 
@@ -3324,7 +3140,7 @@ function CashFlowContent() {
       closeCreateRecord()
       setFeedback({
         type: "success",
-        message: "Cash flow record created successfully.",
+        message: "Petty Cash record created successfully.",
       })
       await reload()
     } catch (error) {
@@ -3475,26 +3291,14 @@ function CashFlowContent() {
 
     setSendingReport(true)
     try {
-      const report = reportFile || (await generateInvoiceReport())
-      if (!report) {
-        setReportError("Unable to generate the report.")
-        return
-      }
-
-      const fileDataBase64 = report.dataUrl.split(",")[1] || ""
-      if (!fileDataBase64) {
-        setReportError("Unable to prepare the report file.")
-        return
-      }
-
-      await apiCall("/api/v1/utils/send-report-email/", {
+      await apiCall("/api/v1/cash-flow/report/send/", {
         method: "POST",
         body: {
           email_to: reportForm.email.trim(),
-          subject: `${title} Report`,
-          html_content: `<p>Hello,</p><p>Please find attached the ${escapeHtml(title.toLowerCase())} report for ${escapeHtml(report.periodLabel)}.</p><p>Invoices included: ${report.invoiceCount}</p>`,
-          file_name: report.fileName,
-          file_data_base64: fileDataBase64,
+          start_month: reportForm.startMonth,
+          end_month: reportForm.endMonth,
+          search: deferredSearch || null,
+          include_invoice_table: reportForm.includeInvoiceTable,
         },
       })
 
@@ -3627,7 +3431,7 @@ function CashFlowContent() {
                     className="px-4 py-6 text-sm font-semibold text-black/60"
                     colSpan={tableColumnCount}
                   >
-                    Loading cash flow records...
+                    Loading Petty Cash records...
                   </td>
                 </tr>
               ) : recordsQuery.error ? (
@@ -3638,7 +3442,7 @@ function CashFlowContent() {
                   >
                     {recordsQuery.error instanceof Error
                       ? recordsQuery.error.message
-                      : "Unable to load monthly cash flow."}
+                      : "Unable to load Petty Cash records."}
                   </td>
                 </tr>
               ) : recordsWithBalance.length > 0 ? (
@@ -6003,11 +5807,35 @@ function FlatsReadingsContent({
   })
 
   const buildings = (buildingsData?.data || []) as Building[]
-  const selectedBuilding = buildings.find(
+  const visibleBuildings = useMemo(
+    () =>
+      buildings.filter((building) => {
+        const normalizedName = building.nome.trim().toLowerCase()
+        return !FLAT_READING_HIDDEN_BUILDING_NAMES.has(normalizedName)
+      }),
+    [buildings],
+  )
+  const firstBuildingId = visibleBuildings[0]?.id
+  const selectedBuilding = visibleBuildings.find(
     (building) => building.id === selectedBuildingId,
   )
   const allFlats = selectedBuilding?.flats || []
   const flats = allFlats.filter((flat) => flat.reading_types !== 0)
+
+  useEffect(() => {
+    if (firstBuildingId !== undefined && selectedBuildingId === null) {
+      setSelectedBuildingId(firstBuildingId)
+    }
+  }, [firstBuildingId, selectedBuildingId])
+
+  useEffect(() => {
+    if (
+      selectedBuildingId &&
+      !visibleBuildings.some((building) => building.id === selectedBuildingId)
+    ) {
+      setSelectedBuildingId(firstBuildingId ?? null)
+    }
+  }, [firstBuildingId, selectedBuildingId, visibleBuildings])
 
   // Reset flat selection when building changes
   useEffect(() => {
@@ -6038,7 +5866,7 @@ function FlatsReadingsContent({
     )
   }
 
-  if (!buildings.length) {
+  if (!visibleBuildings.length) {
     return (
       <div className="mx-auto max-w-7xl">
         <div className="rounded-lg bg-white p-8 shadow-md text-center">
@@ -6053,7 +5881,7 @@ function FlatsReadingsContent({
   if (showForm) {
     return (
       <AddFlatReadingsForm
-        buildings={buildings}
+        buildings={visibleBuildings}
         onBack={() => setShowForm(false)}
       />
     )
@@ -6096,7 +5924,7 @@ function FlatsReadingsContent({
           </p>
           <div className="w-full overflow-x-auto pb-1">
             <div className="flex min-w-max gap-3">
-              {[...buildings]
+              {[...visibleBuildings]
                 .sort((a, b) => a.nome.localeCompare(b.nome))
                 .map((building) => (
                   <button
@@ -8757,7 +8585,11 @@ function TwilioContent() {
   )
 }
 
-function BinsQrCodesContent() {
+function BinsQrCodesContent({
+  title = QR_BINS_LABEL,
+}: {
+  title?: string
+}) {
   const { data: buildingsData, isLoading } = useQuery({
     queryKey: ["buildings", "qr-bins"],
     queryFn: () => apiCall("/api/v1/buildings/condominio"),
@@ -8826,10 +8658,10 @@ function BinsQrCodesContent() {
     <div className="mx-auto max-w-7xl">
       <div className="mb-6 rounded-lg bg-white p-6 shadow-md">
         <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
-          {QR_CARETAKER_BINS_LABEL}
+          {title}
         </h2>
         <p className="mt-2 text-[rgba(0,0,0,0.7)]">
-          One QR code per building for caretaker bin collection reporting.
+          One QR code per building bin collection reporting.
         </p>
       </div>
 
@@ -8859,7 +8691,7 @@ function BinsQrCodesContent() {
                     {building.nome || "Building"}
                   </h3>
                   <p className="text-sm text-[rgba(0,0,0,0.6)]">
-                    Caretaker bins QR code
+                    Bins QR code
                   </p>
                 </div>
 
@@ -10306,11 +10138,11 @@ function HoursInvoiceLauncherDialog({
       writeInvoiceHoursToStorage(storageKey, nextEntries)
       onLaunched(nextEntries)
       queryClient.invalidateQueries({ queryKey: ["cash-flow"] })
-      showSuccessToast(`${workerLabel} invoice added to cash flow`)
+      showSuccessToast(`${workerLabel} invoice added to Petty Cash`)
       handleDialogChange(false)
     } catch (error) {
       showErrorToast(
-        error instanceof Error ? error.message : "Could not add invoice to cash flow",
+        error instanceof Error ? error.message : "Could not add invoice to Petty Cash",
       )
     } finally {
       setIsLaunchingInvoice(false)
@@ -16927,14 +16759,14 @@ function CaretakerSummary({
         return nextEntries
       })
       queryClient.invalidateQueries({ queryKey: ["cash-flow"] })
-      showSuccessToast("Caretaker invoice added to cash flow")
+      showSuccessToast("Caretaker invoice added to Petty Cash")
       setShowInvoiceModal(false)
       resetCaretakerInvoiceForm()
     } catch (error) {
       showErrorToast(
         error instanceof Error
           ? error.message
-          : "Could not add caretaker invoice to cash flow",
+          : "Could not add caretaker invoice to Petty Cash",
       )
     } finally {
       setIsLaunchingCaretakerInvoice(false)

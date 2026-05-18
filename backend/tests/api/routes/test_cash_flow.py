@@ -1,7 +1,10 @@
 import uuid
 from datetime import date
+from io import BytesIO
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+from pypdf import PdfReader
 from sqlmodel import Session, select
 
 from app.core.config import settings
@@ -264,3 +267,85 @@ def test_cash_flow_requires_manager_permissions(
     )
 
     assert response.status_code == 403
+
+
+def test_generate_cash_flow_report_pdf(
+    client: TestClient,
+    db: Session,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    condominio = _create_test_condominio(db)
+    _assign_superuser_to_condominio(db, condominio)
+
+    response = client.post(
+        f"{settings.API_V1_STR}/cash-flow/",
+        headers=superuser_token_headers,
+        json={
+            "has_invoice": True,
+            "invoice_media_name": "invoice.png",
+            "invoice_media_data": (
+                "data:image/png;base64,"
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7Z0ioAAAAASUVORK5CYII="
+            ),
+            "record_date": "2026-03-12",
+            "amount": -88.75,
+            "description": "Supplier invoice",
+        },
+    )
+    assert response.status_code == 201
+
+    report_response = client.get(
+        f"{settings.API_V1_STR}/cash-flow/report/",
+        headers=superuser_token_headers,
+        params={
+            "start_month": "2026-03",
+            "end_month": "2026-03",
+            "include_invoice_table": "true",
+        },
+    )
+
+    assert report_response.status_code == 200
+    assert report_response.headers["content-type"] == "application/pdf"
+    assert "cashflow-report-2026-03.pdf" in report_response.headers["content-disposition"]
+    assert report_response.content.startswith(b"%PDF")
+
+    pdf = PdfReader(BytesIO(report_response.content))
+    assert len(pdf.pages) >= 2
+
+
+def test_send_cash_flow_report(
+    client: TestClient,
+    db: Session,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    condominio = _create_test_condominio(db)
+    _assign_superuser_to_condominio(db, condominio)
+
+    create_response = client.post(
+        f"{settings.API_V1_STR}/cash-flow/",
+        headers=superuser_token_headers,
+        json={
+            "has_invoice": False,
+            "record_date": "2026-03-15",
+            "amount": -42.5,
+            "description": "Cleaner",
+        },
+    )
+    assert create_response.status_code == 201
+
+    with patch("app.services.cash_flow_service.send_email_with_attachment") as email_mock:
+        response = client.post(
+            f"{settings.API_V1_STR}/cash-flow/report/send/",
+            headers=superuser_token_headers,
+            json={
+                "email_to": "resident@example.com",
+                "start_month": "2026-03",
+                "end_month": "2026-03",
+                "search": "Cleaner",
+                "include_invoice_table": False,
+            },
+        )
+
+    assert response.status_code == 201
+    assert response.json() == {"message": "Report sent successfully"}
+    email_mock.assert_called_once()

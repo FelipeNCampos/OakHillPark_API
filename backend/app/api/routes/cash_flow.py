@@ -6,7 +6,7 @@ import uuid
 from datetime import date
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from sqlmodel import func, select
 
 from app.api.deps import CurrentUser, SessionDep
@@ -16,10 +16,12 @@ from app.models import (
     CashFlowRecordPublic,
     CashFlowRecordsPublic,
     CashFlowRecordUpdate,
+    CashFlowReportSendCreate,
     Condominio,
     Message,
     User,
 )
+from app.services.cash_flow_service import CashFlowService
 
 router = APIRouter(prefix="/cash-flow", tags=["cash-flow"])
 
@@ -220,6 +222,67 @@ def read_cash_flow_records(
             month_date=date_from or date.today(),
         ),
     )
+
+
+@router.get("/report/")
+def generate_cash_flow_report(
+    session: SessionDep,
+    current_user: CurrentUser,
+    start_month: str | None = None,
+    end_month: str | None = None,
+    search: str | None = None,
+    include_invoice_table: bool = False,
+) -> Response:
+    if not _is_manager(current_user):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    condominio_id = _resolve_user_condominio_id(session, current_user)
+    if not condominio_id:
+        raise HTTPException(status_code=400, detail="No condominio configured")
+
+    service = CashFlowService(session, condominio_id)
+    period_label, report_data = service.build_range_report_pdf(
+        start_month=start_month,
+        end_month=end_month,
+        search=search,
+        include_invoice_table=include_invoice_table,
+    )
+    file_name = service.build_report_file_name(period_label)
+    headers = {"Content-Disposition": f'inline; filename="{file_name}"'}
+    return Response(content=report_data, media_type="application/pdf", headers=headers)
+
+
+@router.post("/report/send/", response_model=Message, status_code=201)
+def send_cash_flow_report(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    payload: CashFlowReportSendCreate,
+) -> Message:
+    if not _is_manager(current_user):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    condominio_id = _resolve_user_condominio_id(session, current_user)
+    if not condominio_id:
+        raise HTTPException(status_code=400, detail="No condominio configured")
+
+    service = CashFlowService(session, condominio_id)
+    try:
+        service.send_range_report(
+            recipient=str(payload.email_to),
+            start_month=payload.start_month,
+            end_month=payload.end_month,
+            search=payload.search,
+            include_invoice_table=payload.include_invoice_table,
+        )
+    except AssertionError:
+        raise HTTPException(
+            status_code=400,
+            detail="Email is not configured. Set SMTP_HOST and EMAILS_FROM_EMAIL.",
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    return Message(message="Report sent successfully")
 
 
 @router.post("/", response_model=CashFlowRecordPublic, status_code=201)

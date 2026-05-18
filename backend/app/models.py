@@ -1270,6 +1270,14 @@ class CashFlowRecordsPublic(SQLModel):
     next_payment_number: int
 
 
+class CashFlowReportSendCreate(SQLModel):
+    email_to: EmailStr
+    start_month: str | None = None
+    end_month: str | None = None
+    search: str | None = None
+    include_invoice_table: bool = False
+
+
 class CleanerInvoiceCreate(SQLModel):
     invoice_date: date
     media_name: str | None = Field(default=None, max_length=255)

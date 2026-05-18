@@ -2085,6 +2085,95 @@ const generatePdfTableReportBase64 = ({
   return doc.output("datauristring").split(",")[1] || ""
 }
 
+const createBinsPieChartImage = ({
+  title,
+  data,
+}: {
+  title: string
+  data: Array<{ name: string; value: number; color: string }>
+}) => {
+  const canvas = document.createElement("canvas")
+  canvas.width = 880
+  canvas.height = 500
+  const context = canvas.getContext("2d")
+
+  if (!context) {
+    throw new Error("Could not prepare chart image")
+  }
+
+  context.fillStyle = "#ffffff"
+  context.fillRect(0, 0, canvas.width, canvas.height)
+
+  context.fillStyle = "#55311c"
+  context.font = "bold 30px Arial"
+  context.fillText(title, 42, 52)
+
+  const total = data.reduce((sum, item) => sum + item.value, 0)
+  const centerX = 230
+  const centerY = 260
+  const radius = 130
+
+  if (total > 0) {
+    let startAngle = -Math.PI / 2
+    data.forEach((item) => {
+      if (item.value <= 0) return
+      const sliceAngle = (item.value / total) * Math.PI * 2
+      context.beginPath()
+      context.moveTo(centerX, centerY)
+      context.arc(centerX, centerY, radius, startAngle, startAngle + sliceAngle)
+      context.closePath()
+      context.fillStyle = item.color
+      context.fill()
+      startAngle += sliceAngle
+    })
+  } else {
+    context.beginPath()
+    context.arc(centerX, centerY, radius, 0, Math.PI * 2)
+    context.fillStyle = "#ece7e2"
+    context.fill()
+  }
+
+  context.beginPath()
+  context.arc(centerX, centerY, 62, 0, Math.PI * 2)
+  context.fillStyle = "#ffffff"
+  context.fill()
+
+  context.fillStyle = "#55311c"
+  context.font = "bold 34px Arial"
+  context.textAlign = "center"
+  context.fillText(String(total), centerX, centerY - 6)
+  context.font = "16px Arial"
+  context.fillText("records", centerX, centerY + 20)
+  context.textAlign = "left"
+
+  const legendX = 450
+  const legendStartY = 150
+  const legendGap = 82
+
+  data.forEach((item, index) => {
+    const y = legendStartY + index * legendGap
+    const percentage =
+      total > 0 ? ((item.value / total) * 100).toFixed(1) : "0.0"
+
+    context.fillStyle = item.color
+    context.fillRect(legendX, y, 24, 24)
+
+    context.fillStyle = "#55311c"
+    context.font = "bold 22px Arial"
+    context.fillText(item.name, legendX + 40, y + 18)
+
+    context.fillStyle = "#4f4f4f"
+    context.font = "18px Arial"
+    context.fillText(
+      `${item.value} records (${percentage}%)`,
+      legendX + 40,
+      y + 46,
+    )
+  })
+
+  return canvas.toDataURL("image/png")
+}
+
 export const Route = createFileRoute("/dashboard")({
   component: ClientDashboard,
   beforeLoad: async () => {
@@ -8913,11 +9002,6 @@ function BinsContent() {
     return `${hours}:${minutes}`
   }
 
-  const formatCsvValue = (value: string | number | boolean) => {
-    const text = String(value).replace(/"/g, '""')
-    return `"${text}"`
-  }
-
   const oldMissAlerts = useMemo(() => {
     const sorted = [...allItems].sort(
       (a, b) => new Date(a.data).getTime() - new Date(b.data).getTime(),
@@ -9002,29 +9086,169 @@ function BinsContent() {
         return
       }
 
-      const lines = [
-        ["Date", "Time", "Building", "Type", "Status"].join(","),
-        ...filteredItems.map((item) =>
-          [
-            formatCsvValue(formatDate(item.data)),
-            formatCsvValue(formatTime(item.data)),
-            formatCsvValue(item.building_nome || "-"),
-            formatCsvValue(item.collection_type),
-            formatCsvValue(item.collection_status),
-          ].join(","),
-        ),
+      const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" })
+      const pageWidth = doc.internal.pageSize.getWidth()
+      const pageHeight = doc.internal.pageSize.getHeight()
+      const margin = 40
+      const contentWidth = pageWidth - margin * 2
+      const chartWidth = (contentWidth - 16) / 2
+      const chartHeight = 190
+      const selectedGroupLabel =
+        BINS_DASHBOARD_GROUP_OPTIONS.find((option) => option.id === selectedGroup)
+          ?.label || "Bins"
+      const periodLabel = buildDateRangeLabel(dateFrom, dateTo)
+      const typeLabel =
+        typeFilter === "general"
+          ? "General"
+          : typeFilter === "recycle"
+            ? "Recycle"
+            : "All"
+      const statusLabel =
+        statusFilter === "miss"
+          ? "Miss"
+          : statusFilter === "late"
+            ? "Collects"
+            : "All"
+      const statusTotal = statusPieData.reduce((sum, item) => sum + item.value, 0)
+      const typeTotal = typePieData.reduce((sum, item) => sum + item.value, 0)
+      const statusChartImage = createBinsPieChartImage({
+        title: "Collect x Miss",
+        data: statusPieData,
+      })
+      const typeChartImage = createBinsPieChartImage({
+        title: "General x Recycle",
+        data: typePieData,
+      })
+      const analysisLines = [
+        `Total records: ${binsSummary.totalRecords}`,
+        `Collects: ${binsSummary.collectedCount} (${statusTotal > 0 ? ((binsSummary.collectedCount / statusTotal) * 100).toFixed(1) : "0.0"}%)`,
+        `Miss: ${binsSummary.missCount} (${statusTotal > 0 ? ((binsSummary.missCount / statusTotal) * 100).toFixed(1) : "0.0"}%)`,
+        `General: ${binsSummary.generalCount} (${typeTotal > 0 ? ((binsSummary.generalCount / typeTotal) * 100).toFixed(1) : "0.0"}%)`,
+        `Recycle: ${binsSummary.recycleCount} (${typeTotal > 0 ? ((binsSummary.recycleCount / typeTotal) * 100).toFixed(1) : "0.0"}%)`,
       ]
-      const csv = `\uFEFF${lines.join("\n")}`
-      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
-      const href = URL.createObjectURL(blob)
+      const pendingAlertLines =
+        oldMissAlerts.length > 0
+          ? oldMissAlerts.map(
+              (alert) =>
+                `${alert.type === "general" ? "General" : "Recycle"}: ${alert.count} pending (oldest: ${formatDate(alert.oldest)})`,
+            )
+          : ["No old miss collections pending."]
+
+      let cursorY = margin
+      const ensureSpace = (requiredHeight: number) => {
+        if (cursorY + requiredHeight <= pageHeight - margin) return
+        doc.addPage()
+        cursorY = margin
+      }
+
+      doc.setFontSize(18)
+      doc.setTextColor("#55311c")
+      doc.text("Bins Report", margin, cursorY)
+      cursorY += 20
+
+      doc.setFontSize(10)
+      doc.setTextColor("#4f4f4f")
+      doc.text(`Group: ${selectedGroupLabel}`, margin, cursorY)
+      cursorY += 14
+      doc.text(`Period: ${periodLabel}`, margin, cursorY)
+      cursorY += 14
+      doc.text(`Type filter: ${typeLabel}`, margin, cursorY)
+      cursorY += 14
+      doc.text(`Status filter: ${statusLabel}`, margin, cursorY)
+      cursorY += 14
+      doc.text(`Generated: ${new Date().toLocaleString("en-GB")}`, margin, cursorY)
+      cursorY += 24
+
+      ensureSpace(130)
+      doc.setFontSize(14)
+      doc.setTextColor("#55311c")
+      doc.text("Analysis", margin, cursorY)
+      cursorY += 16
+
+      doc.setFontSize(10)
+      doc.setTextColor("#2f2f2f")
+      analysisLines.forEach((line) => {
+        doc.text(line, margin, cursorY)
+        cursorY += 14
+      })
+
+      cursorY += 8
+      doc.setFontSize(12)
+      doc.setTextColor("#55311c")
+      doc.text("Pending Miss Collections", margin, cursorY)
+      cursorY += 16
+
+      doc.setFontSize(10)
+      doc.setTextColor("#2f2f2f")
+      pendingAlertLines.forEach((line) => {
+        const wrapped = doc.splitTextToSize(line, contentWidth)
+        doc.text(wrapped, margin, cursorY)
+        cursorY += wrapped.length * 14
+      })
+
+      cursorY += 10
+      ensureSpace(chartHeight + 24)
+      doc.setFontSize(14)
+      doc.setTextColor("#55311c")
+      doc.text("Charts", margin, cursorY)
+      cursorY += 12
+
+      doc.addImage(
+        statusChartImage,
+        "PNG",
+        margin,
+        cursorY,
+        chartWidth,
+        chartHeight,
+      )
+      doc.addImage(
+        typeChartImage,
+        "PNG",
+        margin + chartWidth + 16,
+        cursorY,
+        chartWidth,
+        chartHeight,
+      )
+      cursorY += chartHeight + 20
+
+      ensureSpace(120)
+      autoTable(doc, {
+        startY: cursorY,
+        head: [["Date", "Time", "Building", "Type", "Status"]],
+        body: filteredItems.map((item) => [
+          formatDate(item.data),
+          formatTime(item.data),
+          item.building_nome || "-",
+          item.collection_type === "general" ? "General" : "Recycle",
+          item.collection_status === "late" ? "Collects" : "Miss",
+        ]),
+        theme: "grid",
+        styles: {
+          fontSize: 9,
+          cellPadding: 4,
+          lineColor: [180, 180, 180],
+          lineWidth: 0.4,
+        },
+        headStyles: {
+          fillColor: [140, 117, 105],
+          textColor: 255,
+          fontStyle: "bold",
+        },
+        bodyStyles: {
+          textColor: [40, 40, 40],
+        },
+        alternateRowStyles: {
+          fillColor: [245, 245, 245],
+        },
+      })
+
       const link = document.createElement("a")
       const day = new Date().toISOString().slice(0, 10)
-      link.href = href
-      link.download = `bins-report-${day}.csv`
+      link.href = doc.output("datauristring")
+      link.download = `bins-report-${day}.pdf`
       document.body.appendChild(link)
       link.click()
       document.body.removeChild(link)
-      URL.revokeObjectURL(href)
       showSuccessToast("Report generated successfully.")
     } catch {
       showErrorToast("Failed to generate report.")

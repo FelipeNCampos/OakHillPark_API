@@ -118,6 +118,7 @@ const TASK_STATUS_ORDER: TaskStatus[] = ["todo", "done"]
 
 const STATUS_EVENT_PREFIX = "[STATUS]"
 const COVER_IMAGE_PREFIX = "[COVER_IMAGE]"
+const HIDDEN_TASK_BUILDING_NAMES = new Set(["cleaner", "caretaker"])
 
 const normalizeTaskStatus = (status: ApiTaskStatus): TaskStatus =>
   status === "paused" ? "todo" : status
@@ -184,6 +185,14 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
   const selectedTaskSummary = tasks.find((t) => t.id === selectedTaskId) || null
   const commonAreaLabel = taskBoardMetadata?.common_area_label || "Common areas"
   const buildingOptions = taskBoardMetadata?.buildings || []
+  const visibleBuildingOptions = useMemo(
+    () =>
+      buildingOptions.filter(
+        (building) =>
+          !HIDDEN_TASK_BUILDING_NAMES.has(building.name.trim().toLowerCase()),
+      ),
+    [buildingOptions],
+  )
   const filteredTasks = useMemo(() => {
     if (buildingFilter === "all") return tasks
     if (buildingFilter === "common_area") {
@@ -191,6 +200,25 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
     }
     return tasks.filter((task) => task.building_id === buildingFilter)
   }, [buildingFilter, tasks])
+
+  useEffect(() => {
+    if (
+      buildingFilter !== "all" &&
+      buildingFilter !== "common_area" &&
+      !visibleBuildingOptions.some((building) => building.id === buildingFilter)
+    ) {
+      setBuildingFilter("all")
+    }
+  }, [buildingFilter, visibleBuildingOptions])
+
+  useEffect(() => {
+    if (
+      newBuildingId !== "common_area" &&
+      !visibleBuildingOptions.some((building) => building.id === newBuildingId)
+    ) {
+      setNewBuildingId("common_area")
+    }
+  }, [newBuildingId, visibleBuildingOptions])
 
   const { data: messagesData, isLoading: messagesLoading } =
     useQuery<TaskMessageListResponse>({
@@ -493,7 +521,7 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
                 <option value="common_area">
                   {commonAreaLabel} (Common areas)
                 </option>
-                {buildingOptions.map((building) => (
+                {visibleBuildingOptions.map((building) => (
                   <option key={building.id} value={building.id}>
                     {building.name}
                   </option>
@@ -522,7 +550,7 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
               <option value="common_area">
                 {commonAreaLabel} (Common areas)
               </option>
-              {buildingOptions.map((building) => (
+              {visibleBuildingOptions.map((building) => (
                 <option key={building.id} value={building.id}>
                   {building.name}
                 </option>

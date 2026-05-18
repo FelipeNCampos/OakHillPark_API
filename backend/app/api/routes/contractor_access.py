@@ -55,6 +55,7 @@ TEMPORARY_CONTRACTOR_DOOR_CODES = {
     "Oak": "Back Door: CY1285\nBoiler: CZ9612YX",
     "Oak Lodge": "Back Door: CY1285\nBoiler: CZ9612YX",
 }
+CONTRACTOR_ACCESS_HIDDEN_BUILDINGS = {"cleaner", "caretaker", "contractor"}
 NEXT_INTERVAL_UNITS = {"week", "month"}
 CONTRACTOR_MEDIA_FIELDS = (
     ("extra_media_name", "extra_media_data"),
@@ -144,6 +145,10 @@ def _get_contractor_door_code(building_name: str) -> str | None:
     return _lookup_contractor_door_code(
         TEMPORARY_CONTRACTOR_DOOR_CODES, normalised_name
     )
+
+
+def _is_visible_contractor_access_building(building_name: str) -> bool:
+    return _normalise_building_name(building_name) not in CONTRACTOR_ACCESS_HIDDEN_BUILDINGS
 
 
 def _contractor_visit_to_public(item: ContractorVisit) -> ContractorVisitPublic:
@@ -977,6 +982,9 @@ def read_contractor_access_buildings(
         .where(Building.condominio_id == condominio_id)
         .order_by(Building.nome.asc())
     ).all()
+    visible_rows = [
+        item for item in rows if _is_visible_contractor_access_building(item.nome)
+    ]
 
     return ContractorAccessBuildingsPublic(
         data=[
@@ -984,9 +992,9 @@ def read_contractor_access_buildings(
                 id=item.id,
                 name=item.nome,
             )
-            for item in rows
+            for item in visible_rows
         ],
-        count=len(rows),
+        count=len(visible_rows),
     )
 
 

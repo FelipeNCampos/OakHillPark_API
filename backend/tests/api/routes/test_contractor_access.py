@@ -164,6 +164,32 @@ def test_contractor_check_in_uses_temporary_door_code_when_unconfigured(
         settings.CONTRACTOR_DOOR_CODES = previous_codes
 
 
+def test_contractor_access_buildings_hides_auxiliary_buildings(
+    client: TestClient,
+    db: Session,
+) -> None:
+    condominio = _create_test_condominio(db)
+    visible_building = _create_test_building(db, condominio.id, name="Merlin")
+    _create_test_building(db, condominio.id, name="Cleaner")
+    _create_test_building(db, condominio.id, name="Caretaker")
+    _create_test_building(db, condominio.id, name="Contractor")
+
+    response = client.get(
+        f"{settings.API_V1_STR}/contractor-access/buildings",
+        params={"condominio_id": str(condominio.id)},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["count"] == 1
+    assert body["data"] == [
+        {
+            "id": str(visible_building.id),
+            "name": "Merlin",
+        }
+    ]
+
+
 def test_contractor_check_out_uses_visit_id_with_repeated_phone(
     client: TestClient,
     db: Session,

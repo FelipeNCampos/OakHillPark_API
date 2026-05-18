@@ -6,6 +6,12 @@ import { z } from "zod"
 import { OpenAPI } from "@/client"
 import useCustomToast from "@/hooks/useCustomToast"
 
+const CONTRACTOR_HIDDEN_BUILDING_NAMES = new Set([
+  "cleaner",
+  "caretaker",
+  "contractor",
+])
+
 const searchSchema = z.object({
   condominioId: z.string().optional().catch(""),
 })
@@ -150,6 +156,14 @@ function ContractorAccess() {
   })
 
   const openVisitOptions = openVisitsQuery.data?.data || []
+  const availableBuildings = useMemo(
+    () =>
+      (buildingsQuery.data?.data || []).filter((building) => {
+        const normalizedName = building.name.trim().toLowerCase()
+        return !CONTRACTOR_HIDDEN_BUILDING_NAMES.has(normalizedName)
+      }),
+    [buildingsQuery.data?.data],
+  )
 
   const selectedVisit = useMemo(
     () => openVisitOptions.find((item) => item.id === selectedVisitId) || null,
@@ -330,7 +344,7 @@ function ContractorAccess() {
                       ? "Loading buildings..."
                       : "Select a building"}
                   </option>
-                  {(buildingsQuery.data?.data || []).map((building) => (
+                  {availableBuildings.map((building) => (
                     <option key={building.id} value={building.id}>
                       {building.name}
                     </option>
@@ -351,8 +365,7 @@ function ContractorAccess() {
                   className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
                 />
               </div>
-              {!buildingsQuery.isLoading &&
-                (buildingsQuery.data?.data || []).length === 0 && (
+              {!buildingsQuery.isLoading && availableBuildings.length === 0 && (
                   <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-700">
                     No buildings are available for this QR code.
                   </div>

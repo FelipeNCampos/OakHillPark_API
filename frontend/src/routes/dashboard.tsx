@@ -80,6 +80,11 @@ interface Building {
 
 const QR_SPECIAL_CLEANER_BUILDING_NAMES = new Set(["general", "cleaner"])
 const QR_CARETAKER_BUILDING_NAME = "caretaker"
+const READING_HIDDEN_BUILDING_NAMES = new Set([
+  "cleaner",
+  "contractor",
+  "caretaker",
+])
 const QR_SPECIAL_CLEANER_BUILDING_LABEL = "Cleaner"
 const QR_CARETAKER_BINS_LABEL = "Caretaker Bins"
 const QR_WORK_TIME_LABEL = "Work Time"
@@ -4271,15 +4276,32 @@ function BuildingsReadingsContent({
   })
 
   const buildings = (buildingsData?.data || []) as Building[]
+  const visibleBuildings = useMemo(
+    () =>
+      buildings.filter((building) => {
+        const normalizedName = building.nome.trim().toLowerCase()
+        return !READING_HIDDEN_BUILDING_NAMES.has(normalizedName)
+      }),
+    [buildings],
+  )
 
   // Set first building as selected if available
-  const firstBuildingId = buildings[0]?.id
+  const firstBuildingId = visibleBuildings[0]?.id
 
   useEffect(() => {
     if (firstBuildingId !== undefined && !selectedBuildingId) {
       setSelectedBuildingId(firstBuildingId)
     }
   }, [firstBuildingId, selectedBuildingId])
+
+  useEffect(() => {
+    if (
+      selectedBuildingId &&
+      !visibleBuildings.some((building) => building.id === selectedBuildingId)
+    ) {
+      setSelectedBuildingId(firstBuildingId ?? null)
+    }
+  }, [firstBuildingId, selectedBuildingId, visibleBuildings])
 
   useEffect(() => {
     if (initialShowForm) {
@@ -4297,7 +4319,7 @@ function BuildingsReadingsContent({
     )
   }
 
-  if (buildingsError || !buildings.length) {
+  if (buildingsError || !visibleBuildings.length) {
     return (
       <div className="mx-auto max-w-[110rem]">
         <div className="rounded-lg bg-white p-8 shadow-md text-center">
@@ -4307,14 +4329,14 @@ function BuildingsReadingsContent({
     )
   }
 
-  const selectedBuilding = buildings.find(
+  const selectedBuilding = visibleBuildings.find(
     (building) => building.id === selectedBuildingId,
   )
 
   if (showForm) {
     return (
       <AddReadingsForm
-        buildings={buildings}
+        buildings={visibleBuildings}
         onBack={() => setShowForm(false)}
       />
     )
@@ -4367,7 +4389,7 @@ function BuildingsReadingsContent({
           </p>
           <div className="w-full overflow-x-auto pb-1">
             <div className="flex min-w-max gap-3">
-              {[...buildings]
+              {[...visibleBuildings]
                 .sort((a, b) => a.nome.localeCompare(b.nome))
                 .map((building) => (
                   <button
@@ -4392,31 +4414,31 @@ function BuildingsReadingsContent({
             building={selectedBuilding}
             reportTrigger={reportTrigger}
             onPrevious={() => {
-              const currentIndex = buildings.findIndex(
+              const currentIndex = visibleBuildings.findIndex(
                 (building) => building.id === selectedBuildingId,
               )
               if (currentIndex > 0) {
-                setSelectedBuildingId(buildings[currentIndex - 1].id)
+                setSelectedBuildingId(visibleBuildings[currentIndex - 1].id)
               }
             }}
             onNext={() => {
-              const currentIndex = buildings.findIndex(
+              const currentIndex = visibleBuildings.findIndex(
                 (building) => building.id === selectedBuildingId,
               )
-              if (currentIndex < buildings.length - 1) {
-                setSelectedBuildingId(buildings[currentIndex + 1].id)
+              if (currentIndex < visibleBuildings.length - 1) {
+                setSelectedBuildingId(visibleBuildings[currentIndex + 1].id)
               }
             }}
             hasPrevious={
-              buildings.findIndex(
+              visibleBuildings.findIndex(
                 (building) => building.id === selectedBuildingId,
               ) > 0
             }
             hasNext={
-              buildings.findIndex(
+              visibleBuildings.findIndex(
                 (building) => building.id === selectedBuildingId,
               ) <
-              buildings.length - 1
+              visibleBuildings.length - 1
             }
           />
         )}

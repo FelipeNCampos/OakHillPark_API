@@ -13,7 +13,7 @@ from pypdf.errors import PdfReadError
 from pypdf.generic import RectangleObject
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
@@ -36,6 +36,7 @@ class CashFlowReportRow:
     invoice_media_name: str | None
     record_date: date
     amount: Decimal
+    supplier: str
     description: str
     balance: Decimal
 
@@ -94,7 +95,8 @@ class CashFlowService:
             running_balance += amount
 
             description = record.description or ""
-            if query and query not in description.lower():
+            supplier = record.supplier or ""
+            if query and query not in description.lower() and query not in supplier.lower():
                 continue
 
             items.append(
@@ -105,6 +107,7 @@ class CashFlowService:
                     invoice_media_name=record.invoice_media_name,
                     record_date=record.record_date,
                     amount=amount,
+                    supplier=supplier,
                     description=description,
                     balance=running_balance,
                 )
@@ -264,7 +267,10 @@ class CashFlowService:
         )
         story.append(Spacer(1, 12))
 
-        rows: list[list[object]] = [["Payment #", "Invoice", "Date", "Amount", "Comments", "Balance"]]
+        rows: list[list[object]] = [
+            ["Payment #", "Invoice", "Date", "Amount", "Supplier", "Comments", "Balance"]
+        ]
+        table_body_style = CashFlowService._table_body_paragraph_style()
         rows.extend(
             [
                 [
@@ -272,45 +278,62 @@ class CashFlowService:
                     "Yes" if item.has_invoice else "No",
                     CashFlowService._format_date(item.record_date),
                     CashFlowService._format_money(item.amount),
-                    item.description or "",
+                    item.supplier or "",
+                    CashFlowService._paragraph_cell(item.description or "", table_body_style),
                     CashFlowService._format_money(item.balance),
                 ]
                 for item in listing.items
             ]
         )
         if len(rows) == 1:
-            rows.append(["-", "-", "-", "-", "No records for this period.", "-"])
+            rows.append(
+                [
+                    "-",
+                    "No",
+                    "-",
+                    CashFlowService._format_money(Decimal("0")),
+                    "-",
+                    "Balance carried forward",
+                    CashFlowService._format_money(closing_balance),
+                ]
+            )
 
         story.append(
             CashFlowService._styled_table(
                 rows,
-                [20 * mm, 20 * mm, 24 * mm, 28 * mm, 63 * mm, 25 * mm],
+                [16 * mm, 18 * mm, 22 * mm, 22 * mm, 35 * mm, 46 * mm, 22 * mm],
             )
         )
 
         if include_invoice_table:
             story.append(Spacer(1, 14))
             story.append(Paragraph("Invoices", styles["Heading2"]))
-            invoice_rows: list[list[object]] = [["Payment #", "Date", "File", "Comments"]]
+            invoice_rows: list[list[object]] = [
+                ["Payment #", "Date", "File", "Supplier", "Comments"]
+            ]
+            invoice_body_style = CashFlowService._table_body_paragraph_style()
             invoice_rows.extend(
                 [
                     [
                         f"#{item.payment_number}",
                         CashFlowService._format_date(item.record_date),
                         item.invoice_media_name or "invoice",
-                        item.description or "",
+                        item.supplier or "",
+                        CashFlowService._paragraph_cell(
+                            item.description or "", invoice_body_style
+                        ),
                     ]
                     for item in listing.items
                     if item.has_invoice
                 ]
             )
             if len(invoice_rows) == 1:
-                invoice_rows.append(["-", "-", "No invoice media in this period.", "-"])
+                invoice_rows.append(["-", "-", "No invoice media in this period.", "-", "-"])
 
             story.append(
                 CashFlowService._styled_table(
                     invoice_rows,
-                    [25 * mm, 28 * mm, 55 * mm, 72 * mm],
+                    [20 * mm, 22 * mm, 42 * mm, 35 * mm, 56 * mm],
                 )
             )
 
@@ -348,6 +371,23 @@ class CashFlowService:
             )
         table.setStyle(TableStyle(style))
         return table
+
+    @staticmethod
+    def _table_body_paragraph_style() -> ParagraphStyle:
+        return ParagraphStyle(
+            "CashFlowTableBody",
+            fontName="Helvetica",
+            fontSize=8,
+            leading=9.5,
+            textColor=colors.black,
+            spaceAfter=0,
+            spaceBefore=0,
+        )
+
+    @staticmethod
+    def _paragraph_cell(value: str, style: ParagraphStyle) -> Paragraph:
+        text = value.strip() or "-"
+        return Paragraph(text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"), style)
 
     @staticmethod
     def _append_media_pages(writer: PdfWriter, data: bytes, mime_type: str) -> None:

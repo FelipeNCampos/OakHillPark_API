@@ -503,6 +503,17 @@ def ensure_cash_flow_record_schema(session: Session) -> None:
     bind = session.get_bind()
     inspector = inspect(bind)
     if inspector.has_table("cash_flow_record"):
+        columns = {
+            column["name"] for column in inspector.get_columns("cash_flow_record")
+        }
+        if "supplier" not in columns:
+            session.execute(
+                text(
+                    "ALTER TABLE cash_flow_record "
+                    "ADD COLUMN supplier VARCHAR(255) NOT NULL DEFAULT ''"
+                )
+            )
+            session.commit()
         return
 
     session.execute(
@@ -516,6 +527,7 @@ def ensure_cash_flow_record_schema(session: Session) -> None:
                 invoice_media_data TEXT,
                 record_date DATE NOT NULL,
                 amount DOUBLE PRECISION NOT NULL DEFAULT 0,
+                supplier VARCHAR(255) NOT NULL DEFAULT '',
                 description VARCHAR(500) NOT NULL DEFAULT '',
                 condominio_id UUID NOT NULL REFERENCES condominio (id) ON DELETE CASCADE,
                 created_by_user_id UUID NOT NULL REFERENCES "user" (id),

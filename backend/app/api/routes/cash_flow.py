@@ -7,6 +7,7 @@ from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Response
+from sqlalchemy import or_
 from sqlmodel import func, select
 
 from app.api.deps import CurrentUser, SessionDep
@@ -163,6 +164,7 @@ def _to_public(record: CashFlowRecord) -> CashFlowRecordPublic:
         invoice_media_data=record.invoice_media_data,
         record_date=record.record_date,
         amount=record.amount,
+        supplier=record.supplier,
         description=record.description,
         condominio_id=record.condominio_id,
         created_by_user_id=record.created_by_user_id,
@@ -194,7 +196,12 @@ def read_cash_flow_records(
         filters.append(CashFlowRecord.record_date <= date_to)
     if search and search.strip():
         query = f"%{search.strip()}%"
-        filters.append(CashFlowRecord.description.ilike(query))
+        filters.append(
+            or_(
+                CashFlowRecord.description.ilike(query),
+                CashFlowRecord.supplier.ilike(query),
+            )
+        )
 
     count_statement = select(func.count()).select_from(CashFlowRecord).where(*filters)
     balance_statement = select(func.coalesce(func.sum(CashFlowRecord.amount), 0)).where(
@@ -314,6 +321,7 @@ def create_cash_flow_record(
         invoice_media_data=invoice_media_data,
         record_date=payload.record_date,
         amount=_validate_amount(payload.amount),
+        supplier=_normalise_text(payload.supplier),
         description=_normalise_text(payload.description),
         condominio_id=condominio_id,
         created_by_user_id=current_user.id,
@@ -353,6 +361,8 @@ def update_cash_flow_record(
     update = payload.model_dump(exclude_unset=True)
     if "amount" in update and update["amount"] is not None:
         update["amount"] = _validate_amount(float(update["amount"]))
+    if "supplier" in update and update["supplier"] is not None:
+        update["supplier"] = _normalise_text(update["supplier"])
     if "description" in update and update["description"] is not None:
         update["description"] = _normalise_text(update["description"])
 

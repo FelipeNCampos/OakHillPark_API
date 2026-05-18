@@ -48,6 +48,7 @@ def test_create_and_read_cash_flow_records(
             "invoice_media_data": "data:image/png;base64,aGVsbG8=",
             "record_date": "2026-03-01",
             "amount": -610,
+            "supplier": "ACME Services",
             "description": "Admin fees",
         },
     )
@@ -65,6 +66,7 @@ def test_create_and_read_cash_flow_records(
     assert response_a.status_code == 201
     assert response_a.json()["payment_number"] == 1
     assert response_a.json()["invoice_media_name"] == "invoice.png"
+    assert response_a.json()["supplier"] == "ACME Services"
     assert "flat" not in response_a.json()
     assert response_b.status_code == 201
     assert response_b.json()["payment_number"] == 2
@@ -81,7 +83,45 @@ def test_create_and_read_cash_flow_records(
     assert body["balance"] == -485
     assert body["next_payment_number"] == 3
     assert [record["payment_number"] for record in body["data"]] == [1, 2]
+    assert body["data"][0]["supplier"] == "ACME Services"
     assert all("flat" not in record for record in body["data"])
+
+
+def test_cash_flow_search_matches_supplier(
+    client: TestClient,
+    db: Session,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    condominio = _create_test_condominio(db)
+    _assign_superuser_to_condominio(db, condominio)
+
+    create_response = client.post(
+        f"{settings.API_V1_STR}/cash-flow/",
+        headers=superuser_token_headers,
+        json={
+            "has_invoice": False,
+            "record_date": "2026-03-10",
+            "amount": -50,
+            "supplier": "Northwind",
+            "description": "Monthly service",
+        },
+    )
+    assert create_response.status_code == 201
+
+    response = client.get(
+        f"{settings.API_V1_STR}/cash-flow/",
+        headers=superuser_token_headers,
+        params={
+            "date_from": "2026-03-01",
+            "date_to": "2026-03-31",
+            "search": "northwind",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["count"] == 1
+    assert body["data"][0]["supplier"] == "Northwind"
 
 
 def test_cash_flow_payment_numbers_are_chronological_within_month(
@@ -349,3 +389,40 @@ def test_send_cash_flow_report(
     assert response.status_code == 201
     assert response.json() == {"message": "Report sent successfully"}
     email_mock.assert_called_once()
+
+
+def test_generate_cash_flow_report_shows_carried_balance_without_records(
+    client: TestClient,
+    db: Session,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    condominio = _create_test_condominio(db)
+    _assign_superuser_to_condominio(db, condominio)
+
+    response = client.post(
+        f"{settings.API_V1_STR}/cash-flow/",
+        headers=superuser_token_headers,
+        json={
+            "has_invoice": False,
+            "record_date": "2026-02-12",
+            "amount": 1000,
+            "description": "Opening balance",
+        },
+    )
+    assert response.status_code == 201
+
+    report_response = client.get(
+        f"{settings.API_V1_STR}/cash-flow/report/",
+        headers=superuser_token_headers,
+        params={
+            "start_month": "2026-03",
+            "end_month": "2026-03",
+            "include_invoice_table": "false",
+        },
+    )
+
+    assert report_response.status_code == 200
+    pdf = PdfReader(BytesIO(report_response.content))
+    extracted_text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+    assert "Balance carried forward" in extracted_text
+    assert "1,000.00" in extracted_text

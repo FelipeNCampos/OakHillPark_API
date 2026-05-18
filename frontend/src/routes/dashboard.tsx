@@ -266,6 +266,7 @@ interface CashFlowRecord {
   invoice_media_data?: string | null
   record_date: string
   amount: number
+  supplier: string
   description: string
   created_at: string
 }
@@ -281,6 +282,7 @@ interface CashFlowFormState {
   invoice: "Yes" | "No"
   date: string
   value: string
+  supplier: string
   description: string
   invoiceMediaName: string
   invoiceMediaData: string | null
@@ -304,6 +306,7 @@ interface CashFlowInvoiceEditorState {
 interface CashFlowTextEditorState {
   record: CashFlowRecord
   value: string
+  supplier: string
   description: string
   error: string | null
 }
@@ -1770,6 +1773,7 @@ const getEmptyCashFlowForm = (): CashFlowFormState => ({
   invoice: "No",
   date: getTodayDateInputValue(),
   value: "",
+  supplier: "",
   description: "",
   invoiceMediaName: "",
   invoiceMediaData: null,
@@ -2796,7 +2800,7 @@ function CashFlowContent() {
     })
   }, [openingBalanceValue, records])
 
-  const tableColumnCount = 7
+  const tableColumnCount = 8
 
   const formatCashFlowDate = (value: string) => {
     const [year, month, day] = value.split("-")
@@ -2965,6 +2969,7 @@ function CashFlowContent() {
     setTextEditor({
       record,
       value: String(record.amount),
+      supplier: record.supplier || "",
       description: record.description || "",
       error: null,
     })
@@ -3134,6 +3139,7 @@ function CashFlowContent() {
           invoice_media_data: form.invoiceMediaData,
           record_date: form.date,
           amount: parsedValue,
+          supplier: form.supplier.trim(),
           description: form.description.trim(),
         },
       })
@@ -3243,6 +3249,7 @@ function CashFlowContent() {
         method: "PATCH",
         body: {
           amount: parsedValue,
+          supplier: textEditor.supplier.trim(),
           description: textEditor.description.trim(),
         },
       })
@@ -3346,7 +3353,7 @@ function CashFlowContent() {
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#8c7569]" />
               <input
                 className={`${inputClass} pl-9`}
-                placeholder="Search by Comments"
+                placeholder="Search by Supplier or Comments"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
               />
@@ -3418,7 +3425,8 @@ function CashFlowContent() {
                 <th className="px-4 py-3 font-extrabold">Invoice</th>
                 <th className="px-4 py-3 font-extrabold">Date</th>
                 <th className="px-4 py-3 text-right font-extrabold">Amount</th>
-                <th className="px-4 py-3 font-extrabold">Comments</th>
+                <th className="px-4 py-3 font-extrabold">Supplier</th>
+                <th className="px-4 py-3 font-extrabold">Description</th>
                 <th className="px-4 py-3 text-right font-extrabold">Balance</th>
                 <th className="px-4 py-3 font-extrabold">Action</th>
               </tr>
@@ -3496,6 +3504,11 @@ function CashFlowContent() {
                         {formatCurrencyGbp(record.amount)}
                       </td>
                       <td className="px-4 py-3 text-sm font-semibold text-black/70">
+                        <span className="block max-w-56 truncate">
+                          {record.supplier || "-"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm font-semibold text-black/70">
                         <button
                           className="inline-flex max-w-72 items-center gap-1.5 rounded-lg px-2 py-1 text-left transition-colors hover:bg-[#faf8f6]"
                           type="button"
@@ -3538,7 +3551,7 @@ function CashFlowContent() {
                     </tr>
                   ))}
                   <tr className="bg-[#faf8f6]/70">
-                    <td className="px-4 py-3" colSpan={4} />
+                    <td className="px-4 py-3" colSpan={5} />
                     <td className="bg-[#faf8f6] px-4 py-3 text-sm font-extrabold uppercase tracking-[0.08em] text-[#55311c]">
                       Total:
                     </td>
@@ -3622,6 +3635,23 @@ function CashFlowContent() {
                       }))
                     }
                     required
+                  />
+                </label>
+              </div>
+
+              <div className="grid gap-4">
+                <label className="grid gap-2">
+                  <span className={labelClass}>Supplier</span>
+                  <input
+                    className={inputClass}
+                    maxLength={255}
+                    value={form.supplier}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        supplier: event.target.value,
+                      }))
+                    }
                   />
                 </label>
               </div>
@@ -3892,6 +3922,26 @@ function CashFlowContent() {
                     )
                   }
                   required
+                />
+              </label>
+
+              <label className="grid gap-2">
+                <span className={labelClass}>Supplier</span>
+                <input
+                  className={inputClass}
+                  maxLength={255}
+                  value={textEditor.supplier}
+                  onChange={(event) =>
+                    setTextEditor((current) =>
+                      current
+                        ? {
+                            ...current,
+                            supplier: event.target.value,
+                            error: null,
+                          }
+                        : current,
+                    )
+                  }
                 />
               </label>
 
@@ -10120,6 +10170,7 @@ function HoursInvoiceLauncherDialog({
           invoice_media_data: generatedInvoice.dataUrl,
           record_date: getTodayDateInputValue(),
           amount,
+          supplier: descriptionSubject,
           description: `${descriptionSubject} ${hoursLabel} hours payment`,
         },
       })
@@ -16735,6 +16786,7 @@ function CaretakerSummary({
           invoice_media_data: generatedInvoice.dataUrl,
           record_date: getTodayDateInputValue(),
           amount,
+          supplier: "Caretaker",
           description: `Caretaker ${hoursLabel} hours payment`,
         },
       })

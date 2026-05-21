@@ -92,6 +92,12 @@ const FLAT_READING_HIDDEN_BUILDING_NAMES = new Set([
   "caretaker",
   "office",
 ])
+const TWILIO_SMS_HIDDEN_BUILDING_NAMES = new Set([
+  "office",
+  "caretaker",
+  "contractor",
+  "cleaner",
+])
 const QR_SPECIAL_CLEANER_BUILDING_LABEL = "Cleaner"
 const QR_BINS_LABEL = "Bins"
 const QR_CARETAKER_BINS_LABEL = "Caretaker Bins"
@@ -7827,6 +7833,18 @@ function TwilioContent() {
   const buildings = buildingsData?.data || []
   const Residents = ResidentsData || []
   const historyRows = historyData?.data || []
+  const visibleBuildings = useMemo(
+    () =>
+      sendChannel === "sms"
+        ? buildings.filter(
+            (building) =>
+              !TWILIO_SMS_HIDDEN_BUILDING_NAMES.has(
+                building.nome.trim().toLowerCase(),
+              ),
+          )
+        : buildings,
+    [buildings, sendChannel],
+  )
   const smsEligibleResidents = useMemo(
     () => Residents.filter((morador) => morador.receives_twilio_sms),
     [Residents],
@@ -7838,11 +7856,29 @@ function TwilioContent() {
 
   const buildingNameById = useMemo(() => {
     const map = new Map<string, string>()
-    buildings.forEach((building) => {
+    visibleBuildings.forEach((building) => {
       map.set(String(building.id), building.nome)
     })
     return map
-  }, [buildings])
+  }, [visibleBuildings])
+
+  useEffect(() => {
+    if (sendChannel !== "sms") return
+
+    const visibleBuildingIdSet = new Set(
+      visibleBuildings.map((building) => String(building.id)),
+    )
+
+    setSelectedBuildingIds((prev) =>
+      prev.filter((id) => visibleBuildingIdSet.has(id)),
+    )
+    setResidentBuildingFilter((prev) => {
+      if (prev === "all") return prev
+      return visibleBuildings.some((building) => building.nome === prev)
+        ? prev
+        : "all"
+    })
+  }, [sendChannel, visibleBuildings])
 
   const filteredResidents = useMemo(() => {
     const search = residentSearch.trim().toLowerCase()
@@ -8334,7 +8370,7 @@ function TwilioContent() {
               </div>
 
               <div className="space-y-2">
-                {buildings.map((building) => {
+                {visibleBuildings.map((building) => {
                   const id = String(building.id)
                   const checked = selectedBuildingIds.includes(id)
                   return (
@@ -8402,7 +8438,7 @@ function TwilioContent() {
                   className="w-full rounded border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
                 >
                   <option value="all">All buildings</option>
-                  {buildings
+                  {visibleBuildings
                     .map((building) => building.nome)
                     .sort((a, b) => a.localeCompare(b))
                     .map((buildingName) => (

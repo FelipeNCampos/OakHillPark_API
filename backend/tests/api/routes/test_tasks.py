@@ -335,3 +335,59 @@ def test_task_board_metadata_returns_buildings_and_common_area_label(
     payload = response.json()
     assert payload["common_area_label"] == condominio.nome
     assert any(item["id"] == str(building.id) for item in payload["buildings"])
+
+
+def test_public_tasks_access_allows_read_message_and_done(
+    client: TestClient, db: Session
+) -> None:
+    condominio, _, caretaker = _ensure_condominio_and_users(db)
+    building = _create_test_building(db, condominio.id)
+
+    manager_headers = user_authentication_headers(
+        client=client,
+        email=settings.FIRST_SUPERUSER,
+        password=settings.FIRST_SUPERUSER_PASSWORD,
+    )
+
+    create_task = client.post(
+        f"{settings.API_V1_STR}/tasks/",
+        headers=manager_headers,
+        json={
+            "title": "Public QR Task",
+            "description": "Public flow",
+            "assigned_to_user_id": str(caretaker.id),
+            "building_id": str(building.id),
+        },
+    )
+    assert create_task.status_code == 200
+    task_id = create_task.json()["id"]
+
+    list_response = client.get(
+        f"{settings.API_V1_STR}/tasks/public",
+        params={"condominio_id": str(condominio.id)},
+    )
+    assert list_response.status_code == 200
+    assert any(item["id"] == task_id for item in list_response.json()["data"])
+
+    detail_response = client.get(
+        f"{settings.API_V1_STR}/tasks/public/{task_id}",
+        params={"condominio_id": str(condominio.id)},
+    )
+    assert detail_response.status_code == 200
+    assert detail_response.json()["building_id"] == str(building.id)
+
+    message_response = client.post(
+        f"{settings.API_V1_STR}/tasks/public/{task_id}/messages",
+        params={"condominio_id": str(condominio.id)},
+        json={"text": "Starting public task"},
+    )
+    assert message_response.status_code == 201
+    assert message_response.json()["sender_role"] == "caretaker"
+
+    done_response = client.patch(
+        f"{settings.API_V1_STR}/tasks/public/{task_id}/status",
+        params={"condominio_id": str(condominio.id)},
+        json={"status": "done"},
+    )
+    assert done_response.status_code == 200
+    assert done_response.json()["status"] == "done"

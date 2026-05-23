@@ -1,12 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useMemo, useRef, useState } from "react"
+import { ArrowUp, Paperclip, X } from "lucide-react"
 
 import { OpenAPI } from "@/client"
 import useCustomToast from "@/hooks/useCustomToast"
 
 type TaskStatus = "todo" | "done"
 type ApiTaskStatus = TaskStatus | "paused"
-type BoardMode = "manager" | "caretaker"
+type BoardMode = "manager" | "caretaker" | "public"
 
 type ApiTask = {
   id: string
@@ -142,7 +143,31 @@ const formatTaskEventTimestamp = (value: string) => {
   )}`
 }
 
-export function TasksBoard({ mode }: { mode: BoardMode }) {
+const buildTaskApiPath = (
+  mode: BoardMode,
+  publicCondominioId: string | null,
+  path = "",
+) => {
+  if (mode === "public") {
+    if (!publicCondominioId) return null
+    const queryPrefix = path.includes("?") ? "&" : "?"
+    return `/api/v1/tasks/public${path}${queryPrefix}condominio_id=${encodeURIComponent(publicCondominioId)}`
+  }
+
+  return `/api/v1/tasks${path}`
+}
+
+export function TasksBoard({
+  mode,
+  publicCondominioId = null,
+  title = "Tasks",
+  subtitle,
+}: {
+  mode: BoardMode
+  publicCondominioId?: string | null
+  title?: string
+  subtitle?: string
+}) {
   const { showErrorToast, showSuccessToast } = useCustomToast()
   const queryClient = useQueryClient()
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
@@ -157,13 +182,30 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
     useState(false)
   const chatComposerRef = useRef<HTMLDivElement | null>(null)
   const chatImageInputRef = useRef<HTMLInputElement | null>(null)
+  const chatTextareaRef = useRef<HTMLTextAreaElement | null>(null)
 
   const isManager = mode === "manager"
+  const isPublic = mode === "public"
+
+  const resolveTaskEndpoint = (path = "") =>
+    buildTaskApiPath(mode, publicCondominioId, path)
+
+  const requestTaskApi = (
+    path = "",
+    options?: { method?: string; body?: unknown },
+  ) => {
+    const endpoint = resolveTaskEndpoint(path)
+    if (!endpoint) {
+      throw new Error("Invalid QR code. Condominio not found.")
+    }
+    return apiCall(endpoint, options)
+  }
 
   const { data: tasksData, isLoading: tasksLoading } =
     useQuery<TaskListResponse>({
-      queryKey: ["tasks", mode],
-      queryFn: () => apiCall("/api/v1/tasks/"),
+      queryKey: ["tasks", mode, publicCondominioId],
+      queryFn: () => requestTaskApi(""),
+      enabled: !isPublic || Boolean(publicCondominioId),
       refetchInterval: selectedTaskId ? 10000 : 15000,
     })
 
@@ -222,16 +264,16 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
 
   const { data: messagesData, isLoading: messagesLoading } =
     useQuery<TaskMessageListResponse>({
-      queryKey: ["task-messages", selectedTaskId],
-      queryFn: () => apiCall(`/api/v1/tasks/${selectedTaskId}/messages`),
+      queryKey: ["task-messages", mode, publicCondominioId, selectedTaskId],
+      queryFn: () => requestTaskApi(`/${selectedTaskId}/messages`),
       enabled: Boolean(selectedTaskId),
       refetchInterval: selectedTaskId ? 8000 : false,
     })
 
   const { data: selectedTaskData, isLoading: selectedTaskLoading } =
     useQuery<ApiTask>({
-      queryKey: ["task", selectedTaskId],
-      queryFn: () => apiCall(`/api/v1/tasks/${selectedTaskId}`),
+      queryKey: ["task", mode, publicCondominioId, selectedTaskId],
+      queryFn: () => requestTaskApi(`/${selectedTaskId}`),
       enabled: Boolean(selectedTaskId),
       refetchInterval: selectedTaskId ? 8000 : false,
     })
@@ -255,6 +297,10 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
     })
     return groups
   }, [filteredTasks])
+  const visibleStatuses = useMemo(
+    () => (isPublic ? (["todo"] as const) : TASK_STATUS_ORDER),
+    [isPublic],
+  )
 
   const allMessages = messagesData?.data || []
 
@@ -279,7 +325,7 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
 
   const createTaskMutation = useMutation({
     mutationFn: () =>
-      apiCall("/api/v1/tasks/", {
+      requestTaskApi("", {
         method: "POST",
         body: {
           title: newTitle.trim(),
@@ -313,7 +359,7 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
       status: TaskStatus
       imageData?: string | null
     }) =>
-      apiCall(`/api/v1/tasks/${taskId}/status`, {
+      requestTaskApi(`/${taskId}/status`, {
         method: "PATCH",
         body: { status, image_data: imageData || null },
       }),
@@ -322,10 +368,10 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
       queryClient.invalidateQueries({ queryKey: ["tasks"] })
       if (selectedTaskId) {
         queryClient.invalidateQueries({
-          queryKey: ["task", selectedTaskId],
+          queryKey: ["task", mode, publicCondominioId, selectedTaskId],
         })
         queryClient.invalidateQueries({
-          queryKey: ["task-messages", selectedTaskId],
+          queryKey: ["task-messages", mode, publicCondominioId, selectedTaskId],
         })
       }
     },
@@ -338,18 +384,32 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
 
   const sendMessageMutation = useMutation({
     mutationFn: () =>
-      apiCall(`/api/v1/tasks/${selectedTaskId}/messages`, {
+      requestTaskApi(`/${selectedTaskId}/messages`, {
         method: "POST",
         body: {
           text: chatText.trim() || null,
           image_data: chatImageData,
         },
       }),
-    onSuccess: () => {
+    onSuccess: (createdMessage: TaskMessage) => {
       setChatText("")
       setChatImageData(null)
+      queryClient.setQueryData<TaskMessageListResponse | undefined>(
+        ["task-messages", mode, publicCondominioId, selectedTaskId],
+        (current) => {
+          if (!current) {
+            return { data: [createdMessage], count: 1 }
+          }
+
+          return {
+            ...current,
+            data: [...current.data, createdMessage],
+            count: (current.count || current.data.length) + 1,
+          }
+        },
+      )
       queryClient.invalidateQueries({
-        queryKey: ["task-messages", selectedTaskId],
+        queryKey: ["task-messages", mode, publicCondominioId, selectedTaskId],
       })
       queryClient.invalidateQueries({ queryKey: ["tasks"] })
     },
@@ -395,6 +455,16 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
       block: "end",
     })
   }, [chatImageData, selectedTaskId, showCompletionPhotoPrompt])
+
+  useEffect(() => {
+    const textarea = chatTextareaRef.current
+    if (!textarea) return
+
+    textarea.style.height = "0px"
+    const nextHeight = Math.min(textarea.scrollHeight, 180)
+    textarea.style.height = `${nextHeight}px`
+    textarea.style.overflowY = textarea.scrollHeight > 180 ? "auto" : "hidden"
+  }, [chatText, selectedTaskId])
 
   const handleSendMessage = () => {
     if (!selectedTaskId) return
@@ -470,6 +540,7 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
   }
 
   const canMarkTaskAsDone = (task: Task) => task.status !== "done"
+  const canSendCurrentMessage = Boolean(chatText.trim() || chatImageData)
 
   const isCaretakerTaskLocked = Boolean(
     selectedTask && !isManager && selectedTask.status === "done",
@@ -496,13 +567,29 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
     )
   }
 
+  if (isPublic && !publicCondominioId) {
+    return (
+      <div className="mx-auto w-full max-w-5xl rounded-lg bg-white p-6 shadow-md">
+        <h2 className="font-['Nunito',sans-serif] text-2xl font-bold text-[#55311c]">
+          {title}
+        </h2>
+        <p className="mt-2 text-sm text-[rgba(0,0,0,0.7)]">Invalid QR code.</p>
+      </div>
+    )
+  }
+
   return (
     <div className="mx-auto w-full max-w-7xl space-y-4 sm:space-y-6">
       <div className="rounded-lg bg-white p-4 shadow-md sm:p-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
-            Tasks
+            {title}
           </h2>
+          {subtitle && (
+            <p className="max-w-2xl text-sm text-[rgba(0,0,0,0.68)] sm:ml-auto sm:text-right">
+              {subtitle}
+            </p>
+          )}
           {isManager && (
             <div className="w-full sm:w-72">
               <label
@@ -604,8 +691,8 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
         </div>
       )}
 
-      <div className="grid gap-4 md:grid-cols-2">
-        {TASK_STATUS_ORDER.map((status) => (
+      <div className={`grid gap-4 ${isPublic ? "" : "md:grid-cols-2"}`}>
+        {visibleStatuses.map((status) => (
           <div
             key={status}
             className="rounded-lg bg-white p-4 shadow-md"
@@ -675,11 +762,37 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
       {selectedTask && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-2 sm:items-center sm:p-4">
           <div className="relative max-h-[95vh] w-full max-w-5xl overflow-y-auto rounded-lg bg-white shadow-xl sm:max-h-[90vh]">
-            <div className="flex flex-col items-start justify-between gap-3 border-b border-[#e6ddd7] px-4 py-4 sm:flex-row sm:px-6">
-              <div>
-                <h3 className="text-lg font-bold text-[#55311c]">
-                  {selectedTask.code} - {selectedTask.title}
-                </h3>
+            <div className="border-b border-[#e6ddd7] px-4 py-4 sm:px-6">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <h3 className="pr-2 text-lg font-bold text-[#55311c]">
+                    {selectedTask.code} - {selectedTask.title}
+                  </h3>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  {canMarkTaskAsDone(selectedTask) && (
+                    <button
+                      type="button"
+                      onClick={handleCompleteSelectedTask}
+                      disabled={updateStatusMutation.isPending}
+                      className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+                    >
+                      {updateStatusMutation.isPending
+                        ? "Saving..."
+                        : "Mark as done"}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={closeTaskPopup}
+                    className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-200 text-[#55311c] hover:bg-gray-300"
+                    aria-label="Close"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+              </div>
+              <div className="mt-3">
                 {selectedTask.cover_image_data ? (
                   <img
                     src={selectedTask.cover_image_data}
@@ -695,52 +808,49 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
                     {selectedTask.description || "No description"}
                   </p>
                 )}
-                <p className="mt-2 text-sm font-semibold text-[#8c7569]">
-                  Building: {selectedTask.building_label}
-                </p>
+                {!isPublic && (
+                  <p className="mt-2 text-sm font-semibold text-[#8c7569]">
+                    Building: {selectedTask.building_label}
+                  </p>
+                )}
               </div>
-              <button
-                type="button"
-                onClick={closeTaskPopup}
-                className="w-full rounded bg-gray-200 px-3 py-2 text-sm font-semibold text-[#55311c] hover:bg-gray-300 sm:w-auto sm:py-1"
-              >
-                Close
-              </button>
             </div>
 
             <div className="grid gap-4 p-3 sm:p-6 lg:grid-cols-3">
-              <div className="rounded border border-[#e6ddd7] bg-[#f9f6f3] p-4 lg:col-span-1">
-                <h4 className="mb-3 text-sm font-bold uppercase tracking-wide text-[#8c7569]">
-                  Status History
-                </h4>
-                <div className="max-h-[50vh] space-y-2 overflow-y-auto pr-1">
-                  {statusEvents.map((event) => (
-                    <div key={event.id} className="rounded bg-white p-2">
-                      <p className="text-xs font-semibold text-[#55311c]">
-                        {getStatusEventLabel(event.text)}
-                      </p>
-                      {event.image_data && (
-                        <img
-                          src={event.image_data}
-                          alt="Task completion evidence"
-                          className="mt-2 max-h-48 rounded border border-[#ddd]"
-                        />
-                      )}
-                      <div className="mt-1 text-xs text-[rgba(0,0,0,0.55)]">
-                        <p>{event.sender_name}</p>
-                        <p>{formatTaskEventTimestamp(event.created_at)}</p>
+              {!isPublic && (
+                <div className="rounded border border-[#e6ddd7] bg-[#f9f6f3] p-4 lg:col-span-1">
+                  <h4 className="mb-3 text-sm font-bold uppercase tracking-wide text-[#8c7569]">
+                    Status History
+                  </h4>
+                  <div className="max-h-[50vh] space-y-2 overflow-y-auto pr-1">
+                    {statusEvents.map((event) => (
+                      <div key={event.id} className="rounded bg-white p-2">
+                        <p className="text-xs font-semibold text-[#55311c]">
+                          {getStatusEventLabel(event.text)}
+                        </p>
+                        {event.image_data && (
+                          <img
+                            src={event.image_data}
+                            alt="Task completion evidence"
+                            className="mt-2 max-h-48 rounded border border-[#ddd]"
+                          />
+                        )}
+                        <div className="mt-1 text-xs text-[rgba(0,0,0,0.55)]">
+                          <p>{event.sender_name}</p>
+                          <p>{formatTaskEventTimestamp(event.created_at)}</p>
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                  {statusEvents.length === 0 && (
-                    <p className="text-xs text-[rgba(0,0,0,0.6)]">
-                      No status history yet.
-                    </p>
-                  )}
+                    ))}
+                    {statusEvents.length === 0 && (
+                      <p className="text-xs text-[rgba(0,0,0,0.6)]">
+                        No status history yet.
+                      </p>
+                    )}
+                  </div>
                 </div>
-              </div>
+              )}
 
-              <div className="space-y-3 lg:col-span-2">
+              <div className={`space-y-3 ${isPublic ? "lg:col-span-3" : "lg:col-span-2"}`}>
                 <h4 className="text-lg font-bold text-[#55311c]">Task Chat</h4>
                 {!isManager &&
                   selectedTask.requires_completion_image &&
@@ -793,22 +903,7 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
                   </div>
                 ) : (
                   <div ref={chatComposerRef} className="space-y-2">
-                    <textarea
-                      value={chatText}
-                      onChange={(e) => setChatText(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key !== "Enter") return
-                        if (e.shiftKey) return
-                        e.preventDefault()
-                        if (!sendMessageMutation.isPending) {
-                          handleSendMessage()
-                        }
-                      }}
-                      rows={3}
-                      placeholder="Type a message..."
-                      className="w-full rounded border border-[#ddd] px-3 py-2 text-black"
-                    />
-                    <div className="flex flex-wrap items-center gap-2">
+                    <div className="relative rounded-[28px] border border-[#d9dce3] bg-[#f2f2f7] shadow-[inset_0_1px_0_rgba(255,255,255,0.85)]">
                       <input
                         ref={chatImageInputRef}
                         id="task-chat-image-input"
@@ -821,16 +916,46 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
                       />
                       <label
                         htmlFor="task-chat-image-input"
-                        className="cursor-pointer rounded bg-[#8c7569] px-3 py-2 text-xs font-semibold text-white hover:bg-[#55311c]"
+                        className="absolute bottom-3 left-3 flex h-9 w-9 cursor-pointer items-center justify-center rounded-full text-[#6b7280] transition-all duration-200 hover:bg-white/80 hover:text-[#55311c]"
+                        title={
+                          selectedTask.requires_completion_image
+                            ? "Select photo"
+                            : "Add media"
+                        }
                       >
-                        {selectedTask.requires_completion_image
-                          ? "Select photo"
-                          : "Send media"}
+                        <Paperclip className="h-4 w-4" />
                       </label>
-                      <span className="text-xs text-[rgba(0,0,0,0.7)]">
-                        {chatImageData
-                          ? "1 file selected"
-                          : "No media selected"}
+                      <textarea
+                        ref={chatTextareaRef}
+                        value={chatText}
+                        onChange={(e) => setChatText(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key !== "Enter") return
+                          if (e.shiftKey) return
+                          e.preventDefault()
+                          if (!sendMessageMutation.isPending && canSendCurrentMessage) {
+                            handleSendMessage()
+                          }
+                        }}
+                        rows={1}
+                        placeholder="iMessage-style update..."
+                        className="min-h-[56px] w-full resize-none bg-transparent px-14 py-[17px] pr-16 text-[15px] leading-6 text-black placeholder:text-[#8e8e93] focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleSendMessage}
+                        disabled={
+                          sendMessageMutation.isPending || !canSendCurrentMessage
+                        }
+                        className="absolute bottom-3 right-3 flex h-9 w-9 items-center justify-center rounded-full bg-[#007aff] text-white shadow-sm transition-all duration-200 hover:bg-[#0062cc] disabled:cursor-not-allowed disabled:bg-[#b8d8ff]"
+                        title="Send message"
+                      >
+                        <ArrowUp className="h-4 w-4" />
+                      </button>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 pl-2 text-xs text-[rgba(0,0,0,0.7)]">
+                      <span>
+                        {chatImageData ? "1 file selected" : "No media selected"}
                       </span>
                     </div>
                     {chatImageData && (
@@ -848,28 +973,6 @@ export function TasksBoard({ mode }: { mode: BoardMode }) {
                           Remove media
                         </button>
                       </div>
-                    )}
-                    <button
-                      type="button"
-                      onClick={handleSendMessage}
-                      disabled={sendMessageMutation.isPending}
-                      className="rounded bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white hover:bg-[#55311c] disabled:opacity-60"
-                    >
-                      {sendMessageMutation.isPending
-                        ? "Sending..."
-                        : "Send message"}
-                    </button>
-                    {canMarkTaskAsDone(selectedTask) && (
-                      <button
-                        type="button"
-                        onClick={handleCompleteSelectedTask}
-                        disabled={updateStatusMutation.isPending}
-                        className="ml-2 rounded bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
-                      >
-                        {updateStatusMutation.isPending
-                          ? "Saving..."
-                          : "Mark as done"}
-                      </button>
                     )}
                   </div>
                 )}

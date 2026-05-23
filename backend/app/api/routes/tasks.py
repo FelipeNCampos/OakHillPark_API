@@ -3,7 +3,7 @@ import uuid
 import re
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import func, select
@@ -244,6 +244,39 @@ def _ensure_caretaker_can_modify_task(task: Task, current_user: User) -> None:
             status_code=400,
             detail="Completed tasks cannot be changed by caretaker",
         )
+
+
+def _ensure_public_task_can_modify(task: Task) -> None:
+    if _normalize_task_status(task.status) == "done":
+        raise HTTPException(
+            status_code=400,
+            detail="Completed tasks cannot be changed by caretaker",
+        )
+
+
+def _check_public_task_access(task: Task, condominio_id: uuid.UUID) -> None:
+    if task.condominio_id != condominio_id:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+
+def _resolve_public_task_actor(session: SessionDep, task: Task) -> User:
+    assigned_user = session.get(User, task.assigned_to_user_id)
+    if (
+        assigned_user
+        and assigned_user.cargo == 1
+        and assigned_user.is_active
+        and assigned_user.condominio_id == task.condominio_id
+    ):
+        return assigned_user
+
+    fallback_user = _resolve_active_caretaker_user(session, task.condominio_id)
+    if fallback_user:
+        return fallback_user
+
+    raise HTTPException(
+        status_code=400,
+        detail="No active caretaker available for public task access",
+    )
 
 
 def _status_label(status: str) -> str:
@@ -540,6 +573,259 @@ def read_tasks(
             )
         )
     return TasksPublic(data=data, count=count)
+
+
+@router.get("/public", response_model=TasksPublic)
+def read_public_tasks(
+    session: SessionDep,
+    condominio_id: uuid.UUID = Query(...),
+    skip: int = 0,
+    limit: int = 100,
+) -> TasksPublic:
+    count_statement = (
+        select(func.count())
+        .select_from(Task)
+        .where(Task.condominio_id == condominio_id)
+    )
+    statement = (
+        select(Task)
+        .where(Task.condominio_id == condominio_id)
+        .order_by(Task.updated_at.desc())
+        .offset(skip)
+        .limit(limit)
+    )
+
+    count = session.exec(count_statement).one()
+    tasks = session.exec(statement).all()
+
+    task_ids = [task.id for task in tasks]
+    task_ids_with_cover_image = _get_task_ids_with_cover_image(session, task_ids)
+
+    assigned_user_ids = list({task.assigned_to_user_id for task in tasks})
+    assigned_user_map: dict[Any, User] = {}
+    if assigned_user_ids:
+        assigned_users = session.exec(select(User).where(User.id.in_(assigned_user_ids))).all()
+        assigned_user_map = {user.id: user for user in assigned_users}
+
+    building_ids = [task.building_id for task in tasks if task.building_id is not None]
+    building_map: dict[Any, Building] = {}
+    if building_ids:
+        buildings = session.exec(select(Building).where(Building.id.in_(building_ids))).all()
+        building_map = {building.id: building for building in buildings}
+
+    condominio = session.get(Condominio, condominio_id)
+    common_area_label = condominio.nome if condominio else "Common areas"
+
+    data: list[TaskPublic] = []
+    for task in tasks:
+        assigned_user = assigned_user_map.get(task.assigned_to_user_id)
+        assigned_name = (
+            assigned_user.full_name or assigned_user.email
+            if assigned_user
+            else str(task.assigned_to_user_id)
+        )
+        building = building_map.get(task.building_id) if task.building_id else None
+        building_label = building.nome if building else common_area_label
+        data.append(
+            TaskPublic(
+                id=task.id,
+                code=task.code,
+                title=task.title,
+                description=task.description,
+                cover_image_data=None,
+                requires_completion_image=task.id in task_ids_with_cover_image,
+                status=_normalize_task_status(task.status),
+                condominio_id=task.condominio_id,
+                building_id=task.building_id,
+                building_label=building_label,
+                created_by_user_id=task.created_by_user_id,
+                assigned_to_user_id=task.assigned_to_user_id,
+                assigned_to_name=str(assigned_name),
+                spent_seconds=0,
+                created_at=task.created_at,
+                updated_at=task.updated_at,
+            )
+        )
+
+    return TasksPublic(data=data, count=count)
+
+
+@router.get("/public/{task_id}", response_model=TaskPublic)
+def read_public_task(
+    *, session: SessionDep, task_id: str, condominio_id: uuid.UUID = Query(...)
+) -> TaskPublic:
+    try:
+        task_uuid = uuid.UUID(task_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid task id") from exc
+
+    task = session.get(Task, task_uuid)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    _check_public_task_access(task, condominio_id)
+    return _task_to_public(session, task)
+
+
+@router.patch("/public/{task_id}/status", response_model=TaskPublic)
+def update_public_task_status(
+    *,
+    session: SessionDep,
+    task_id: str,
+    payload: TaskStatusUpdate,
+    condominio_id: uuid.UUID = Query(...),
+) -> TaskPublic:
+    try:
+        task_uuid = uuid.UUID(task_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid task id") from exc
+
+    task = session.get(Task, task_uuid)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    _check_public_task_access(task, condominio_id)
+    _ensure_public_task_can_modify(task)
+
+    next_status = payload.status.strip().lower()
+    if next_status not in TASK_ALLOWED_STATUSES:
+        raise HTTPException(status_code=400, detail="Invalid task status")
+
+    image_data = payload.image_data.strip() if payload.image_data else None
+    requires_completion_image = bool(_get_task_cover_image_data(session, task.id))
+    if next_status == "done" and requires_completion_image and not image_data:
+        raise HTTPException(
+            status_code=400,
+            detail="A completion photo is required to finish this task",
+        )
+
+    actor = _resolve_public_task_actor(session, task)
+    previous_status = _normalize_task_status(task.status)
+    task.status = next_status
+    task.updated_at = datetime.now(timezone.utc)
+    session.add(task)
+
+    if previous_status != next_status:
+        session.add(
+            TaskMessage(
+                task_id=task.id,
+                sender_user_id=actor.id,
+                sender_role="caretaker",
+                text=f"{STATUS_EVENT_PREFIX} {_status_label(next_status)}",
+                image_data=image_data if next_status == "done" else None,
+                created_at=task.updated_at,
+            )
+        )
+
+    session.commit()
+    session.refresh(task)
+    return _task_to_public(session, task)
+
+
+@router.get("/public/{task_id}/messages", response_model=TaskMessagesPublic)
+def read_public_task_messages(
+    *,
+    session: SessionDep,
+    task_id: str,
+    condominio_id: uuid.UUID = Query(...),
+    skip: int = 0,
+    limit: int = 200,
+) -> TaskMessagesPublic:
+    try:
+        task_uuid = uuid.UUID(task_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid task id") from exc
+
+    task = session.get(Task, task_uuid)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    _check_public_task_access(task, condominio_id)
+
+    count_statement = (
+        select(func.count()).select_from(TaskMessage).where(TaskMessage.task_id == task.id)
+    )
+    count = session.exec(count_statement).one()
+    statement = (
+        select(TaskMessage)
+        .where(TaskMessage.task_id == task.id)
+        .order_by(TaskMessage.created_at.asc())
+        .offset(skip)
+        .limit(limit)
+    )
+    messages = session.exec(statement).all()
+
+    data: list[TaskMessagePublic] = []
+    for item in messages:
+        sender = session.get(User, item.sender_user_id)
+        sender_name = sender.full_name or sender.email if sender else str(item.sender_user_id)
+        data.append(
+            TaskMessagePublic(
+                id=item.id,
+                task_id=item.task_id,
+                sender_user_id=item.sender_user_id,
+                sender_name=str(sender_name),
+                sender_role=item.sender_role,
+                text=item.text,
+                image_data=item.image_data,
+                created_at=item.created_at,
+            )
+        )
+    return TaskMessagesPublic(data=data, count=count)
+
+
+@router.post("/public/{task_id}/messages", response_model=TaskMessagePublic, status_code=201)
+def create_public_task_message(
+    *,
+    session: SessionDep,
+    task_id: str,
+    payload: TaskMessageCreate,
+    condominio_id: uuid.UUID = Query(...),
+) -> TaskMessagePublic:
+    try:
+        task_uuid = uuid.UUID(task_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid task id") from exc
+
+    task = session.get(Task, task_uuid)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    _check_public_task_access(task, condominio_id)
+    _ensure_public_task_can_modify(task)
+
+    text = payload.text.strip() if payload.text else None
+    image_data = payload.image_data.strip() if payload.image_data else None
+    if not text and not image_data:
+        raise HTTPException(status_code=400, detail="Message must have text or image")
+
+    actor = _resolve_public_task_actor(session, task)
+    now = datetime.now(timezone.utc)
+    item = TaskMessage(
+        task_id=task.id,
+        sender_user_id=actor.id,
+        sender_role="caretaker",
+        text=text,
+        image_data=image_data,
+        created_at=now,
+    )
+    task.updated_at = now
+    session.add(item)
+    session.add(task)
+    session.commit()
+    session.refresh(item)
+
+    sender_name = actor.full_name or actor.email
+    return TaskMessagePublic(
+        id=item.id,
+        task_id=item.task_id,
+        sender_user_id=item.sender_user_id,
+        sender_name=str(sender_name),
+        sender_role=item.sender_role,
+        text=item.text,
+        image_data=item.image_data,
+        created_at=item.created_at,
+    )
 
 
 @router.get(

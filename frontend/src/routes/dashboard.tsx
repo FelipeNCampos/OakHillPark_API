@@ -79,8 +79,6 @@ interface Building {
 }
 
 const QR_SPECIAL_CLEANER_BUILDING_NAMES = new Set(["general", "cleaner"])
-const QR_CARETAKER_BUILDING_NAME = "caretaker"
-const CARETAKER_BINS_QR_HIDDEN_BUILDING_NAMES = new Set(["falcon", "office"])
 const READING_HIDDEN_BUILDING_NAMES = new Set([
   "cleaner",
   "contractor",
@@ -98,7 +96,19 @@ const TWILIO_SMS_HIDDEN_BUILDING_NAMES = new Set([
   "contractor",
   "cleaner",
 ])
+const TWILIO_EMAIL_HIDDEN_BUILDING_NAMES = new Set([
+  "office",
+  "cleaner",
+  "caretaker",
+])
+const CARETAKER_BINS_QR_HIDDEN_BUILDING_NAMES = new Set([
+  "cleaner",
+  "caretaker",
+  "contractor",
+  "office",
+])
 const QR_SPECIAL_CLEANER_BUILDING_LABEL = "Cleaner"
+const QR_TASKS_LABEL = "Task"
 const QR_BINS_LABEL = "Bins"
 const QR_CARETAKER_BINS_LABEL = "Caretaker Bins"
 const QR_WORK_TIME_LABEL = "Work Time"
@@ -106,20 +116,25 @@ const QR_WORK_TIME_LABEL = "Work Time"
 const isCleanerQrBuilding = (building: Building) =>
   QR_SPECIAL_CLEANER_BUILDING_NAMES.has(building.nome.trim().toLowerCase())
 
-const isCaretakerQrBuilding = (building: Building) =>
-  building.nome.trim().toLowerCase() === QR_CARETAKER_BUILDING_NAME
-
-const isCaretakerBinsQrBuilding = (building: Building) =>
-  !isCleanerQrBuilding(building) &&
-  !isCaretakerQrBuilding(building) &&
-  !CARETAKER_BINS_QR_HIDDEN_BUILDING_NAMES.has(
-    building.nome.trim().toLowerCase(),
-  )
+const isTwilioBuildingVisible = (
+  buildingName: string,
+  channel: "sms" | "email",
+) => {
+  const normalized = buildingName.trim().toLowerCase()
+  return channel === "sms"
+    ? !TWILIO_SMS_HIDDEN_BUILDING_NAMES.has(normalized)
+    : !TWILIO_EMAIL_HIDDEN_BUILDING_NAMES.has(normalized)
+}
 
 const getCleanerQrBuildingLabel = (building: Building) =>
   isCleanerQrBuilding(building)
     ? QR_SPECIAL_CLEANER_BUILDING_LABEL
     : building.nome || "Building"
+
+const isCaretakerBinsQrBuilding = (building: Building) =>
+  !CARETAKER_BINS_QR_HIDDEN_BUILDING_NAMES.has(
+    building.nome.trim().toLowerCase(),
+  )
 
 type BinsDashboardGroupId =
   | "falcon-martlett-merlin-oaklodge"
@@ -138,6 +153,29 @@ const BINS_DASHBOARD_GROUP_OPTIONS: Array<{
     label: "Northwood",
   },
 ]
+
+const BINS_QR_GROUP_CONFIG: Record<
+  BinsDashboardGroupId,
+  {
+    downloadSlug: string
+    preferredBuildingNames: string[]
+  }
+> = {
+  "falcon-martlett-merlin-oaklodge": {
+    downloadSlug: "falcon-martlett-merlin-oak-lodge",
+    preferredBuildingNames: [
+      "Falcon",
+      "Martlett",
+      "Merlin",
+      "Oak Lodge",
+      "OakLogde",
+    ],
+  },
+  northwood: {
+    downloadSlug: "northwood",
+    preferredBuildingNames: ["Northwood"],
+  },
+}
 
 const normalizeBinsBuildingName = (value: string) =>
   value.trim().toLowerCase().replace(/[\s_-]+/g, "")
@@ -167,6 +205,40 @@ const filterBinRecordsByDashboardGroup = <T extends { building_nome: string }>(
   items.filter(
     (item) => getBinsDashboardGroupForBuilding(item.building_nome) === groupId,
   )
+
+const getBinsQrRepresentativeBuilding = (
+  buildings: Building[],
+  groupId: BinsDashboardGroupId,
+) => {
+  const matchingBuildings = buildings.filter(
+    (building) =>
+      getBinsDashboardGroupForBuilding(building.nome || "") === groupId,
+  )
+
+  if (matchingBuildings.length === 0) return null
+
+  const preferredBuilding = BINS_QR_GROUP_CONFIG[
+    groupId
+  ].preferredBuildingNames.find((preferredName) =>
+    matchingBuildings.some(
+      (building) =>
+        normalizeBinsBuildingName(building.nome || "") ===
+        normalizeBinsBuildingName(preferredName),
+    ),
+  )
+
+  if (preferredBuilding) {
+    return (
+      matchingBuildings.find(
+        (building) =>
+          normalizeBinsBuildingName(building.nome || "") ===
+          normalizeBinsBuildingName(preferredBuilding),
+      ) || null
+    )
+  }
+
+  return [...matchingBuildings].sort((a, b) => a.nome.localeCompare(b.nome))[0]
+}
 
 interface Flat {
   id: EntityId
@@ -2299,6 +2371,7 @@ function ClientDashboard() {
       name: "QR Codes",
       id: "qrCodes",
       items: [
+        { label: QR_TASKS_LABEL, id: "qr-task" },
         { label: "Cleaner", id: "qr-cleaner" },
         { label: "Contractor", id: "qr-contractor" },
         { label: "Caretaker", id: "qr-caretaker" },
@@ -2342,6 +2415,8 @@ function ClientDashboard() {
         return <FlatsReadingsContent />
       case "flats-add":
         return <FlatsReadingsContent initialShowForm />
+      case "qr-task":
+        return <TaskQrCodesContent />
       case "qr-cleaner":
         return <CleanerQrCodesContent />
       case "qr-contractor":
@@ -2351,7 +2426,12 @@ function ClientDashboard() {
       case "qr-bins":
         return <BinsQrCodesContent title={QR_BINS_LABEL} />
       case "qr-caretaker-bins":
-        return <BinsQrCodesContent title={QR_CARETAKER_BINS_LABEL} />
+        return (
+          <BinsQrCodesContent
+            title={QR_CARETAKER_BINS_LABEL}
+            accessMode="caretaker-bins"
+          />
+        )
       case "schedule-alarm":
         return <CaretakerSchedules initialTab="alarm" />
       case "schedule-lift":
@@ -2384,7 +2464,7 @@ function ClientDashboard() {
   }
 
   return (
-    <div className="dashboard-mobile-root flex min-h-screen w-full bg-[#f5f1ee]">
+    <div className="dashboard-mobile-root flex h-screen min-h-screen w-full overflow-hidden bg-[#f5f1ee]">
       {/* Sidebar */}
       <aside
         className={`fixed left-0 top-0 h-screen bg-white shadow-lg transition-all duration-300 ease-in-out ${
@@ -2497,9 +2577,9 @@ function ClientDashboard() {
       </aside>
 
       {/* Main Content */}
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-w-0 min-h-0 flex-1 flex-col">
         {/* Header */}
-        <header className="bg-white shadow-md">
+        <header className="sticky top-0 z-20 shrink-0 bg-white shadow-md">
           <div className="flex flex-wrap items-center justify-between gap-3 px-3 py-3 sm:px-6 sm:py-4">
             {/* Left: Menu Button */}
             <button
@@ -2551,7 +2631,7 @@ function ClientDashboard() {
         </header>
 
         {/* Page Content */}
-        <main className="flex-1 overflow-y-auto px-3 py-4 sm:px-6 sm:py-8">
+        <main className="min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-6 sm:py-8">
           {renderContent()}
         </main>
       </div>
@@ -2587,6 +2667,7 @@ function OverviewContent({
     {
       title: "QR Codes",
       items: [
+        { label: QR_TASKS_LABEL, tabId: "qr-task" },
         { label: "Cleaner", tabId: "qr-cleaner" },
         { label: "Contractor", tabId: "qr-contractor" },
         { label: "Caretaker", tabId: "qr-caretaker" },
@@ -7834,24 +7915,15 @@ function TwilioContent() {
   const Residents = ResidentsData || []
   const historyRows = historyData?.data || []
   const visibleBuildings = useMemo(
-    () =>
-      sendChannel === "sms"
-        ? buildings.filter(
-            (building) =>
-              !TWILIO_SMS_HIDDEN_BUILDING_NAMES.has(
-                building.nome.trim().toLowerCase(),
-              ),
-          )
-        : buildings,
+    () => buildings.filter((building) => isTwilioBuildingVisible(building.nome, sendChannel)),
     [buildings, sendChannel],
   )
-  const smsEligibleResidents = useMemo(
-    () => Residents.filter((morador) => morador.receives_twilio_sms),
-    [Residents],
-  )
   const residentsForActiveChannel = useMemo(
-    () => (sendChannel === "sms" ? smsEligibleResidents : Residents),
-    [Residents, sendChannel, smsEligibleResidents],
+    () =>
+      Residents.filter(
+        (morador) => isTwilioBuildingVisible(morador.building_nome, sendChannel),
+      ),
+    [Residents, sendChannel],
   )
 
   const buildingNameById = useMemo(() => {
@@ -7863,8 +7935,6 @@ function TwilioContent() {
   }, [visibleBuildings])
 
   useEffect(() => {
-    if (sendChannel !== "sms") return
-
     const visibleBuildingIdSet = new Set(
       visibleBuildings.map((building) => String(building.id)),
     )
@@ -7878,7 +7948,7 @@ function TwilioContent() {
         ? prev
         : "all"
     })
-  }, [sendChannel, visibleBuildings])
+  }, [visibleBuildings])
 
   const filteredResidents = useMemo(() => {
     const search = residentSearch.trim().toLowerCase()
@@ -8401,7 +8471,7 @@ function TwilioContent() {
                   </h3>
                   {sendChannel === "sms" && (
                     <p className="text-xs text-[rgba(0,0,0,0.6)]">
-                      Only residents with Twilio SMS enabled are shown for SMS
+                      Residents from the visible buildings are shown for SMS
                       sending.
                     </p>
                   )}
@@ -8673,8 +8743,10 @@ function TwilioContent() {
 
 function BinsQrCodesContent({
   title = QR_BINS_LABEL,
+  accessMode = "miss-collection",
 }: {
   title?: string
+  accessMode?: "miss-collection" | "caretaker-bins"
 }) {
   const { data: buildingsData, isLoading } = useQuery({
     queryKey: ["buildings", "qr-bins"],
@@ -8682,29 +8754,54 @@ function BinsQrCodesContent({
   })
 
   const buildings = (buildingsData?.data || []) as Building[]
-  const qrBuildings = useMemo(
-    () =>
-      buildings
+  const isCaretakerBinsMode = accessMode === "caretaker-bins"
+  const qrItems = useMemo(() => {
+    if (isCaretakerBinsMode) {
+      return [...buildings]
         .filter(isCaretakerBinsQrBuilding)
-        .sort((a, b) => a.nome.localeCompare(b.nome)),
-    [buildingsData?.data],
-  )
+        .sort((a, b) => a.nome.localeCompare(b.nome))
+        .map((building) => ({
+          key: String(building.id),
+          label: building.nome || "Building",
+          downloadSlug: (building.nome || "building")
+            .trim()
+            .toLowerCase()
+            .replace(/\s+/g, "-"),
+          building,
+        }))
+    }
+
+    return BINS_DASHBOARD_GROUP_OPTIONS.map((option) => {
+      const building = getBinsQrRepresentativeBuilding(buildings, option.id)
+      if (!building) return null
+
+      return {
+        key: option.id,
+        label: option.label,
+        downloadSlug: BINS_QR_GROUP_CONFIG[option.id].downloadSlug,
+        building,
+      }
+    }).filter(Boolean) as Array<{
+      key: string
+      label: string
+      downloadSlug: string
+      building: Building
+    }>
+  }, [buildings, isCaretakerBinsMode])
 
   const baseUrl = useMemo(() => {
     if (typeof window === "undefined") return ""
     return window.location.origin
   }, [])
 
-  const [qrMap, setQrMap] = useState<
-    Record<string, { dataUrl: string; link: string }>
-  >({})
+  const [qrMap, setQrMap] = useState<Record<string, { dataUrl: string; link: string }>>({})
   const [isGenerating, setIsGenerating] = useState(false)
 
   useEffect(() => {
     let isActive = true
 
     const generateQRCodes = async () => {
-      if (!baseUrl || qrBuildings.length === 0) {
+      if (!baseUrl || qrItems.length === 0) {
         setQrMap({})
         return
       }
@@ -8712,14 +8809,17 @@ function BinsQrCodesContent({
       setIsGenerating(true)
 
       const entries = await Promise.all(
-        qrBuildings.map(async (building) => {
+        qrItems.map(async (item) => {
           const params = new URLSearchParams()
-          params.set("buildingId", String(building.id))
-          if (building.nome) params.set("buildingName", String(building.nome))
-          const link = `${baseUrl}/bins-access?${params.toString()}`
+          params.set("buildingId", String(item.building.id))
+          params.set("buildingName", item.label)
+          const route = isCaretakerBinsMode
+            ? "/caretaker-access"
+            : "/bins-access"
+          const link = `${baseUrl}${route}?${params.toString()}`
           const dataUrl = await QRCode.toDataURL(link, { width: 240, margin: 1 })
 
-          return [String(building.id), { dataUrl, link }] as const
+          return [item.key, { dataUrl, link }] as const
         }),
       )
 
@@ -8738,7 +8838,7 @@ function BinsQrCodesContent({
     return () => {
       isActive = false
     }
-  }, [baseUrl, qrBuildings])
+  }, [baseUrl, isCaretakerBinsMode, qrItems])
 
   return (
     <div className="mx-auto max-w-7xl">
@@ -8747,7 +8847,9 @@ function BinsQrCodesContent({
           {title}
         </h2>
         <p className="mt-2 text-[rgba(0,0,0,0.7)]">
-          One QR code per building bin collection reporting.
+          {isCaretakerBinsMode
+            ? "One QR code per building for caretaker bins time tracking."
+            : "One QR code per bins analysis tab."}
         </p>
       </div>
 
@@ -8757,27 +8859,33 @@ function BinsQrCodesContent({
         </div>
       )}
 
-      {!isLoading && qrBuildings.length === 0 && (
+      {!isLoading && qrItems.length === 0 && (
         <div className="rounded-lg bg-white p-6 text-center text-sm text-[#55311c] shadow-md">
           No caretaker bins QR codes found.
         </div>
       )}
 
-      {qrBuildings.length > 0 && (
-        <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-          {qrBuildings.map((building) => {
-            const qrItem = qrMap[String(building.id)]
+      {qrItems.length > 0 && (
+        <div
+          className={`grid gap-6 ${
+            isCaretakerBinsMode ? "md:grid-cols-2 xl:grid-cols-3" : "md:grid-cols-2"
+          }`}
+        >
+          {qrItems.map((item) => {
+            const qrItem = qrMap[item.key]
             return (
               <div
-                key={building.id}
+                key={item.key}
                 className="flex h-full flex-col justify-between rounded-lg bg-white p-6 shadow-md"
               >
                 <div>
                   <h3 className="text-lg font-semibold text-[#55311c]">
-                    {building.nome || "Building"}
+                    {item.label}
                   </h3>
                   <p className="text-sm text-[rgba(0,0,0,0.6)]">
-                    Bins QR code
+                    {isCaretakerBinsMode
+                      ? "Caretaker bins IN/OUT QR code"
+                      : "Bins QR code"}
                   </p>
                 </div>
 
@@ -8785,7 +8893,7 @@ function BinsQrCodesContent({
                   {qrItem?.dataUrl ? (
                     <img
                       src={qrItem.dataUrl}
-                      alt={`QR Code ${building.nome || "Building"}`}
+                      alt={`QR Code ${item.label}`}
                       className="h-48 w-48 rounded-lg border border-[#e5e0dc] bg-white p-2"
                     />
                   ) : (
@@ -8797,7 +8905,9 @@ function BinsQrCodesContent({
                   <div className="flex w-full flex-col gap-2">
                     <a
                       href={qrItem?.dataUrl || "#"}
-                      download={`qr-caretaker-bins-${(building.nome || "building").trim().toLowerCase().replace(/\s+/g, "-")}.png`}
+                      download={`${
+                        isCaretakerBinsMode ? "qr-caretaker-bins" : "qr-bins"
+                      }-${item.downloadSlug}.png`}
                       className={`w-full rounded-lg px-4 py-2 text-center text-sm font-semibold transition-all duration-200 ${
                         qrItem?.dataUrl
                           ? "bg-[#8c7569] text-white hover:bg-[#55311c]"
@@ -9154,11 +9264,10 @@ function BinsContent() {
       ensureSpace(120)
       autoTable(doc, {
         startY: cursorY,
-        head: [["Date", "Time", "Building", "Type", "Status"]],
+        head: [["Date", "Time", "Type", "Status"]],
         body: filteredItems.map((item) => [
           formatDate(item.data),
           formatTime(item.data),
-          item.building_nome || "-",
           item.collection_type === "general" ? "General" : "Recycle",
           item.collection_status === "late" ? "Collects" : "Miss",
         ]),
@@ -9596,9 +9705,6 @@ function BinsContent() {
                   Time
                 </th>
                 <th className="border border-gray-300 px-4 py-3 text-center text-sm font-semibold text-white">
-                  Building
-                </th>
-                <th className="border border-gray-300 px-4 py-3 text-center text-sm font-semibold text-white">
                   Type
                 </th>
                 <th className="border border-gray-300 px-4 py-3 text-center text-sm font-semibold text-white">
@@ -9624,9 +9730,6 @@ function BinsContent() {
                     {formatTime(item.data)}
                   </td>
                   <td className="border border-gray-300 px-4 py-3 text-center text-[#55311c]">
-                    {item.building_nome || "-"}
-                  </td>
-                  <td className="border border-gray-300 px-4 py-3 text-center text-[#55311c]">
                     {item.collection_type === "recycle" ? "Recycle" : "General"}
                   </td>
                   <td className="border border-gray-300 px-4 py-3 text-center text-[#55311c]">
@@ -9639,7 +9742,7 @@ function BinsContent() {
               {items.length === 0 && (
                 <tr>
                   <td
-                    colSpan={5}
+                    colSpan={4}
                     className="border border-gray-300 px-4 py-8 text-center text-[rgba(0,0,0,0.65)]"
                   >
                     No miss collection records found.
@@ -9687,11 +9790,7 @@ function BinsContent() {
               Edit bin record
             </h3>
             <p className="mt-1 text-sm text-[rgba(0,0,0,0.7)]">
-              Update the collection record
-              {editingBinRecord.building_nome
-                ? ` for ${editingBinRecord.building_nome}`
-                : ""}
-              .
+              Update the collection record.
             </p>
 
             <div className="mt-4 grid gap-4">
@@ -11213,6 +11312,135 @@ function CaretakerQrCodesContent() {
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+function TaskQrCodesContent() {
+  const { user } = useAuth()
+
+  const baseUrl = useMemo(() => {
+    if (typeof window === "undefined") return ""
+    return window.location.origin
+  }, [])
+
+  const [qrItem, setQrItem] = useState<{
+    dataUrl: string
+    link: string
+  } | null>(null)
+  const [isGenerating, setIsGenerating] = useState(false)
+
+  useEffect(() => {
+    let isActive = true
+
+    const generateQRCode = async () => {
+      if (!baseUrl || !user?.condominio_id) {
+        setQrItem(null)
+        return
+      }
+
+      setIsGenerating(true)
+
+      const params = new URLSearchParams()
+      params.set("condominioId", String(user.condominio_id))
+      const link = `${baseUrl}/tasks-access?${params.toString()}`
+      const dataUrl = await QRCode.toDataURL(link, {
+        width: 240,
+        margin: 1,
+      })
+
+      if (!isActive) return
+
+      setQrItem({ dataUrl, link })
+      setIsGenerating(false)
+    }
+
+    generateQRCode().catch(() => {
+      if (!isActive) return
+      setQrItem(null)
+      setIsGenerating(false)
+    })
+
+    return () => {
+      isActive = false
+    }
+  }, [baseUrl, user?.condominio_id])
+
+  return (
+    <div className="mx-auto max-w-4xl">
+      <div className="mb-6 rounded-lg bg-white p-6 shadow-md">
+        <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
+          QR Code - {QR_TASKS_LABEL}
+        </h2>
+        <p className="mt-2 text-[rgba(0,0,0,0.7)]">
+          Single QR code for public task follow-up without login.
+        </p>
+      </div>
+
+      {isGenerating && (
+        <div className="rounded-lg bg-white p-6 text-center text-sm text-[#55311c] shadow-md">
+          Generating QR Code...
+        </div>
+      )}
+
+      {!user?.condominio_id && !isGenerating && (
+        <div className="rounded-lg bg-white p-6 text-center text-sm text-[#55311c] shadow-md">
+          User is not linked to a condominio.
+        </div>
+      )}
+
+      {user?.condominio_id && !isGenerating && (
+        <div className="mx-auto max-w-md rounded-lg bg-white p-6 shadow-md">
+          <div>
+            <h3 className="text-lg font-semibold text-[#55311c]">
+              Public Tasks Board
+            </h3>
+            <p className="text-sm text-[rgba(0,0,0,0.6)]">
+              To Do, Done and task messages
+            </p>
+          </div>
+          <div className="mt-4 flex flex-col items-center justify-center gap-4">
+            {qrItem?.dataUrl ? (
+              <img
+                src={qrItem.dataUrl}
+                alt={`QR Code ${QR_TASKS_LABEL}`}
+                className="h-56 w-56 rounded-lg border border-[#e5e0dc] bg-white p-2"
+              />
+            ) : (
+              <div className="flex h-56 w-56 items-center justify-center rounded-lg border border-dashed border-[#e5e0dc] text-xs text-[rgba(0,0,0,0.6)]">
+                QR Code unavailable
+              </div>
+            )}
+
+            <div className="flex w-full flex-col gap-2">
+              <a
+                href={qrItem?.dataUrl || "#"}
+                download="qr-task-board.png"
+                className={`w-full rounded-lg px-4 py-2 text-center text-sm font-semibold transition-all duration-200 ${
+                  qrItem?.dataUrl
+                    ? "bg-[#8c7569] text-white hover:bg-[#55311c]"
+                    : "cursor-not-allowed bg-[#e5e0dc] text-[#8c7569]"
+                }`}
+                onClick={(event) => {
+                  if (!qrItem?.dataUrl) event.preventDefault()
+                }}
+              >
+                Download QR Code
+              </a>
+              {qrItem?.link && (
+                <a
+                  href={qrItem.link}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block rounded-lg border border-[#8c7569] px-4 py-2 text-center text-sm font-semibold text-[#55311c] transition-all duration-300 hover:bg-[#f3eeea]"
+                >
+                  Open link
+                </a>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

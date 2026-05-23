@@ -26,6 +26,8 @@ from app.utils import send_email_with_attachment
 DATA_URL_PATTERN = re.compile(
     r"^data:(?P<mime>[-\w.+/]+/[-\w.+]+)?;base64,(?P<data>[A-Za-z0-9+/=\s]+)$"
 )
+NEGATIVE_MONEY_COLOR = colors.HexColor("#cf0e0e")
+POSITIVE_MONEY_COLOR = colors.HexColor("#217a4b")
 
 
 @dataclass
@@ -217,7 +219,12 @@ class CashFlowService:
 
             try:
                 mime_type, media_bytes = self._decode_media_data(record.invoice_media_data)
-                self._append_media_pages(writer, media_bytes, mime_type)
+                self._append_media_pages(
+                    writer,
+                    media_bytes,
+                    mime_type,
+                    invoice_label=f"Invoice #{item.payment_number}",
+                )
             except HTTPException:
                 fallback_pdf = self._placeholder_pdf_page("Unable to render invoice media")
                 for page in PdfReader(BytesIO(fallback_pdf)).pages:
@@ -258,9 +265,7 @@ class CashFlowService:
             Spacer(1, 8),
         ]
 
-        summary_rows = [
-            ["Balance", CashFlowService._format_money(closing_balance)],
-        ]
+        summary_rows = [["Balance", CashFlowService._money_cell(closing_balance)]]
         story.append(
             CashFlowService._styled_table(summary_rows, [90 * mm, 55 * mm], has_header=False)
         )
@@ -276,10 +281,10 @@ class CashFlowService:
                     f"#{item.payment_number}",
                     "Yes" if item.has_invoice else "No",
                     CashFlowService._format_date(item.record_date),
-                    CashFlowService._format_money(item.amount),
+                    CashFlowService._money_cell(item.amount),
                     item.supplier or "",
                     CashFlowService._paragraph_cell(item.description or "", table_body_style),
-                    CashFlowService._format_money(item.balance),
+                    CashFlowService._money_cell(item.balance),
                 ]
                 for item in listing.items
             ]
@@ -290,10 +295,10 @@ class CashFlowService:
                     "-",
                     "No",
                     "-",
-                    CashFlowService._format_money(Decimal("0")),
+                    CashFlowService._money_cell(Decimal("0")),
                     "-",
                     "Balance carried forward",
-                    CashFlowService._format_money(closing_balance),
+                    CashFlowService._money_cell(closing_balance),
                 ]
             )
 
@@ -389,19 +394,46 @@ class CashFlowService:
         return Paragraph(text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"), style)
 
     @staticmethod
-    def _append_media_pages(writer: PdfWriter, data: bytes, mime_type: str) -> None:
+    def _money_cell(value: Decimal) -> Paragraph:
+        text_color = colors.black
+        if value < 0:
+            text_color = NEGATIVE_MONEY_COLOR
+        elif value > 0:
+            text_color = POSITIVE_MONEY_COLOR
+
+        return CashFlowService._paragraph_cell(
+            CashFlowService._format_money(value),
+            ParagraphStyle(
+                "CashFlowMoneyCell",
+                parent=CashFlowService._table_body_paragraph_style(),
+                textColor=text_color,
+            ),
+        )
+
+    @staticmethod
+    def _append_media_pages(
+        writer: PdfWriter,
+        data: bytes,
+        mime_type: str,
+        invoice_label: str,
+    ) -> None:
         if mime_type == "application/pdf":
             try:
                 reader = PdfReader(BytesIO(data))
                 for page in reader.pages:
-                    writer.add_page(CashFlowService._center_pdf_page(page))
+                    writer.add_page(
+                        CashFlowService._compose_media_page(
+                            source_page=page,
+                            invoice_label=invoice_label,
+                        )
+                    )
                 return
             except (PdfReadError, ValueError, TypeError):
                 pass
 
         if mime_type.startswith("image/"):
             try:
-                media_pdf = CashFlowService._image_to_centered_pdf_page(data)
+                media_pdf = CashFlowService._image_to_labeled_pdf_page(data, invoice_label)
                 for page in PdfReader(BytesIO(media_pdf)).pages:
                     writer.add_page(page)
                 return
@@ -413,35 +445,59 @@ class CashFlowService:
             writer.add_page(page)
 
     @staticmethod
-    def _center_pdf_page(source_page: PageObject) -> PageObject:
+    def _compose_media_page(
+        source_page: PageObject,
+        invoice_label: str,
+    ) -> PageObject:
         page_width, page_height = A4
         target_page = PageObject.create_blank_page(width=page_width, height=page_height)
+        header_height, body_x, body_y, body_width, body_height = (
+            CashFlowService._media_frame(page_width, page_height)
+        )
         media_box = source_page.mediabox
         source_width = float(media_box.width)
         source_height = float(media_box.height)
         if source_width <= 0 or source_height <= 0:
+            CashFlowService._merge_overlay_page(
+                target_page,
+                CashFlowService._invoice_label_overlay(invoice_label),
+            )
             return target_page
-        scale = min(page_width / source_width, page_height / source_height)
-        x_offset = (page_width - source_width * scale) / 2
-        y_offset = (page_height - source_height * scale) / 2
+        scale = min(body_width / source_width, body_height / source_height)
+        draw_width = source_width * scale
+        draw_height = source_height * scale
+        x_offset = body_x + (body_width - draw_width) / 2
+        y_offset = body_y + (body_height - draw_height) / 2
         source_page.cropbox = RectangleObject(media_box)
         transformation = Transformation().scale(scale).translate(x_offset, y_offset)
         target_page.merge_transformed_page(source_page, transformation)
+        CashFlowService._merge_overlay_page(
+            target_page,
+            CashFlowService._invoice_label_overlay(
+                invoice_label, page_width=page_width, page_height=page_height
+            ),
+        )
         return target_page
 
     @staticmethod
-    def _image_to_centered_pdf_page(data: bytes) -> bytes:
+    def _image_to_labeled_pdf_page(data: bytes, invoice_label: str) -> bytes:
         output = BytesIO()
         page_width, page_height = A4
+        header_height, body_x, body_y, body_width, body_height = CashFlowService._media_frame(
+            page_width, page_height
+        )
         image = ImageReader(BytesIO(data))
         image_width, image_height = image.getSize()
-        scale = min(page_width / image_width, page_height / image_height)
+        scale = min(body_width / image_width, body_height / image_height)
         draw_width = image_width * scale
         draw_height = image_height * scale
-        x = (page_width - draw_width) / 2
-        y = (page_height - draw_height) / 2
+        x = body_x + (body_width - draw_width) / 2
+        y = body_y + (body_height - draw_height) / 2
 
         pdf = canvas.Canvas(output, pagesize=A4)
+        pdf.setFillColor(NEGATIVE_MONEY_COLOR)
+        pdf.setFont("Helvetica-Bold", 12)
+        pdf.drawString(14 * mm, page_height - header_height + (header_height * 0.35), invoice_label)
         pdf.drawImage(
             image,
             x,
@@ -454,6 +510,41 @@ class CashFlowService:
         pdf.showPage()
         pdf.save()
         return output.getvalue()
+
+    @staticmethod
+    def _invoice_label_overlay(
+        invoice_label: str,
+        *,
+        page_width: float = A4[0],
+        page_height: float = A4[1],
+    ) -> bytes:
+        output = BytesIO()
+        header_height, _, _, _, _ = CashFlowService._media_frame(page_width, page_height)
+        pdf = canvas.Canvas(output, pagesize=(page_width, page_height))
+        pdf.setFillColor(NEGATIVE_MONEY_COLOR)
+        pdf.setFont("Helvetica-Bold", 12)
+        pdf.drawString(14 * mm, page_height - header_height + (header_height * 0.35), invoice_label)
+        pdf.save()
+        return output.getvalue()
+
+    @staticmethod
+    def _merge_overlay_page(target_page: PageObject, overlay_pdf: bytes) -> None:
+        overlay_page = PdfReader(BytesIO(overlay_pdf)).pages[0]
+        target_page.merge_page(overlay_page)
+
+    @staticmethod
+    def _media_frame(
+        page_width: float,
+        page_height: float,
+    ) -> tuple[float, float, float, float, float]:
+        header_height = page_height * 0.07
+        side_margin = 8 * mm
+        bottom_margin = 8 * mm
+        body_x = side_margin
+        body_y = bottom_margin
+        body_width = page_width - (side_margin * 2)
+        body_height = max(page_height - header_height - bottom_margin, 1)
+        return header_height, body_x, body_y, body_width, body_height
 
     @staticmethod
     def _placeholder_pdf_page(message: str) -> bytes:

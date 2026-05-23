@@ -1,14 +1,17 @@
 import uuid
 from datetime import date
+from decimal import Decimal
 from io import BytesIO
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from pypdf import PdfReader
+from reportlab.lib import colors
 from sqlmodel import Session, select
 
 from app.core.config import settings
 from app.models import CashFlowRecord, Condominio, CondominioCreate, User
+from app.services.cash_flow_service import CashFlowService
 
 
 def _create_test_condominio(db: Session) -> Condominio:
@@ -351,6 +354,8 @@ def test_generate_cash_flow_report_pdf(
 
     pdf = PdfReader(BytesIO(report_response.content))
     assert len(pdf.pages) >= 2
+    extracted_text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+    assert "Invoice #1" in extracted_text
 
 
 def test_send_cash_flow_report(
@@ -426,3 +431,13 @@ def test_generate_cash_flow_report_shows_carried_balance_without_records(
     extracted_text = "\n".join(page.extract_text() or "" for page in pdf.pages)
     assert "Balance carried forward" in extracted_text
     assert "1,000.00" in extracted_text
+
+
+def test_cash_flow_report_money_cells_use_sign_colors() -> None:
+    negative_cell = CashFlowService._money_cell(Decimal("-1"))
+    positive_cell = CashFlowService._money_cell(Decimal("1"))
+    neutral_cell = CashFlowService._money_cell(Decimal("0"))
+
+    assert negative_cell.style.textColor == colors.HexColor("#cf0e0e")
+    assert positive_cell.style.textColor == colors.HexColor("#217a4b")
+    assert neutral_cell.style.textColor == colors.black

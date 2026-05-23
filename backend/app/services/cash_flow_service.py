@@ -259,8 +259,7 @@ class CashFlowService:
         ]
 
         summary_rows = [
-            ["Opening Balance", CashFlowService._format_money(opening_balance)],
-            ["Closing Balance", CashFlowService._format_money(closing_balance)],
+            ["Balance", CashFlowService._format_money(closing_balance)],
         ]
         story.append(
             CashFlowService._styled_table(summary_rows, [90 * mm, 55 * mm], has_header=False)

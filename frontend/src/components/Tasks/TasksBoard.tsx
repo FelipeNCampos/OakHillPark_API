@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { ArrowUp, Paperclip, X } from "lucide-react"
 
 import { OpenAPI } from "@/client"
+import { normalizeApiBase, resolveApiBase } from "@/config/api"
 import useCustomToast from "@/hooks/useCustomToast"
 
 type TaskStatus = "todo" | "done"
@@ -63,39 +64,8 @@ const apiCall = async (
   endpoint: string,
   options?: { method?: string; body?: unknown },
 ) => {
-  const normalizeApiBase = (value: string) => {
-    const trimmedValue = value.trim().replace(/\/$/, "")
-    if (
-      typeof window !== "undefined" &&
-      window.location.protocol === "https:" &&
-      trimmedValue.startsWith("http://")
-    ) {
-      try {
-        const upgradedUrl = new URL(trimmedValue)
-        upgradedUrl.protocol = "https:"
-        return upgradedUrl.toString().replace(/\/$/, "")
-      } catch {
-        return trimmedValue.replace(/^http:\/\//i, "https://")
-      }
-    }
-    return trimmedValue
-  }
-
-  const resolveApiBase = () => {
-    if (OpenAPI.BASE) return normalizeApiBase(OpenAPI.BASE)
-    if (typeof window !== "undefined") {
-      const { protocol, hostname, port } = window.location
-      if (hostname.startsWith("dashboard.")) {
-        return `${protocol}//api.${hostname.slice("dashboard.".length)}`
-      }
-      if (hostname === "localhost" && port === "5173") {
-        return "http://localhost:8000"
-      }
-      return `${protocol}//${hostname}${port ? `:${port}` : ""}`
-    }
-    return "http://localhost:8000"
-  }
-  const base = resolveApiBase()
+  const base =
+    normalizeApiBase(OpenAPI.BASE) || resolveApiBase(import.meta.env.VITE_API_URL)
   let response: Response
   try {
     response = await fetch(`${base}${endpoint}`, {

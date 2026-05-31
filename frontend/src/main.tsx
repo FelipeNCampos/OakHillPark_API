@@ -10,58 +10,12 @@ import ReactDOM from "react-dom/client"
 import { OpenAPI } from "./client"
 import { ThemeProvider } from "./components/theme-provider"
 import { Toaster } from "./components/ui/sonner"
+import { resolveApiBase } from "./config/api"
 import "./index.css"
 import { routeTree } from "./routeTree.gen"
 import { clearAuthSession, isAuthSessionError } from "./utils"
 
-const normalizeApiBase = (value?: string) => {
-  const trimmedValue = value?.trim()
-  if (!trimmedValue) return ""
-  const normalizedValue = trimmedValue.replace(/\/$/, "")
-  if (
-    typeof window !== "undefined" &&
-    window.location.protocol === "https:" &&
-    normalizedValue.startsWith("http://")
-  ) {
-    try {
-      const upgradedUrl = new URL(normalizedValue)
-      upgradedUrl.protocol = "https:"
-      return upgradedUrl.toString().replace(/\/$/, "")
-    } catch {
-      return normalizedValue.replace(/^http:\/\//i, "https://")
-    }
-  }
-  return normalizedValue
-}
-
-const resolveApiBase = () => {
-  const configuredApiUrl = normalizeApiBase(import.meta.env.VITE_API_URL)
-  if (configuredApiUrl) {
-    return configuredApiUrl
-  }
-
-  if (typeof window !== "undefined") {
-    const { protocol, hostname } = window.location
-
-    if (hostname === "localhost" || hostname === "127.0.0.1") {
-      return "http://localhost:8000"
-    }
-
-    if (hostname.startsWith("dashboard.")) {
-      return `${protocol}//api.${hostname.slice("dashboard.".length)}`
-    }
-
-    if (hostname.startsWith("www.")) {
-      return `${protocol}//api.${hostname.slice("www.".length)}`
-    }
-
-    return `${protocol}//api.${hostname}`
-  }
-
-  return "http://localhost:8000"
-}
-
-OpenAPI.BASE = resolveApiBase()
+OpenAPI.BASE = resolveApiBase(import.meta.env.VITE_API_URL)
 OpenAPI.TOKEN = async () => {
   return localStorage.getItem("access_token") || ""
 }

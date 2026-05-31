@@ -1,6 +1,8 @@
-from datetime import datetime, timezone
-import uuid
+import base64
+import binascii
 import re
+import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -35,6 +37,10 @@ TASK_ALLOWED_STATUSES = {"todo", "done"}
 STATUS_EVENT_PREFIX = "[STATUS]"
 COVER_IMAGE_PREFIX = "[COVER_IMAGE]"
 TASK_CODE_PATTERN = re.compile(r"^task-(\d+)$")
+DATA_URL_PATTERN = re.compile(
+    r"^data:(?P<mime>[-\w.+/]+/[-\w.+]+)?;base64,(?P<data>[A-Za-z0-9+/=\s]+)$"
+)
+MAX_TASK_IMAGE_BYTES = 10 * 1024 * 1024
 
 
 def _is_manager(user: User) -> bool:
@@ -124,6 +130,29 @@ def _normalize_task_status(status: str) -> str:
     if normalized in {"paused", "in_progress"}:
         return "todo"
     return normalized
+
+
+def _normalize_task_image_data(field_name: str, value: str | None) -> str | None:
+    if not value:
+        return None
+    stripped = value.strip()
+    if not stripped:
+        return None
+
+    match = DATA_URL_PATTERN.fullmatch(stripped)
+    if not match:
+        raise HTTPException(status_code=422, detail=f"Invalid {field_name}")
+
+    try:
+        file_bytes = base64.b64decode(match.group("data"), validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid {field_name}") from exc
+
+    if not file_bytes:
+        raise HTTPException(status_code=422, detail=f"Empty {field_name}")
+    if len(file_bytes) > MAX_TASK_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail=f"{field_name} is too large")
+    return stripped
 
 
 def _task_to_public(
@@ -434,7 +463,7 @@ def create_task(
                 status_code=400, detail="Building outside this condominio"
             )
 
-    cover_image_data = payload.image_data.strip() if payload.image_data else None
+    cover_image_data = _normalize_task_image_data("image_data", payload.image_data)
 
     for _attempt in range(3):
         now = datetime.now(timezone.utc)
@@ -691,7 +720,7 @@ def update_public_task_status(
     if next_status not in TASK_ALLOWED_STATUSES:
         raise HTTPException(status_code=400, detail="Invalid task status")
 
-    image_data = payload.image_data.strip() if payload.image_data else None
+    image_data = _normalize_task_image_data("image_data", payload.image_data)
     requires_completion_image = bool(_get_task_cover_image_data(session, task.id))
     if next_status == "done" and requires_completion_image and not image_data:
         raise HTTPException(
@@ -795,7 +824,7 @@ def create_public_task_message(
     _ensure_public_task_can_modify(task)
 
     text = payload.text.strip() if payload.text else None
-    image_data = payload.image_data.strip() if payload.image_data else None
+    image_data = _normalize_task_image_data("image_data", payload.image_data)
     if not text and not image_data:
         raise HTTPException(status_code=400, detail="Message must have text or image")
 
@@ -876,7 +905,7 @@ def update_task_status(
     if _is_caretaker(current_user) and task.assigned_to_user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not enough permissions")
 
-    image_data = payload.image_data.strip() if payload.image_data else None
+    image_data = _normalize_task_image_data("image_data", payload.image_data)
     requires_completion_image = bool(_get_task_cover_image_data(session, task.id))
     if (
         next_status == "done"
@@ -982,7 +1011,7 @@ def create_task_message(
     _ensure_caretaker_can_modify_task(task, current_user)
 
     text = payload.text.strip() if payload.text else None
-    image_data = payload.image_data.strip() if payload.image_data else None
+    image_data = _normalize_task_image_data("image_data", payload.image_data)
     if not text and not image_data:
         raise HTTPException(status_code=400, detail="Message must have text or image")
 

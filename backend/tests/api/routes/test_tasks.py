@@ -1,6 +1,7 @@
+import re
+
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
-import re
 
 from app import crud
 from app.core.config import settings
@@ -15,6 +16,8 @@ from app.models import (
 )
 from tests.utils.user import user_authentication_headers
 from tests.utils.utils import random_email, random_lower_string
+
+VALID_IMAGE_DATA = "data:image/png;base64,QUFB"
 
 
 def _ensure_condominio_and_users(db: Session) -> tuple[Condominio, User, User]:
@@ -227,13 +230,13 @@ def test_task_with_creation_photo_requires_completion_photo(
         json={
             "title": "Photo-based task",
             "description": "",
-            "image_data": "data:image/png;base64,AAA",
+            "image_data": VALID_IMAGE_DATA,
             "assigned_to_user_id": str(caretaker.id),
         },
     )
     assert create_task.status_code == 200
     payload = create_task.json()
-    assert payload["cover_image_data"] == "data:image/png;base64,AAA"
+    assert payload["cover_image_data"] == VALID_IMAGE_DATA
     assert payload["requires_completion_image"] is True
 
     list_response = client.get(f"{settings.API_V1_STR}/tasks/", headers=manager_headers)
@@ -249,7 +252,7 @@ def test_task_with_creation_photo_requires_completion_photo(
         headers=manager_headers,
     )
     assert detail_response.status_code == 200
-    assert detail_response.json()["cover_image_data"] == "data:image/png;base64,AAA"
+    assert detail_response.json()["cover_image_data"] == VALID_IMAGE_DATA
 
     caretaker_password = random_lower_string()
     caretaker = crud.update_user(
@@ -275,7 +278,7 @@ def test_task_with_creation_photo_requires_completion_photo(
     finish_with_photo = client.patch(
         f"{settings.API_V1_STR}/tasks/{payload['id']}/status",
         headers=caretaker_headers,
-        json={"status": "done", "image_data": "data:image/png;base64,BBB"},
+        json={"status": "done", "image_data": "data:image/png;base64,QkJC"},
     )
     assert finish_with_photo.status_code == 200
     assert finish_with_photo.json()["status"] == "done"
@@ -308,10 +311,63 @@ def test_task_with_creation_photo_requires_completion_photo(
     )
     assert messages_response.status_code == 200
     assert any(
-        message["image_data"] == "data:image/png;base64,BBB"
+        message["image_data"] == "data:image/png;base64,QkJC"
         and "Done" in (message.get("text") or "")
         for message in messages_response.json()["data"]
     )
+
+
+def test_task_creation_rejects_invalid_image_data(
+    client: TestClient, db: Session
+) -> None:
+    _, _, caretaker = _ensure_condominio_and_users(db)
+
+    manager_headers = user_authentication_headers(
+        client=client,
+        email=settings.FIRST_SUPERUSER,
+        password=settings.FIRST_SUPERUSER_PASSWORD,
+    )
+
+    create_task = client.post(
+        f"{settings.API_V1_STR}/tasks/",
+        headers=manager_headers,
+        json={
+            "title": "Invalid image task",
+            "description": "",
+            "image_data": "not-a-data-url",
+            "assigned_to_user_id": str(caretaker.id),
+        },
+    )
+
+    assert create_task.status_code == 422
+    assert create_task.json()["detail"] == "Invalid image_data"
+
+
+def test_task_creation_rejects_oversized_image_data(
+    client: TestClient, db: Session
+) -> None:
+    _, _, caretaker = _ensure_condominio_and_users(db)
+
+    manager_headers = user_authentication_headers(
+        client=client,
+        email=settings.FIRST_SUPERUSER,
+        password=settings.FIRST_SUPERUSER_PASSWORD,
+    )
+
+    oversized_image_data = "data:image/png;base64," + ("A" * (14 * 1024 * 1024))
+    create_task = client.post(
+        f"{settings.API_V1_STR}/tasks/",
+        headers=manager_headers,
+        json={
+            "title": "Oversized image task",
+            "description": "",
+            "image_data": oversized_image_data,
+            "assigned_to_user_id": str(caretaker.id),
+        },
+    )
+
+    assert create_task.status_code == 413
+    assert create_task.json()["detail"] == "image_data is too large"
 
 
 def test_task_board_metadata_returns_buildings_and_common_area_label(

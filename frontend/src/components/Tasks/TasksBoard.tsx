@@ -78,19 +78,29 @@ const apiCall = async (
     return "http://localhost:8000"
   }
   const base = resolveApiBase()
-  const response = await fetch(`${base}${endpoint}`, {
-    method: options?.method || "GET",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${localStorage.getItem("access_token")}`,
-    },
-    body:
-      options?.body === undefined
-        ? undefined
-        : typeof options.body === "string"
-          ? options.body
-          : JSON.stringify(options.body),
-  })
+  let response: Response
+  try {
+    response = await fetch(`${base}${endpoint}`, {
+      method: options?.method || "GET",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${localStorage.getItem("access_token")}`,
+      },
+      body:
+        options?.body === undefined
+          ? undefined
+          : typeof options.body === "string"
+            ? options.body
+            : JSON.stringify(options.body),
+    })
+  } catch (error) {
+    if (error instanceof Error && /fetch/i.test(error.message)) {
+      throw new Error(
+        "Could not reach the API server. If you attached a photo, try a smaller image.",
+      )
+    }
+    throw error
+  }
 
   if (!response.ok) {
     let message = `HTTP ${response.status}`
@@ -120,6 +130,7 @@ const TASK_STATUS_ORDER: TaskStatus[] = ["todo", "done"]
 const STATUS_EVENT_PREFIX = "[STATUS]"
 const COVER_IMAGE_PREFIX = "[COVER_IMAGE]"
 const HIDDEN_TASK_BUILDING_NAMES = new Set(["cleaner", "caretaker"])
+const MAX_TASK_IMAGE_BYTES = 10 * 1024 * 1024
 
 const normalizeTaskStatus = (status: ApiTaskStatus): TaskStatus =>
   status === "paused" ? "todo" : status
@@ -433,6 +444,10 @@ export function TasksBoard({
     target: "create" | "chat" = "chat",
   ) => {
     if (!file) return
+    if (file.size > MAX_TASK_IMAGE_BYTES) {
+      showErrorToast("Image is too large. Please use a file up to 10 MB.")
+      return
+    }
     const reader = new FileReader()
     reader.onload = () => {
       if (typeof reader.result === "string") {

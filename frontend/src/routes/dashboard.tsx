@@ -7106,6 +7106,7 @@ function RemindsContent() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [showModal, setShowModal] = useState(false)
   const [togglingId, setTogglingId] = useState<string | null>(null)
+  const [triggeringId, setTriggeringId] = useState<string | null>(null)
   const [formData, setFormData] = useState({
     name: "",
     schedule_unit: "week" as ReminderScheduleUnit,
@@ -7264,6 +7265,28 @@ function RemindsContent() {
     },
   })
 
+  const triggerNowMutation = useMutation({
+    mutationFn: (id: string) =>
+      apiCall(`/api/v1/reminds/${id}/trigger-now`, {
+        method: "POST",
+      }) as Promise<ReminderExecutionInfo>,
+    onSuccess: (result) => {
+      showSuccessToast(
+        `Reminder triggered now (${result.sms_sent} SMS, ${result.tasks_created} task(s)).`,
+      )
+      queryClient.invalidateQueries({ queryKey: ["tasks"] })
+      queryClient.invalidateQueries({ queryKey: ["reminds"] })
+    },
+    onError: (error: unknown) => {
+      showErrorToast(
+        error instanceof Error ? error.message : "Error triggering reminder",
+      )
+    },
+    onSettled: () => {
+      setTriggeringId(null)
+    },
+  })
+
   const reminders = remindsData?.data || []
 
   const handleOpenCreateModal = () => {
@@ -7393,6 +7416,9 @@ function RemindsContent() {
               Create reminders by day, week, or month to send SMS via Twilio
               and/or create tasks automatically.
             </p>
+            <p className="mt-1 text-xs text-[rgba(0,0,0,0.55)]">
+              Scheduled SMS reminders are sent from 08:00 onward on the due day.
+            </p>
           </div>
           <button
             type="button"
@@ -7440,7 +7466,25 @@ function RemindsContent() {
                       </p>
                     )}
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const id = String(reminder.id)
+                        setTriggeringId(id)
+                        triggerNowMutation.mutate(id)
+                      }}
+                      disabled={
+                        triggerNowMutation.isPending &&
+                        triggeringId === String(reminder.id)
+                      }
+                      className="rounded bg-sky-600 px-3 py-1 text-xs font-semibold text-white hover:bg-sky-700 disabled:opacity-60"
+                    >
+                      {triggerNowMutation.isPending &&
+                      triggeringId === String(reminder.id)
+                        ? "Running..."
+                        : "Run now"}
+                    </button>
                     <button
                       type="button"
                       onClick={() => {
@@ -7760,6 +7804,10 @@ function RemindsContent() {
                       className="w-full rounded border border-[#d9d0ca] px-3 py-2 text-[#55311c] focus:border-[#8c7569] focus:outline-none"
                       placeholder="Reminder message text"
                     />
+                    <p className="mt-1 text-xs text-[rgba(0,0,0,0.65)]">
+                      Scheduled SMS reminders go out from 08:00 on the due day.
+                      Use "Run now" in the list to send immediately.
+                    </p>
                   </div>
                 </div>
               )}

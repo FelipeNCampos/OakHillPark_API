@@ -548,16 +548,17 @@ def execute_due_reminders(
     sms_sent = 0
     tasks_created = 0
     triggered = 0
+    sms_window_open = _is_reminder_sms_window_open(today_utc)
 
     for reminder in due_reminders:
+        if reminder.action_sms and not sms_window_open:
+            continue
+
         reminder_triggered = False
 
         if reminder.action_sms and reminder.sms_to and reminder.sms_message:
             try:
-                send_sms_notification(
-                    phone_to=reminder.sms_to,
-                    body=reminder.sms_message,
-                )
+                _send_reminder_sms(reminder)
                 sms_sent += 1
                 reminder_triggered = True
             except Exception:
@@ -565,45 +566,96 @@ def execute_due_reminders(
                 pass
 
         if reminder.action_task and reminder.task_title:
-            assigned_user_id = None
-            caretaker = _resolve_active_caretaker_user(session, condominio_id)
-            if caretaker:
-                assigned_user_id = caretaker.id
-
-            if assigned_user_id:
-                for _attempt in range(3):
-                    try:
-                        now = datetime.now(timezone.utc)
-                        task = Task(
-                            code=_next_task_code(session, condominio_id),
-                            title=reminder.task_title,
-                            description=(reminder.task_description or "").strip(),
-                            status="todo",
-                            condominio_id=condominio_id,
-                            created_by_user_id=current_user.id,
-                            assigned_to_user_id=assigned_user_id,
-                            created_at=now,
-                            updated_at=now,
-                        )
-                        session.add(task)
-                        session.commit()
-                        tasks_created += 1
-                        reminder_triggered = True
-                        break
-                    except IntegrityError:
-                        session.rollback()
+            task_created = _create_task_from_reminder(
+                session,
+                reminder=reminder,
+                condominio_id=condominio_id,
+                created_by_user_id=current_user.id,
+            )
+            if task_created:
+                tasks_created += 1
+                reminder_triggered = True
 
         if reminder_triggered:
-            reminder.last_triggered_on = today_date
-            reminder.last_triggered_at = datetime.now(timezone.utc)
-            reminder.updated_at = datetime.now(timezone.utc)
-            session.add(reminder)
-            session.commit()
+            _mark_reminder_triggered(
+                session,
+                reminder=reminder,
+                triggered_at=datetime.now(timezone.utc),
+            )
             triggered += 1
 
     return ReminderExecutionSummary(
         checked=len(due_reminders),
         triggered=triggered,
+        sms_sent=sms_sent,
+        tasks_created=tasks_created,
+    )
+
+
+@router.post("/{reminder_id}/trigger-now", response_model=ReminderExecutionSummary)
+def trigger_reminder_now(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    reminder_id: str,
+) -> ReminderExecutionSummary:
+    if not _is_manager(current_user):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    try:
+        reminder_uuid = uuid.UUID(reminder_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid reminder id") from exc
+
+    condominio_id = _resolve_user_condominio_id(session, current_user)
+    if not condominio_id:
+        raise HTTPException(status_code=400, detail="No condominio configured")
+
+    reminder = session.get(Reminder, reminder_uuid)
+    if not reminder:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    if reminder.condominio_id != condominio_id:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    sms_sent = 0
+    tasks_created = 0
+    last_error_detail: str | None = None
+    last_error_status = 400
+
+    if reminder.action_sms and reminder.sms_to and reminder.sms_message:
+        try:
+            if _send_reminder_sms(reminder):
+                sms_sent = 1
+        except Exception as exc:
+            last_error_detail = str(exc) or "Could not send reminder SMS"
+            last_error_status = 502
+
+    if reminder.action_task and reminder.task_title:
+        if _create_task_from_reminder(
+            session,
+            reminder=reminder,
+            condominio_id=condominio_id,
+            created_by_user_id=current_user.id,
+        ):
+            tasks_created = 1
+        elif last_error_detail is None:
+            last_error_detail = "No active caretaker available for task assignment"
+
+    triggered = 1 if (sms_sent or tasks_created) else 0
+    if not triggered:
+        raise HTTPException(
+            status_code=last_error_status,
+            detail=last_error_detail or "Reminder could not be triggered now",
+        )
+
+    _mark_reminder_triggered(
+        session,
+        reminder=reminder,
+        triggered_at=datetime.now(timezone.utc),
+    )
+
+    return ReminderExecutionSummary(
+        checked=1,
+        triggered=1,
         sms_sent=sms_sent,
         tasks_created=tasks_created,
     )

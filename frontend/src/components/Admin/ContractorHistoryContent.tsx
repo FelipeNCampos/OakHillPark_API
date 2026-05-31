@@ -7,6 +7,7 @@ import {
 import { useDeferredValue, useEffect, useMemo, useState } from "react"
 
 import { OpenAPI } from "@/client"
+import { resolveApiBase } from "@/config/api"
 import {
   Dialog,
   DialogContent,
@@ -106,22 +107,7 @@ const apiCall = async (
   endpoint: string,
   params?: ApiQueryParams | ApiRequestOptions,
 ) => {
-  const resolveApiBase = () => {
-    if (OpenAPI.BASE) return OpenAPI.BASE
-    if (typeof window !== "undefined") {
-      const { protocol, hostname, port } = window.location
-      if (hostname.startsWith("dashboard.")) {
-        return `${protocol}//api.${hostname.slice("dashboard.".length)}`
-      }
-      if (hostname === "localhost" && port === "5173") {
-        return "http://localhost:8000"
-      }
-      return `${protocol}//${hostname}${port ? `:${port}` : ""}`
-    }
-    return "http://localhost:8000"
-  }
-
-  const url = new URL(`${resolveApiBase()}${endpoint}`)
+  const url = new URL(`${resolveApiBase(OpenAPI.BASE)}${endpoint}`)
   const requestOptions = isRequestOptions(params) ? params : undefined
 
   if (!requestOptions && params) {

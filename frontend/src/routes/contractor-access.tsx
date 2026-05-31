@@ -4,6 +4,7 @@ import { useMemo, useState } from "react"
 import { z } from "zod"
 
 import { OpenAPI } from "@/client"
+import { resolveApiBase } from "@/config/api"
 import useCustomToast from "@/hooks/useCustomToast"
 
 const CONTRACTOR_HIDDEN_BUILDING_NAMES = new Set([
@@ -66,7 +67,7 @@ const isRequestOptions = (params?: ApiParams): params is RequestOptions => {
 }
 
 const publicApiCall = async (endpoint: string, params?: ApiParams) => {
-  const url = new URL(`${OpenAPI.BASE || "http://localhost:8000"}${endpoint}`)
+  const url = new URL(`${resolveApiBase(OpenAPI.BASE)}${endpoint}`)
   const requestOptions = isRequestOptions(params) ? params : undefined
 
   if (!requestOptions && params) {

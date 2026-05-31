@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { ArrowUp, Paperclip, X } from "lucide-react"
 
 import { OpenAPI } from "@/client"
-import { normalizeApiBase, resolveApiBase } from "@/config/api"
+import { resolveApiBase } from "@/config/api"
 import useCustomToast from "@/hooks/useCustomToast"
 
 type TaskStatus = "todo" | "done"
@@ -64,8 +64,7 @@ const apiCall = async (
   endpoint: string,
   options?: { method?: string; body?: unknown },
 ) => {
-  const base =
-    normalizeApiBase(OpenAPI.BASE) || resolveApiBase(import.meta.env.VITE_API_URL)
+  const base = resolveApiBase(OpenAPI.BASE)
   let response: Response
   try {
     response = await fetch(`${base}${endpoint}`, {

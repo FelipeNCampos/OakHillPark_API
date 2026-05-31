@@ -3,18 +3,24 @@ export const normalizeApiBase = (value?: string) => {
   if (!trimmedValue) return ""
 
   const normalizedValue = trimmedValue.replace(/\/$/, "")
-  if (
-    typeof window !== "undefined" &&
-    window.location.protocol === "https:" &&
-    normalizedValue.startsWith("http://")
-  ) {
-    try {
-      const upgradedUrl = new URL(normalizedValue)
-      upgradedUrl.protocol = "https:"
-      return upgradedUrl.toString().replace(/\/$/, "")
-    } catch {
+  try {
+    const parsedUrl = new URL(normalizedValue)
+    const isLocalhost =
+      parsedUrl.hostname === "localhost" ||
+      parsedUrl.hostname === "127.0.0.1" ||
+      parsedUrl.hostname === "::1"
+
+    if (parsedUrl.protocol === "http:" && !isLocalhost) {
+      parsedUrl.protocol = "https:"
+    }
+
+    return parsedUrl.toString().replace(/\/$/, "")
+  } catch {
+    if (normalizedValue.startsWith("http://")) {
       return normalizedValue.replace(/^http:\/\//i, "https://")
     }
+
+    return normalizedValue
   }
 
   return normalizedValue

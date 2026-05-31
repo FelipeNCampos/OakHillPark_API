@@ -4,6 +4,7 @@ import { useState } from "react"
 import { z } from "zod"
 
 import { OpenAPI } from "@/client"
+import { resolveApiBase } from "@/config/api"
 import useCustomToast from "@/hooks/useCustomToast"
 
 const searchSchema = z.object({
@@ -14,23 +15,8 @@ const searchSchema = z.object({
 
 type RequestOptions = { method?: string; body?: unknown }
 
-const resolveApiBase = () => {
-  if (OpenAPI.BASE) return OpenAPI.BASE
-  if (typeof window !== "undefined") {
-    const { protocol, hostname, port } = window.location
-    if (hostname.startsWith("dashboard.")) {
-      return `${protocol}//api.${hostname.slice("dashboard.".length)}`
-    }
-    if (hostname === "localhost" && port === "5173") {
-      return "http://localhost:8000"
-    }
-    return `${protocol}//${hostname}${port ? `:${port}` : ""}`
-  }
-  return "http://localhost:8000"
-}
-
 const publicApiCall = async (endpoint: string, options?: RequestOptions) => {
-  const url = new URL(`${resolveApiBase()}${endpoint}`)
+  const url = new URL(`${resolveApiBase(OpenAPI.BASE)}${endpoint}`)
   const requestOptions = options || {}
 
   const request: RequestInit = {

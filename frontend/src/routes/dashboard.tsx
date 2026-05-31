@@ -7350,6 +7350,13 @@ function RemindsContent() {
       showErrorToast("Enter a valid interval number")
       return
     }
+    const normalizedReminderPhone = formData.action_sms
+      ? normalizePhoneToE164(formData.sms_to)
+      : null
+    if (formData.action_sms && !normalizedReminderPhone) {
+      showErrorToast("Enter a valid SMS destination")
+      return
+    }
 
     const payload: Record<string, unknown> = {
       name: formData.name.trim(),
@@ -7369,7 +7376,7 @@ function RemindsContent() {
           : null,
       is_active: formData.is_active,
       action_sms: formData.action_sms,
-      sms_to: formData.sms_to.trim() || null,
+      sms_to: normalizedReminderPhone,
       sms_message: formData.sms_message.trim() || null,
       action_task: formData.action_task,
       task_title: formData.task_title.trim() || null,

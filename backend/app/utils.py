@@ -96,6 +96,32 @@ def _record_notification_history(
         logger.exception("failed to record notification history")
 
 
+def normalize_phone_to_e164(
+    raw_phone: str | int | None, default_country_code: str = "+44"
+) -> str | None:
+    if raw_phone is None:
+        return None
+    cleaned = str(raw_phone).strip()
+    cleaned = re.sub(r"[^\d+]", "", cleaned)
+    if not cleaned:
+        return None
+
+    normalized = cleaned
+    if normalized.startswith("00"):
+        normalized = f"+{normalized[2:]}"
+    elif not normalized.startswith("+"):
+        digits_only = re.sub(r"\D", "", normalized)
+        country_digits = re.sub(r"\D", "", default_country_code) or "44"
+        if digits_only.startswith(country_digits):
+            normalized = f"+{digits_only}"
+        else:
+            if digits_only.startswith("0"):
+                digits_only = digits_only[1:]
+            normalized = f"+{country_digits}{digits_only}"
+
+    return normalized if E164_PHONE_REGEX.fullmatch(normalized) else None
+
+
 def update_notification_history_status(
     *,
     provider_message_id: str,
@@ -341,6 +367,7 @@ def send_email_with_attachments(
 
 
 def send_sms_notification(*, phone_to: str, body: str) -> str:
+    normalized_phone = normalize_phone_to_e164(phone_to)
     if not settings.twilio_enabled:
         error_message = "Twilio configuration is missing"
         logger.error(
@@ -348,7 +375,7 @@ def send_sms_notification(*, phone_to: str, body: str) -> str:
         )
         _record_notification_history(
             notification_type="sms",
-            recipient_to=phone_to,
+            recipient_to=normalized_phone or phone_to,
             message=body,
             delivery_status="failed",
             success=False,
@@ -363,7 +390,7 @@ def send_sms_notification(*, phone_to: str, body: str) -> str:
         )
         _record_notification_history(
             notification_type="sms",
-            recipient_to=phone_to,
+            recipient_to=normalized_phone or phone_to,
             message=body,
             delivery_status="failed",
             success=False,
@@ -371,7 +398,7 @@ def send_sms_notification(*, phone_to: str, body: str) -> str:
         )
         raise ValueError(error_message)
 
-    if not E164_PHONE_REGEX.fullmatch(phone_to):
+    if not normalized_phone:
         error_message = "Phone number must be in E.164 format"
         logger.error(
             f"twilio sms skipped - reason='{error_message}' phone_to='{phone_to}'"
@@ -386,12 +413,12 @@ def send_sms_notification(*, phone_to: str, body: str) -> str:
         )
         raise ValueError(error_message)
 
-    logger.info(f"twilio sms sending - to='{phone_to}'")
+    logger.info(f"twilio sms sending - to='{normalized_phone}'")
     try:
         client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
         message_payload: dict[str, Any] = {
             "body": body,
-            "to": phone_to,
+            "to": normalized_phone,
         }
         if settings.TWILIO_MESSAGING_SERVICE_SID:
             message_payload["messaging_service_sid"] = (
@@ -408,11 +435,11 @@ def send_sms_notification(*, phone_to: str, body: str) -> str:
 
         message = client.messages.create(**message_payload)
         logger.info(
-            f"twilio sms sent - sid='{message.sid}' status='{message.status}' to='{phone_to}'"
+            f"twilio sms sent - sid='{message.sid}' status='{message.status}' to='{normalized_phone}'"
         )
         _record_notification_history(
             notification_type="sms",
-            recipient_to=phone_to,
+            recipient_to=normalized_phone,
             message=body,
             delivery_status=str(message.status or "queued"),
             success=str(message.status or "").lower() not in {"failed", "undelivered"},
@@ -421,17 +448,28 @@ def send_sms_notification(*, phone_to: str, body: str) -> str:
         return message.sid
     except TwilioRestException as exc:
         logger.exception(
-            f"twilio sms failed - to='{phone_to}' code='{exc.code}' message='{exc.msg}'"
+            f"twilio sms failed - to='{normalized_phone}' code='{exc.code}' message='{exc.msg}'"
         )
         _record_notification_history(
             notification_type="sms",
-            recipient_to=phone_to,
+            recipient_to=normalized_phone,
             message=body,
             delivery_status="failed",
             success=False,
             error_message=exc.msg or str(exc),
         )
         raise
+    except Exception as exc:
+        logger.exception(f"twilio sms failed - to='{normalized_phone}'")
+        _record_notification_history(
+            notification_type="sms",
+            recipient_to=normalized_phone,
+            message=body,
+            delivery_status="failed",
+            success=False,
+            error_message=str(exc),
+        )
+        raise RuntimeError("Failed to send SMS") from exc
 
 
 def generate_test_email(email_to: str) -> EmailData:

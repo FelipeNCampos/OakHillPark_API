@@ -94,7 +94,11 @@ const apiCall = async (
             : JSON.stringify(options.body),
     })
   } catch (error) {
-    if (error instanceof Error && /fetch/i.test(error.message)) {
+    if (
+      error instanceof TypeError ||
+      (error instanceof Error &&
+        /fetch|network|load failed|failed to fetch/i.test(error.message))
+    ) {
       throw new Error(
         "Could not reach the API server. If you attached a photo, try a smaller image.",
       )
@@ -130,7 +134,69 @@ const TASK_STATUS_ORDER: TaskStatus[] = ["todo", "done"]
 const STATUS_EVENT_PREFIX = "[STATUS]"
 const COVER_IMAGE_PREFIX = "[COVER_IMAGE]"
 const HIDDEN_TASK_BUILDING_NAMES = new Set(["cleaner", "caretaker"])
-const MAX_TASK_IMAGE_BYTES = 10 * 1024 * 1024
+const MAX_TASK_IMAGE_INPUT_BYTES = 12 * 1024 * 1024
+const MAX_TASK_IMAGE_OUTPUT_LENGTH = 2_000_000
+const MAX_TASK_IMAGE_DIMENSION = 1400
+
+const readFileAsDataUrl = (file: File) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result)
+        return
+      }
+      reject(new Error("Could not read image"))
+    }
+    reader.onerror = () => reject(new Error("Could not read image"))
+    reader.readAsDataURL(file)
+  })
+
+const loadImageElement = (src: string) =>
+  new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image()
+    image.onload = () => resolve(image)
+    image.onerror = () => reject(new Error("Could not process image"))
+    image.src = src
+  })
+
+const optimizeTaskImage = async (file: File) => {
+  const originalDataUrl = await readFileAsDataUrl(file)
+  const image = await loadImageElement(originalDataUrl)
+  const scale = Math.min(
+    1,
+    MAX_TASK_IMAGE_DIMENSION / Math.max(image.naturalWidth, 1),
+    MAX_TASK_IMAGE_DIMENSION / Math.max(image.naturalHeight, 1),
+  )
+  const targetWidth = Math.max(1, Math.round(image.naturalWidth * scale))
+  const targetHeight = Math.max(1, Math.round(image.naturalHeight * scale))
+
+  const canvas = document.createElement("canvas")
+  canvas.width = targetWidth
+  canvas.height = targetHeight
+  const context = canvas.getContext("2d")
+  if (!context) {
+    throw new Error("Could not process image")
+  }
+
+  context.fillStyle = "#ffffff"
+  context.fillRect(0, 0, targetWidth, targetHeight)
+  context.drawImage(image, 0, 0, targetWidth, targetHeight)
+
+  let quality = 0.82
+  let optimizedDataUrl = canvas.toDataURL("image/jpeg", quality)
+  while (
+    optimizedDataUrl.length > MAX_TASK_IMAGE_OUTPUT_LENGTH &&
+    quality > 0.45
+  ) {
+    quality -= 0.08
+    optimizedDataUrl = canvas.toDataURL("image/jpeg", quality)
+  }
+
+  return optimizedDataUrl.length < originalDataUrl.length
+    ? optimizedDataUrl
+    : originalDataUrl
+}
 
 const normalizeTaskStatus = (status: ApiTaskStatus): TaskStatus =>
   status === "paused" ? "todo" : status
@@ -444,22 +510,24 @@ export function TasksBoard({
     target: "create" | "chat" = "chat",
   ) => {
     if (!file) return
-    if (file.size > MAX_TASK_IMAGE_BYTES) {
-      showErrorToast("Image is too large. Please use a file up to 10 MB.")
+    if (file.size > MAX_TASK_IMAGE_INPUT_BYTES) {
+      showErrorToast("Image is too large. Please use a file up to 12 MB.")
       return
     }
-    const reader = new FileReader()
-    reader.onload = () => {
-      if (typeof reader.result === "string") {
+    optimizeTaskImage(file)
+      .then((imageData) => {
         if (target === "create") {
-          setNewImageData(reader.result)
+          setNewImageData(imageData)
           return
         }
-        setChatImageData(reader.result)
+        setChatImageData(imageData)
         setShowCompletionPhotoPrompt(false)
-      }
-    }
-    reader.readAsDataURL(file)
+      })
+      .catch((error: unknown) => {
+        showErrorToast(
+          error instanceof Error ? error.message : "Could not process image",
+        )
+      })
   }
 
   useEffect(() => {

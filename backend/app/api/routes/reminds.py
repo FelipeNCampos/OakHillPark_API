@@ -20,7 +20,7 @@ from app.models import (
     Task,
     User,
 )
-from app.utils import send_sms_notification
+from app.utils import normalize_phone_to_e164, send_sms_notification
 
 router = APIRouter(prefix="/reminds", tags=["reminds"])
 REMINDER_SCHEDULE_UNITS = {"day", "week", "month"}
@@ -97,6 +97,18 @@ def _validate_reminder_actions(
         raise HTTPException(
             status_code=400, detail="Task title is required for task action"
         )
+
+
+def _normalize_reminder_sms_to(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = normalize_phone_to_e164(value)
+    if not normalized:
+        raise HTTPException(
+            status_code=400,
+            detail="SMS destination must be a valid phone number",
+        )
+    return normalized
 
 
 def _validate_weekday_mask(weekday_mask: int) -> None:
@@ -380,6 +392,9 @@ def create_reminder(
         weekday_mask=payload.weekday_mask,
         month_mask=payload.month_mask,
     )
+    normalized_sms_to = (
+        _normalize_reminder_sms_to(payload.sms_to) if payload.action_sms else None
+    )
 
     now = datetime.now(timezone.utc)
     reminder = Reminder(
@@ -391,7 +406,7 @@ def create_reminder(
         month_mask=payload.month_mask,
         is_active=payload.is_active,
         action_sms=payload.action_sms,
-        sms_to=payload.sms_to.strip() if payload.sms_to else None,
+        sms_to=normalized_sms_to,
         sms_message=payload.sms_message.strip() if payload.sms_message else None,
         action_task=payload.action_task,
         task_title=payload.task_title.strip() if payload.task_title else None,
@@ -454,7 +469,9 @@ def update_reminder(
         reminder.action_task = payload.action_task
 
     if "sms_to" in payload.model_fields_set:
-        reminder.sms_to = (payload.sms_to or "").strip() or None
+        reminder.sms_to = (
+            _normalize_reminder_sms_to(payload.sms_to) if payload.sms_to else None
+        )
     if "sms_message" in payload.model_fields_set:
         reminder.sms_message = (payload.sms_message or "").strip() or None
     if "task_title" in payload.model_fields_set:

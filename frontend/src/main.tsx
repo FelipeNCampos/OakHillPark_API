@@ -17,7 +17,21 @@ import { clearAuthSession, isAuthSessionError } from "./utils"
 const normalizeApiBase = (value?: string) => {
   const trimmedValue = value?.trim()
   if (!trimmedValue) return ""
-  return trimmedValue.replace(/\/$/, "")
+  const normalizedValue = trimmedValue.replace(/\/$/, "")
+  if (
+    typeof window !== "undefined" &&
+    window.location.protocol === "https:" &&
+    normalizedValue.startsWith("http://")
+  ) {
+    try {
+      const upgradedUrl = new URL(normalizedValue)
+      upgradedUrl.protocol = "https:"
+      return upgradedUrl.toString().replace(/\/$/, "")
+    } catch {
+      return normalizedValue.replace(/^http:\/\//i, "https://")
+    }
+  }
+  return normalizedValue
 }
 
 const resolveApiBase = () => {

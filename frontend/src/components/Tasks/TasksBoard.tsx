@@ -63,8 +63,26 @@ const apiCall = async (
   endpoint: string,
   options?: { method?: string; body?: unknown },
 ) => {
+  const normalizeApiBase = (value: string) => {
+    const trimmedValue = value.trim().replace(/\/$/, "")
+    if (
+      typeof window !== "undefined" &&
+      window.location.protocol === "https:" &&
+      trimmedValue.startsWith("http://")
+    ) {
+      try {
+        const upgradedUrl = new URL(trimmedValue)
+        upgradedUrl.protocol = "https:"
+        return upgradedUrl.toString().replace(/\/$/, "")
+      } catch {
+        return trimmedValue.replace(/^http:\/\//i, "https://")
+      }
+    }
+    return trimmedValue
+  }
+
   const resolveApiBase = () => {
-    if (OpenAPI.BASE) return OpenAPI.BASE
+    if (OpenAPI.BASE) return normalizeApiBase(OpenAPI.BASE)
     if (typeof window !== "undefined") {
       const { protocol, hostname, port } = window.location
       if (hostname.startsWith("dashboard.")) {

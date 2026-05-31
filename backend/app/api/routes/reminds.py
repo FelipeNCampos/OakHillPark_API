@@ -25,6 +25,7 @@ from app.utils import send_sms_notification
 router = APIRouter(prefix="/reminds", tags=["reminds"])
 REMINDER_SCHEDULE_UNITS = {"day", "week", "month"}
 REMINDER_SCHEDULE_MODES = {"interval", "fixed"}
+REMINDER_SMS_DISPATCH_HOUR = 8
 
 
 def _is_manager(user: User) -> bool:
@@ -189,6 +190,10 @@ def _is_reminder_due_today(reminder: Reminder, today_date: date) -> bool:
     return False
 
 
+def _is_reminder_sms_window_open(reference_time: datetime) -> bool:
+    return reference_time.astimezone().hour >= REMINDER_SMS_DISPATCH_HOUR
+
+
 def _next_task_code(session: SessionDep, condominio_id) -> str:
     import re
 
@@ -251,6 +256,67 @@ def _resolve_active_caretaker_user(session: SessionDep, condominio_id) -> User |
         .order_by(User.created_at.asc())
         .limit(1)
     ).first()
+
+
+def _send_reminder_sms(reminder: Reminder) -> bool:
+    if not (reminder.action_sms and reminder.sms_to and reminder.sms_message):
+        return False
+
+    send_sms_notification(
+        phone_to=reminder.sms_to,
+        body=reminder.sms_message,
+    )
+    return True
+
+
+def _create_task_from_reminder(
+    session: SessionDep,
+    *,
+    reminder: Reminder,
+    condominio_id,
+    created_by_user_id,
+) -> bool:
+    if not (reminder.action_task and reminder.task_title):
+        return False
+
+    caretaker = _resolve_active_caretaker_user(session, condominio_id)
+    if not caretaker:
+        return False
+
+    for _attempt in range(3):
+        try:
+            now = datetime.now(timezone.utc)
+            task = Task(
+                code=_next_task_code(session, condominio_id),
+                title=reminder.task_title,
+                description=(reminder.task_description or "").strip(),
+                status="todo",
+                condominio_id=condominio_id,
+                created_by_user_id=created_by_user_id,
+                assigned_to_user_id=caretaker.id,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(task)
+            session.commit()
+            return True
+        except IntegrityError:
+            session.rollback()
+
+    return False
+
+
+def _mark_reminder_triggered(
+    session: SessionDep,
+    *,
+    reminder: Reminder,
+    triggered_at: datetime,
+) -> None:
+    reminder.last_triggered_on = triggered_at.date()
+    reminder.last_triggered_at = triggered_at
+    reminder.updated_at = triggered_at
+    session.add(reminder)
+    session.commit()
 
 
 @router.get("/", response_model=RemindersPublic)

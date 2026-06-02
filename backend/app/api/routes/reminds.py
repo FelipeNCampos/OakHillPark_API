@@ -61,6 +61,7 @@ def _reminder_to_public(reminder: Reminder) -> ReminderPublic:
         action_task=reminder.action_task,
         task_title=reminder.task_title,
         task_description=reminder.task_description,
+        task_priority=reminder.task_priority,
         condominio_id=reminder.condominio_id,
         created_by_user_id=reminder.created_by_user_id,
         last_triggered_on=reminder.last_triggered_on,
@@ -303,6 +304,7 @@ def _create_task_from_reminder(
                 title=reminder.task_title,
                 description=(reminder.task_description or "").strip(),
                 status="todo",
+                priority=reminder.task_priority,
                 condominio_id=condominio_id,
                 created_by_user_id=created_by_user_id,
                 assigned_to_user_id=caretaker.id,
@@ -413,6 +415,7 @@ def create_reminder(
         task_description=(
             payload.task_description.strip() if payload.task_description else None
         ),
+        task_priority=payload.task_priority,
         condominio_id=condominio_id,
         created_by_user_id=current_user.id,
         created_at=now,
@@ -478,6 +481,8 @@ def update_reminder(
         reminder.task_title = (payload.task_title or "").strip() or None
     if "task_description" in payload.model_fields_set:
         reminder.task_description = (payload.task_description or "").strip() or None
+    if payload.task_priority is not None:
+        reminder.task_priority = payload.task_priority
 
     _validate_schedule_config(
         schedule_unit=reminder.schedule_unit,

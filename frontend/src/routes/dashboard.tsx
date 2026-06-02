@@ -46,6 +46,7 @@ import {
 } from "@/components/ui/dialog"
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
@@ -76,6 +77,11 @@ interface Building {
   electricity_sn?: string | null
   gas_sn?: string | null
   flats?: Flat[]
+}
+
+interface ContractorAccessBuilding {
+  id: EntityId
+  name: string
 }
 
 const QR_SPECIAL_CLEANER_BUILDING_NAMES = new Set(["general", "cleaner"])
@@ -467,6 +473,7 @@ interface ReminderItem {
   action_task: boolean
   task_title?: string | null
   task_description?: string | null
+  task_priority: number
   last_triggered_on?: string | null
   updated_at: string
 }
@@ -739,6 +746,13 @@ const apiCall = async (
     throw new Error(message)
   }
   return response.json()
+}
+
+const parseDateTimeLocalToIso = (value: string) => {
+  if (!value) return null
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return null
+  return parsed.toISOString()
 }
 
 const formatDateToBr = (value: string) => {
@@ -1770,6 +1784,18 @@ const toTimeInputValue = (dateValue?: string | null) => {
   const hours = String(date.getHours()).padStart(2, "0")
   const minutes = String(date.getMinutes()).padStart(2, "0")
   return `${hours}:${minutes}`
+}
+
+const toDateTimeLocalInputValue = (dateValue?: string | null) => {
+  if (!dateValue) return ""
+  const date = new Date(dateValue)
+  if (Number.isNaN(date.getTime())) return ""
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+  const hours = String(date.getHours()).padStart(2, "0")
+  const minutes = String(date.getMinutes()).padStart(2, "0")
+  return `${year}-${month}-${day}T${hours}:${minutes}`
 }
 
 const readDateSetFromStorage = (storageKey: string) => {
@@ -7121,6 +7147,7 @@ function RemindsContent() {
     action_task: false,
     task_title: "",
     task_description: "",
+    task_priority: "2",
   })
 
   const { data: remindsData, isLoading } = useQuery<
@@ -7145,6 +7172,7 @@ function RemindsContent() {
       action_task: false,
       task_title: "",
       task_description: "",
+      task_priority: "2",
     })
   }
 
@@ -7381,6 +7409,7 @@ function RemindsContent() {
       action_task: formData.action_task,
       task_title: formData.task_title.trim() || null,
       task_description: formData.task_description.trim() || null,
+      task_priority: Number(formData.task_priority),
     }
 
     if (editingId) {
@@ -7407,6 +7436,7 @@ function RemindsContent() {
       action_task: reminder.action_task,
       task_title: reminder.task_title || "",
       task_description: reminder.task_description || "",
+      task_priority: String(reminder.task_priority || 2),
     })
     setShowModal(true)
   }
@@ -7466,6 +7496,11 @@ function RemindsContent() {
                       {reminder.action_sms && reminder.action_task ? "+" : ""}{" "}
                       {reminder.action_task ? "Task" : ""}
                     </p>
+                    {reminder.action_task && (
+                      <p className="text-xs text-[rgba(0,0,0,0.55)]">
+                        Task priority: {reminder.task_priority || 2}
+                      </p>
+                    )}
                     {reminder.last_triggered_on && (
                       <p className="text-xs text-[rgba(0,0,0,0.55)]">
                         Last triggered:{" "}
@@ -7820,7 +7855,7 @@ function RemindsContent() {
               )}
 
               {formData.action_task && (
-                <div className="grid gap-4 md:grid-cols-2">
+                <div className="grid gap-4 md:grid-cols-3">
                   <div>
                     <label
                       htmlFor="remind-task-title"
@@ -7841,6 +7876,29 @@ function RemindsContent() {
                       className="w-full rounded border border-[#d9d0ca] px-3 py-2 text-[#55311c] focus:border-[#8c7569] focus:outline-none"
                       placeholder="Task created by reminder"
                     />
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="remind-task-priority"
+                      className="mb-1 block text-sm font-semibold text-[#55311c]"
+                    >
+                      Task priority
+                    </label>
+                    <select
+                      id="remind-task-priority"
+                      value={formData.task_priority}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          task_priority: e.target.value,
+                        }))
+                      }
+                      className="w-full rounded border border-[#d9d0ca] px-3 py-2 text-[#55311c] focus:border-[#8c7569] focus:outline-none"
+                    >
+                      <option value="1">Priority 1</option>
+                      <option value="2">Priority 2</option>
+                      <option value="3">Priority 3</option>
+                    </select>
                   </div>
                   <div>
                     <label
@@ -10582,15 +10640,584 @@ function HoursInvoiceLauncherDialog({
   )
 }
 
+function CleanerRecordCreateDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  const queryClient = useQueryClient()
+  const { showSuccessToast, showErrorToast } = useCustomToast()
+  const [buildingId, setBuildingId] = useState("")
+  const [inAt, setInAt] = useState("")
+  const [outAt, setOutAt] = useState("")
+  const { data: buildingsData } = useQuery<ApiListResponse<Building>>({
+    queryKey: ["buildings", "cleaner-record-create"],
+    queryFn: () => apiCall("/api/v1/buildings/condominio"),
+    enabled: open,
+  })
+
+  const buildings = useMemo(
+    () =>
+      ((buildingsData?.data || []) as Building[])
+        .filter(
+          (building) =>
+            !["office"].includes(building.nome.trim().toLowerCase()),
+        )
+        .sort((a, b) => a.nome.localeCompare(b.nome)),
+    [buildingsData],
+  )
+
+  const resetForm = () => {
+    setBuildingId("")
+    setInAt("")
+    setOutAt("")
+  }
+
+  const createMutation = useMutation({
+    mutationFn: async () => {
+      if (!buildingId) throw new Error("Select a building")
+      const inAtIso = parseDateTimeLocalToIso(inAt)
+      const outAtIso = parseDateTimeLocalToIso(outAt)
+      if (!inAtIso || !outAtIso) throw new Error("Enter valid dates")
+      if (new Date(outAtIso).getTime() <= new Date(inAtIso).getTime()) {
+        throw new Error("Time OUT must be after Time IN")
+      }
+
+      await apiCall("/api/v1/acess/", {
+        method: "POST",
+        body: {
+          building_id: buildingId,
+          operacao: 0,
+          data: inAtIso,
+        },
+      })
+      await apiCall("/api/v1/acess/", {
+        method: "POST",
+        body: {
+          building_id: buildingId,
+          operacao: 1,
+          data: outAtIso,
+        },
+      })
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ["acess", "cleaner"],
+      })
+      onOpenChange(false)
+      resetForm()
+      showSuccessToast("Cleaner record created successfully")
+    },
+    onError: (error) => {
+      showErrorToast(
+        error instanceof Error ? error.message : "Failed to create cleaner record",
+      )
+    },
+  })
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        onOpenChange(nextOpen)
+        if (!nextOpen) resetForm()
+      }}
+    >
+      <DialogContent className="border-[#e5e0dc] bg-white text-[#55311c] sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="text-[#55311c]">
+            Create cleaner record
+          </DialogTitle>
+          <DialogDescription className="text-[rgba(0,0,0,0.7)]">
+            Add a cleaner record by defining the building, date in and date out.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="grid gap-4">
+          <div>
+            <label
+              htmlFor="cleaner-record-building"
+              className="mb-1 block text-sm font-semibold text-[#55311c]"
+            >
+              Building
+            </label>
+            <select
+              id="cleaner-record-building"
+              value={buildingId}
+              onChange={(event) => setBuildingId(event.target.value)}
+              className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+            >
+              <option value="">Select a building</option>
+              {buildings.map((building) => (
+                <option key={building.id} value={String(building.id)}>
+                  {building.nome}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label
+              htmlFor="cleaner-record-in-at"
+              className="mb-1 block text-sm font-semibold text-[#55311c]"
+            >
+              Date in
+            </label>
+            <input
+              id="cleaner-record-in-at"
+              type="datetime-local"
+              value={inAt}
+              onChange={(event) => setInAt(event.target.value)}
+              className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+            />
+          </div>
+          <div>
+            <label
+              htmlFor="cleaner-record-out-at"
+              className="mb-1 block text-sm font-semibold text-[#55311c]"
+            >
+              Date out
+            </label>
+            <input
+              id="cleaner-record-out-at"
+              type="datetime-local"
+              value={outAt}
+              onChange={(event) => setOutAt(event.target.value)}
+              className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+            />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <button
+            type="button"
+            onClick={() => onOpenChange(false)}
+            disabled={createMutation.isPending}
+            className="rounded border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => createMutation.mutate()}
+            disabled={createMutation.isPending}
+            className="rounded bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {createMutation.isPending ? "Saving..." : "Create"}
+          </button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function CaretakerRecordCreateDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  const queryClient = useQueryClient()
+  const { showSuccessToast, showErrorToast } = useCustomToast()
+  const [inAt, setInAt] = useState("")
+  const [outAt, setOutAt] = useState("")
+
+  const resetForm = () => {
+    setInAt("")
+    setOutAt("")
+  }
+
+  const createMutation = useMutation({
+    mutationFn: async () => {
+      const inAtIso = parseDateTimeLocalToIso(inAt)
+      const outAtIso = parseDateTimeLocalToIso(outAt)
+      if (!inAtIso || !outAtIso) throw new Error("Enter valid dates")
+      if (new Date(outAtIso).getTime() <= new Date(inAtIso).getTime()) {
+        throw new Error("Time OUT must be after Time IN")
+      }
+
+      await apiCall("/api/v1/acess/caretaker/work-time", {
+        method: "POST",
+        body: {
+          operacao: 0,
+          data: inAtIso,
+        },
+      })
+      await apiCall("/api/v1/acess/caretaker/work-time", {
+        method: "POST",
+        body: {
+          operacao: 1,
+          data: outAtIso,
+        },
+      })
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ["acess", "caretaker", "work-time"],
+      })
+      onOpenChange(false)
+      resetForm()
+      showSuccessToast("Caretaker record created successfully")
+    },
+    onError: (error) => {
+      showErrorToast(
+        error instanceof Error
+          ? error.message
+          : "Failed to create caretaker record",
+      )
+    },
+  })
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        onOpenChange(nextOpen)
+        if (!nextOpen) resetForm()
+      }}
+    >
+      <DialogContent className="border-[#e5e0dc] bg-white text-[#55311c] sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="text-[#55311c]">
+            Create caretaker record
+          </DialogTitle>
+          <DialogDescription className="text-[rgba(0,0,0,0.7)]">
+            Add a caretaker record by defining the date in and date out.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="grid gap-4">
+          <div>
+            <label
+              htmlFor="caretaker-record-in-at"
+              className="mb-1 block text-sm font-semibold text-[#55311c]"
+            >
+              Date in
+            </label>
+            <input
+              id="caretaker-record-in-at"
+              type="datetime-local"
+              value={inAt}
+              onChange={(event) => setInAt(event.target.value)}
+              className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+            />
+          </div>
+          <div>
+            <label
+              htmlFor="caretaker-record-out-at"
+              className="mb-1 block text-sm font-semibold text-[#55311c]"
+            >
+              Date out
+            </label>
+            <input
+              id="caretaker-record-out-at"
+              type="datetime-local"
+              value={outAt}
+              onChange={(event) => setOutAt(event.target.value)}
+              className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+            />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <button
+            type="button"
+            onClick={() => onOpenChange(false)}
+            disabled={createMutation.isPending}
+            className="rounded border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => createMutation.mutate()}
+            disabled={createMutation.isPending}
+            className="rounded bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {createMutation.isPending ? "Saving..." : "Create"}
+          </button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function ContractorRecordCreateDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  const queryClient = useQueryClient()
+  const { showSuccessToast, showErrorToast } = useCustomToast()
+  const { user } = useAuth()
+  const [name, setName] = useState("")
+  const [company, setCompany] = useState("")
+  const [buildingId, setBuildingId] = useState("")
+  const [jobDescription, setJobDescription] = useState("")
+  const [mobile, setMobile] = useState("")
+  const [inAt, setInAt] = useState("")
+  const [outAt, setOutAt] = useState("")
+  const { data: buildingsData } = useQuery<
+    ApiListResponse<ContractorAccessBuilding>
+  >({
+    queryKey: ["contractor-buildings", "record-create"],
+    queryFn: () => apiCall("/api/v1/contractor-access/buildings"),
+    enabled: open,
+  })
+
+  const buildings = useMemo(
+    () =>
+      ((buildingsData?.data || []) as ContractorAccessBuilding[]).sort((a, b) =>
+        a.name.localeCompare(b.name),
+      ),
+    [buildingsData],
+  )
+
+  const resetForm = () => {
+    setName("")
+    setCompany("")
+    setBuildingId("")
+    setJobDescription("")
+    setMobile("")
+    setInAt("")
+    setOutAt("")
+  }
+
+  const createMutation = useMutation({
+    mutationFn: async () => {
+      if (!user?.condominio_id) {
+        throw new Error("User is not associated with a condominium")
+      }
+      if (
+        !name.trim() ||
+        !company.trim() ||
+        !buildingId ||
+        !jobDescription.trim()
+      ) {
+        throw new Error("Fill in all required fields")
+      }
+
+      const inAtIso = parseDateTimeLocalToIso(inAt)
+      const outAtIso = parseDateTimeLocalToIso(outAt)
+      if (!inAtIso || !outAtIso) throw new Error("Enter valid dates")
+      if (new Date(outAtIso).getTime() <= new Date(inAtIso).getTime()) {
+        throw new Error("Date out must be after date in")
+      }
+
+      const visit = (await apiCall("/api/v1/contractor-access/check-in", {
+        method: "POST",
+        body: {
+          condominio_id: user.condominio_id,
+          name: name.trim(),
+          company: company.trim(),
+          building_id: buildingId,
+          job_description: jobDescription.trim(),
+          mobile: mobile.trim() || "-",
+          in_at: inAtIso,
+        },
+      })) as { id: EntityId }
+
+      await apiCall("/api/v1/contractor-access/check-out", {
+        method: "POST",
+        body: {
+          condominio_id: user.condominio_id,
+          visit_id: visit.id,
+          out_at: outAtIso,
+        },
+      })
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ["contractor-visits"],
+      })
+      onOpenChange(false)
+      resetForm()
+      showSuccessToast("Contractor record created successfully")
+    },
+    onError: (error) => {
+      showErrorToast(
+        error instanceof Error
+          ? error.message
+          : "Failed to create contractor record",
+      )
+    },
+  })
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        onOpenChange(nextOpen)
+        if (!nextOpen) resetForm()
+      }}
+    >
+      <DialogContent className="border-[#e5e0dc] bg-white text-[#55311c] sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle className="text-[#55311c]">
+            Create contractor record
+          </DialogTitle>
+          <DialogDescription className="text-[rgba(0,0,0,0.7)]">
+            Add a contractor record by defining the contractor data, date in and date out.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <div>
+            <label
+              className="mb-1 block text-sm font-semibold text-[#55311c]"
+              htmlFor="contractor-record-name"
+            >
+              Name
+            </label>
+            <input
+              id="contractor-record-name"
+              type="text"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+            />
+          </div>
+          <div>
+            <label
+              className="mb-1 block text-sm font-semibold text-[#55311c]"
+              htmlFor="contractor-record-company"
+            >
+              Company
+            </label>
+            <input
+              id="contractor-record-company"
+              type="text"
+              value={company}
+              onChange={(event) => setCompany(event.target.value)}
+              className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+            />
+          </div>
+          <div>
+            <label
+              className="mb-1 block text-sm font-semibold text-[#55311c]"
+              htmlFor="contractor-record-building"
+            >
+              Building
+            </label>
+            <select
+              id="contractor-record-building"
+              value={buildingId}
+              onChange={(event) => setBuildingId(event.target.value)}
+              className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+            >
+              <option value="">Select a building</option>
+              {buildings.map((building) => (
+                <option key={building.id} value={String(building.id)}>
+                  {building.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label
+              className="mb-1 block text-sm font-semibold text-[#55311c]"
+              htmlFor="contractor-record-mobile"
+            >
+              Mobile
+            </label>
+            <input
+              id="contractor-record-mobile"
+              type="text"
+              value={mobile}
+              onChange={(event) => setMobile(event.target.value)}
+              className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+            />
+          </div>
+          <div className="md:col-span-2">
+            <label
+              className="mb-1 block text-sm font-semibold text-[#55311c]"
+              htmlFor="contractor-record-job-description"
+            >
+              Job description
+            </label>
+            <input
+              id="contractor-record-job-description"
+              type="text"
+              value={jobDescription}
+              onChange={(event) => setJobDescription(event.target.value)}
+              className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+            />
+          </div>
+          <div>
+            <label
+              className="mb-1 block text-sm font-semibold text-[#55311c]"
+              htmlFor="contractor-record-in-at"
+            >
+              Date in
+            </label>
+            <input
+              id="contractor-record-in-at"
+              type="datetime-local"
+              value={inAt}
+              onChange={(event) => setInAt(event.target.value)}
+              className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+            />
+          </div>
+          <div>
+            <label
+              className="mb-1 block text-sm font-semibold text-[#55311c]"
+              htmlFor="contractor-record-out-at"
+            >
+              Date out
+            </label>
+            <input
+              id="contractor-record-out-at"
+              type="datetime-local"
+              value={outAt}
+              onChange={(event) => setOutAt(event.target.value)}
+              className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+            />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <button
+            type="button"
+            onClick={() => onOpenChange(false)}
+            disabled={createMutation.isPending}
+            className="rounded border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => createMutation.mutate()}
+            disabled={createMutation.isPending}
+            className="rounded bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {createMutation.isPending ? "Saving..." : "Create"}
+          </button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function ContractorsContent() {
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
+  const { user } = useAuth()
   const [search, setSearch] = useState("")
   const [dateFrom, setDateFrom] = useState("")
   const [dateTo, setDateTo] = useState("")
+  const [selectedBuildings, setSelectedBuildings] = useState<string[]>([])
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [isMediaDialogOpen, setIsMediaDialogOpen] = useState(false)
   const [isInvoiceDialogOpen, setIsInvoiceDialogOpen] = useState(false)
-  const [contractorInvoiceHourEntries, setContractorInvoiceHourEntries] =
+  const [manualCheckoutVisit, setManualCheckoutVisit] =
+    useState<ContractorVisitAdmin | null>(null)
+  const [manualCheckoutTimeValue, setManualCheckoutTimeValue] = useState("")
+  const [isSavingManualCheckout, setIsSavingManualCheckout] = useState(false)
+  const [, setContractorInvoiceHourEntries] =
     useState<WorkerInvoiceHourEntry[]>(() =>
       readInvoiceHoursFromStorage(CONTRACTOR_INVOICE_HOURS_STORAGE_KEY),
     )
@@ -10610,16 +11237,41 @@ function ContractorsContent() {
         search: deferredSearch || undefined,
         date_from: dateFrom || undefined,
         date_to: dateTo || undefined,
-      }),
+    }),
     placeholderData: keepPreviousData,
   })
 
   const visits = data?.data || []
-  const totalVisits = data?.count || visits.length
-  const currentMonthKey = getCurrentMonthInputValue()
-  const contractorInvoiceHours = contractorInvoiceHourEntries
-    .filter((entry) => entry.monthKey === currentMonthKey)
-    .reduce((sum, entry) => sum + entry.hours, 0)
+  const buildingOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          visits
+            .map((visit) => visit.building_name?.trim())
+            .filter((value): value is string => Boolean(value)),
+        ),
+      ).sort((a, b) => a.localeCompare(b)),
+    [visits],
+  )
+  const filteredVisits = useMemo(() => {
+    if (selectedBuildings.length === 0) return visits
+    return visits.filter((visit) =>
+      selectedBuildings.includes(visit.building_name),
+    )
+  }, [selectedBuildings, visits])
+  const totalVisits = filteredVisits.length
+  const selectedBuildingsLabel =
+    selectedBuildings.length === 0
+      ? "All buildings"
+      : selectedBuildings.length === 1
+        ? selectedBuildings[0]
+        : `${selectedBuildings.length} buildings selected`
+
+  useEffect(() => {
+    setSelectedBuildings((previous) =>
+      previous.filter((building) => buildingOptions.includes(building)),
+    )
+  }, [buildingOptions])
 
   const contractorMediaMutation = useMutation({
     mutationFn: ({
@@ -10707,6 +11359,88 @@ function ContractorsContent() {
     })
   }
 
+  const resetManualCheckout = () => {
+    setManualCheckoutVisit(null)
+    setManualCheckoutTimeValue("")
+  }
+
+  const handleManualCheckoutDialogChange = (open: boolean) => {
+    if (!open) resetManualCheckout()
+  }
+
+  const handleOpenManualCheckout = (visit: ContractorVisitAdmin) => {
+    setManualCheckoutVisit(visit)
+    setManualCheckoutTimeValue("")
+  }
+
+  const handleSaveManualCheckout = async () => {
+    if (!manualCheckoutVisit) return
+
+    if (!user?.condominio_id) {
+      showErrorToast("User is not associated with a condominium")
+      return
+    }
+
+    if (!manualCheckoutTimeValue) {
+      showErrorToast("Time is required")
+      return
+    }
+
+    const [hoursRaw, minutesRaw] = manualCheckoutTimeValue.split(":")
+    const hours = Number(hoursRaw)
+    const minutes = Number(minutesRaw)
+    if (
+      Number.isNaN(hours) ||
+      Number.isNaN(minutes) ||
+      hours < 0 ||
+      hours > 23 ||
+      minutes < 0 ||
+      minutes > 59
+    ) {
+      showErrorToast("Invalid time")
+      return
+    }
+
+    const referenceDate = new Date(manualCheckoutVisit.in_at)
+    if (Number.isNaN(referenceDate.getTime())) {
+      showErrorToast("Invalid Time IN")
+      return
+    }
+
+    const checkoutDate = new Date(referenceDate)
+    checkoutDate.setHours(hours, minutes, 0, 0)
+
+    if (checkoutDate.getTime() <= referenceDate.getTime()) {
+      showErrorToast("Time OUT must be after Time IN")
+      return
+    }
+
+    try {
+      setIsSavingManualCheckout(true)
+      await apiCall("/api/v1/contractor-access/check-out", {
+        method: "POST",
+        body: {
+          condominio_id: user.condominio_id,
+          visit_id: manualCheckoutVisit.id,
+          out_at: checkoutDate.toISOString(),
+        },
+      })
+      await queryClient.invalidateQueries({
+        queryKey: ["contractor-visits"],
+      })
+      resetManualCheckout()
+      showSuccessToast("Contractor Time OUT created successfully")
+    } catch (error) {
+      showErrorToast(
+        error instanceof Error
+          ? error.message
+          : "Failed to create contractor Time OUT",
+      )
+    } finally {
+      setIsSavingManualCheckout(false)
+    }
+  }
+
   const formatDate = (value?: string | null) => {
     if (!value) return "-"
     const parsed = new Date(value)
@@ -10727,7 +11461,7 @@ function ContractorsContent() {
   return (
     <div className="mx-auto max-w-7xl space-y-6">
       <div className="rounded-lg bg-white p-6 shadow-md">
-        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
               Contractors
@@ -10737,65 +11471,126 @@ function ContractorsContent() {
               media files for follow-up.
             </p>
           </div>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <div className="sm:col-span-3 flex flex-col gap-2 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-3 sm:flex-row sm:items-center sm:justify-between">
-              <span className="text-sm font-semibold text-[#217a4b]">
-                Invoices launched {formatInvoiceHours(contractorInvoiceHours)}
-              </span>
-              <button
-                type="button"
-                onClick={() => setIsInvoiceDialogOpen(true)}
-                className="rounded-lg border border-[#8c7569] bg-white px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
-              >
-                Invoice
-              </button>
-            </div>
-            <div>
-              <label
-                htmlFor="contractor-search"
-                className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
-              >
-                Search
-              </label>
-              <input
-                id="contractor-search"
-                type="text"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Name, company, building or job"
-                className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
-              />
-            </div>
-            <div>
-              <label
-                htmlFor="contractor-date-from"
-                className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
-              >
-                Date from
-              </label>
-              <input
-                id="contractor-date-from"
-                type="date"
-                value={dateFrom}
-                onChange={(event) => setDateFrom(event.target.value)}
-                className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
-              />
-            </div>
-            <div>
-              <label
-                htmlFor="contractor-date-to"
-                className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
-              >
-                Date to
-              </label>
-              <input
-                id="contractor-date-to"
-                type="date"
-                min={dateFrom || undefined}
-                value={dateTo}
-                onChange={(event) => setDateTo(event.target.value)}
-                className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
-              />
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setIsCreateDialogOpen(true)}
+              className="rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c]"
+            >
+              + Add
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsInvoiceDialogOpen(true)}
+              className="rounded-lg border border-[#8c7569] bg-white px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+            >
+              Invoice
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-lg bg-white p-6 shadow-md">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
+          <div className="lg:col-span-2">
+            <label
+              htmlFor="contractor-search"
+              className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+            >
+              Search
+            </label>
+            <input
+              id="contractor-search"
+              type="text"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Name, company or job"
+              className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+            />
+          </div>
+          <div>
+            <label
+              htmlFor="contractor-date-from"
+              className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+            >
+              Date from
+            </label>
+            <input
+              id="contractor-date-from"
+              type="date"
+              value={dateFrom}
+              onChange={(event) => setDateFrom(event.target.value)}
+              className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+            />
+          </div>
+          <div>
+            <label
+              htmlFor="contractor-date-to"
+              className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+            >
+              Date to
+            </label>
+            <input
+              id="contractor-date-to"
+              type="date"
+              min={dateFrom || undefined}
+              value={dateTo}
+              onChange={(event) => setDateTo(event.target.value)}
+              className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+            />
+          </div>
+          <div className="lg:col-span-1">
+            <label
+              htmlFor="contractor-building-filter"
+              className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+            >
+              Building
+            </label>
+            <div className="flex flex-wrap items-center gap-3">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    id="contractor-building-filter"
+                    type="button"
+                    className="w-full min-w-0 rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-left text-sm text-[#55311c] transition-all duration-200 hover:bg-[#f8f5f3]"
+                  >
+                    {selectedBuildingsLabel}
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-64">
+                  {buildingOptions.length === 0 ? (
+                    <DropdownMenuItem disabled>
+                      No buildings found
+                    </DropdownMenuItem>
+                  ) : (
+                    buildingOptions.map((building) => (
+                      <DropdownMenuCheckboxItem
+                        key={building}
+                        checked={selectedBuildings.includes(building)}
+                        onCheckedChange={(checked) => {
+                          setSelectedBuildings((previous) =>
+                            checked
+                              ? [...previous, building]
+                              : previous.filter((item) => item !== building),
+                          )
+                        }}
+                        onSelect={(event) => event.preventDefault()}
+                      >
+                        {building}
+                      </DropdownMenuCheckboxItem>
+                    ))
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              {selectedBuildings.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedBuildings([])}
+                  className="rounded-lg border border-[#d9d0ca] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+                >
+                  Clear building filter
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -10803,6 +11598,70 @@ function ContractorsContent() {
           Showing {totalVisits} contractor record(s).
         </p>
       </div>
+
+      <ContractorRecordCreateDialog
+        open={isCreateDialogOpen}
+        onOpenChange={setIsCreateDialogOpen}
+      />
+
+      <Dialog
+        open={Boolean(manualCheckoutVisit)}
+        onOpenChange={handleManualCheckoutDialogChange}
+      >
+        <DialogContent className="border-[#e5e0dc] bg-white text-[#55311c] sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-[#55311c]">
+              Add contractor Time OUT
+            </DialogTitle>
+            <DialogDescription className="text-[rgba(0,0,0,0.7)]">
+              Enter the Time OUT for{" "}
+              {manualCheckoutVisit ? formatDate(manualCheckoutVisit.in_at) : "-"}
+              . It must be after{" "}
+              <span className="font-semibold text-[#55311c]">
+                {manualCheckoutVisit
+                  ? formatTime(manualCheckoutVisit.in_at)
+                  : "-"}
+              </span>
+              .
+            </DialogDescription>
+          </DialogHeader>
+
+          <div>
+            <label
+              className="block text-sm font-semibold text-[#55311c]"
+              htmlFor="contractor-manual-time-out"
+            >
+              Time OUT
+            </label>
+            <input
+              id="contractor-manual-time-out"
+              type="time"
+              value={manualCheckoutTimeValue}
+              onChange={(event) => setManualCheckoutTimeValue(event.target.value)}
+              className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+            />
+          </div>
+
+          <DialogFooter>
+            <button
+              type="button"
+              onClick={resetManualCheckout}
+              disabled={isSavingManualCheckout}
+              className="w-full rounded-lg border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleSaveManualCheckout}
+              disabled={isSavingManualCheckout}
+              className="w-full rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+            >
+              {isSavingManualCheckout ? "Saving..." : "Confirm"}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <div className="rounded-lg bg-white p-6 shadow-md">
         <div className="overflow-x-auto">
@@ -10852,7 +11711,7 @@ function ContractorsContent() {
                   </td>
                 </tr>
               )}
-              {!isLoading && visits.length === 0 && (
+              {!isLoading && filteredVisits.length === 0 && (
                 <tr>
                   <td
                     colSpan={10}
@@ -10863,7 +11722,7 @@ function ContractorsContent() {
                 </tr>
               )}
               {!isLoading &&
-                visits.map((visit) => {
+                filteredVisits.map((visit) => {
                   const mediaSlots = getContractorVisitMediaSlots(visit)
                     .map((slot, index) => ({
                       ...slot,
@@ -10881,7 +11740,19 @@ function ContractorsContent() {
                         {formatTime(visit.in_at)}
                       </td>
                       <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
-                        {formatTime(visit.out_at)}
+                        <div className="flex items-center justify-between gap-2">
+                          {visit.out_at ? (
+                            <span>{formatTime(visit.out_at)}</span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenManualCheckout(visit)}
+                              className="rounded border border-[#8c7569] px-2 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+                            >
+                              Add Time OUT
+                            </button>
+                          )}
+                        </div>
                       </td>
                       <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
                         {visit.name}
@@ -11243,6 +12114,7 @@ function ContractorQrCodesContent() {
 }
 
 function CaretakerQrCodesContent() {
+  const { user } = useAuth()
   const baseUrl = useMemo(() => {
     if (typeof window === "undefined") return ""
     return window.location.origin
@@ -11257,7 +12129,7 @@ function CaretakerQrCodesContent() {
     let isActive = true
 
     const generateQRCodes = async () => {
-      if (!baseUrl) {
+      if (!baseUrl || !user?.condominio_id) {
         setQrMap({})
         return
       }
@@ -11268,7 +12140,7 @@ function CaretakerQrCodesContent() {
         [
           {
             key: "work-time",
-            link: `${baseUrl}/caretaker-access?mode=work-time`,
+            link: `${baseUrl}/caretaker-access?mode=work-time&condominioId=${encodeURIComponent(String(user.condominio_id))}`,
           },
         ].map(async (entry) => {
           const dataUrl = await QRCode.toDataURL(entry.link, {
@@ -11294,7 +12166,7 @@ function CaretakerQrCodesContent() {
     return () => {
       isActive = false
     }
-  }, [baseUrl])
+  }, [baseUrl, user?.condominio_id])
 
   return (
     <div className="mx-auto max-w-7xl">
@@ -11894,6 +12766,7 @@ function CleanerContent() {
   const [activeSubTab, setActiveSubTab] = useState<"summary" | "register">(
     "summary",
   )
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [isInvoiceDialogOpen, setIsInvoiceDialogOpen] = useState(false)
   const [isInvoiceHistoryOpen, setIsInvoiceHistoryOpen] = useState(false)
 
@@ -11910,6 +12783,13 @@ function CleanerContent() {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsCreateDialogOpen(true)}
+              className="rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c]"
+            >
+              + Add
+            </button>
             {/* <button
               type="button"
               onClick={() => setIsInvoiceDialogOpen(true)}
@@ -11956,6 +12836,11 @@ function CleanerContent() {
         <CleanerRegister />
       )}
 
+      <CleanerRecordCreateDialog
+        open={isCreateDialogOpen}
+        onOpenChange={setIsCreateDialogOpen}
+      />
+
       <WorkerSimpleInvoiceDialog
         open={isInvoiceDialogOpen}
         onOpenChange={setIsInvoiceDialogOpen}
@@ -11979,6 +12864,7 @@ function CaretakerContent() {
     "summary" | "bins" | "register" | "schedules"
   >("summary")
   const [reportTrigger, setReportTrigger] = useState(0)
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [isInvoiceDialogOpen, setIsInvoiceDialogOpen] = useState(false)
   const [isInvoiceHistoryOpen, setIsInvoiceHistoryOpen] = useState(false)
 
@@ -12000,6 +12886,13 @@ function CaretakerContent() {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsCreateDialogOpen(true)}
+              className="rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c]"
+            >
+              + Add
+            </button>
             <button
               type="button"
               onClick={() => setIsInvoiceDialogOpen(true)}
@@ -12050,6 +12943,10 @@ function CaretakerContent() {
       <CaretakerSummary
         activeTab={activeSubTab === "bins" ? "bins" : "summary"}
         reportTrigger={reportTrigger}
+      />
+      <CaretakerRecordCreateDialog
+        open={isCreateDialogOpen}
+        onOpenChange={setIsCreateDialogOpen}
       />
       {activeSubTab === "register" && <CaretakerRegister />}
       {activeSubTab === "schedules" && <CaretakerSchedules />}
@@ -14605,12 +15502,15 @@ function CleanerSummary() {
   }
 
   const formatUsed = (inValue?: string | null, outValue?: string | null) => {
-    if (!inValue || !outValue) return "-"
+    if (!inValue) return "-"
+    if (!outValue) return "No exit this day"
     const start = new Date(inValue).getTime()
     const end = new Date(outValue).getTime()
     if (Number.isNaN(start) || Number.isNaN(end) || end < start) return "-"
+    if (toIsoDateString(new Date(inValue)) !== toIsoDateString(new Date(outValue))) {
+      return "No exit this day"
+    }
     const diffMinutes = Math.floor((end - start) / 60000)
-    if (diffMinutes >= 1440) return "No exit this day"
     const hours = Math.floor(diffMinutes / 60)
     const minutes = diffMinutes % 60
     if (hours <= 0) return `${minutes}m`
@@ -14877,8 +15777,8 @@ function CleanerSummary() {
       outRecordId,
       outOriginalIso: outIsoValue,
     })
-    setEditedCleanerInTimeValue(toTimeInputValue(inIsoValue))
-    setEditedCleanerOutTimeValue(toTimeInputValue(outIsoValue))
+    setEditedCleanerInTimeValue(toDateTimeLocalInputValue(inIsoValue))
+    setEditedCleanerOutTimeValue(toDateTimeLocalInputValue(outIsoValue))
   }
 
   const handleSaveCleanerRecordEdit = async () => {
@@ -14888,6 +15788,8 @@ function CleanerSummary() {
       setIsSavingCleanerRecordEdit(true)
 
       const updates: Promise<unknown>[] = []
+      let nextInIso = editingCleanerRecord.inOriginalIso
+      let nextOutIso = editingCleanerRecord.outOriginalIso
 
       if (
         editingCleanerRecord.inRecordId &&
@@ -14898,32 +15800,17 @@ function CleanerSummary() {
           return
         }
 
-        const [hoursRaw, minutesRaw] = editedCleanerInTimeValue.split(":")
-        const hours = Number(hoursRaw)
-        const minutes = Number(minutesRaw)
-        if (
-          Number.isNaN(hours) ||
-          Number.isNaN(minutes) ||
-          hours < 0 ||
-          hours > 23 ||
-          minutes < 0 ||
-          minutes > 59
-        ) {
+        const parsedInIso = parseDateTimeLocalToIso(editedCleanerInTimeValue)
+        if (!parsedInIso) {
           showErrorToast("Invalid Time IN")
           return
         }
-
-        const nextInDate = new Date(editingCleanerRecord.inOriginalIso)
-        if (Number.isNaN(nextInDate.getTime())) {
-          showErrorToast("Invalid Time IN record date")
-          return
-        }
-        nextInDate.setHours(hours, minutes, 0, 0)
+        nextInIso = parsedInIso
 
         updates.push(
           apiCall(`/api/v1/acess/${editingCleanerRecord.inRecordId}`, {
             method: "PATCH",
-            body: { data: nextInDate.toISOString() },
+            body: { data: parsedInIso },
           }),
         )
       }
@@ -14937,34 +15824,32 @@ function CleanerSummary() {
           return
         }
 
-        const [hoursRaw, minutesRaw] = editedCleanerOutTimeValue.split(":")
-        const hours = Number(hoursRaw)
-        const minutes = Number(minutesRaw)
-        if (
-          Number.isNaN(hours) ||
-          Number.isNaN(minutes) ||
-          hours < 0 ||
-          hours > 23 ||
-          minutes < 0 ||
-          minutes > 59
-        ) {
+        const parsedOutIso = parseDateTimeLocalToIso(editedCleanerOutTimeValue)
+        if (!parsedOutIso) {
           showErrorToast("Invalid Time OUT")
           return
         }
-
-        const nextOutDate = new Date(editingCleanerRecord.outOriginalIso)
-        if (Number.isNaN(nextOutDate.getTime())) {
-          showErrorToast("Invalid Time OUT record date")
-          return
-        }
-        nextOutDate.setHours(hours, minutes, 0, 0)
+        nextOutIso = parsedOutIso
 
         updates.push(
           apiCall(`/api/v1/acess/${editingCleanerRecord.outRecordId}`, {
             method: "PATCH",
-            body: { data: nextOutDate.toISOString() },
+            body: { data: parsedOutIso },
           }),
         )
+      }
+
+      if (nextInIso && nextOutIso) {
+        const nextInTime = new Date(nextInIso).getTime()
+        const nextOutTime = new Date(nextOutIso).getTime()
+        if (
+          Number.isNaN(nextInTime) ||
+          Number.isNaN(nextOutTime) ||
+          nextOutTime <= nextInTime
+        ) {
+          showErrorToast("Time OUT must be after Time IN")
+          return
+        }
       }
 
       await Promise.all(updates)
@@ -15596,7 +16481,7 @@ function CleanerSummary() {
                     </label>
                     <input
                       id="cleaner-edit-time-in"
-                      type="time"
+                      type="datetime-local"
                       value={editedCleanerInTimeValue}
                       onChange={(event) =>
                         setEditedCleanerInTimeValue(event.target.value)
@@ -15616,7 +16501,7 @@ function CleanerSummary() {
                     </label>
                     <input
                       id="cleaner-edit-time-out"
-                      type="time"
+                      type="datetime-local"
                       value={editedCleanerOutTimeValue}
                       onChange={(event) =>
                         setEditedCleanerOutTimeValue(event.target.value)

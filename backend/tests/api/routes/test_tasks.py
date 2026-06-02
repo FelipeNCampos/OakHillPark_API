@@ -94,6 +94,7 @@ def test_tasks_lifecycle(client: TestClient, db: Session) -> None:
         "description": "Block B - flat 12",
         "assigned_to_user_id": str(caretaker.id),
         "building_id": str(building.id),
+        "priority": 1,
     }
     create_task = client.post(
         f"{settings.API_V1_STR}/tasks/",
@@ -106,6 +107,7 @@ def test_tasks_lifecycle(client: TestClient, db: Session) -> None:
     assert re.fullmatch(r"task-\d{3,}", task["code"])
     assert task["building_id"] == str(building.id)
     assert task["building_label"] == building.nome
+    assert task["priority"] == 1
 
     caretaker_password = random_lower_string()
     caretaker = crud.update_user(
@@ -211,6 +213,96 @@ def test_task_code_auto_increment(client: TestClient, db: Session) -> None:
     second_match = re.fullmatch(r"task-(\d{3,})", second_code)
     assert second_match
     assert int(second_match.group(1)) == int(first_match.group(1)) + 1
+
+
+def test_tasks_are_ordered_by_priority(client: TestClient, db: Session) -> None:
+    _, _, caretaker = _ensure_condominio_and_users(db)
+
+    manager_headers = user_authentication_headers(
+        client=client,
+        email=settings.FIRST_SUPERUSER,
+        password=settings.FIRST_SUPERUSER_PASSWORD,
+    )
+
+    low_priority = client.post(
+        f"{settings.API_V1_STR}/tasks/",
+        headers=manager_headers,
+        json={
+            "title": "Low priority task",
+            "description": "",
+            "assigned_to_user_id": str(caretaker.id),
+            "priority": 3,
+        },
+    )
+    assert low_priority.status_code == 200
+    high_priority = client.post(
+        f"{settings.API_V1_STR}/tasks/",
+        headers=manager_headers,
+        json={
+            "title": "High priority task",
+            "description": "",
+            "assigned_to_user_id": str(caretaker.id),
+            "priority": 1,
+        },
+    )
+    assert high_priority.status_code == 200
+
+    list_response = client.get(f"{settings.API_V1_STR}/tasks/", headers=manager_headers)
+    assert list_response.status_code == 200
+    task_ids = [item["id"] for item in list_response.json()["data"]]
+    assert task_ids.index(high_priority.json()["id"]) < task_ids.index(
+        low_priority.json()["id"]
+    )
+
+
+def test_reminder_created_task_uses_configured_priority(
+    client: TestClient, db: Session
+) -> None:
+    _ensure_condominio_and_users(db)
+
+    manager_headers = user_authentication_headers(
+        client=client,
+        email=settings.FIRST_SUPERUSER,
+        password=settings.FIRST_SUPERUSER_PASSWORD,
+    )
+
+    create_reminder = client.post(
+        f"{settings.API_V1_STR}/reminds/",
+        headers=manager_headers,
+        json={
+            "name": "Priority reminder",
+            "schedule_unit": "week",
+            "schedule_mode": "fixed",
+            "weekday_mask": 2,
+            "is_active": True,
+            "action_sms": False,
+            "action_task": True,
+            "task_title": "Reminder priority task",
+            "task_description": "",
+            "task_priority": 1,
+        },
+    )
+    assert create_reminder.status_code == 201
+    assert create_reminder.json()["task_priority"] == 1
+
+    trigger_response = client.post(
+        f"{settings.API_V1_STR}/reminds/{create_reminder.json()['id']}/trigger-now",
+        headers=manager_headers,
+    )
+    assert trigger_response.status_code == 200
+    assert trigger_response.json()["tasks_created"] == 1
+
+    list_response = client.get(f"{settings.API_V1_STR}/tasks/", headers=manager_headers)
+    assert list_response.status_code == 200
+    created_task = next(
+        item
+        for item in list_response.json()["data"]
+        if item["title"] == "Reminder priority task"
+    )
+    assert created_task["priority"] == 1
+    assigned_user = db.get(User, created_task["assigned_to_user_id"])
+    assert assigned_user is not None
+    assert assigned_user.cargo == 1
 
 
 def test_task_with_creation_photo_requires_completion_photo(
@@ -411,6 +503,7 @@ def test_public_tasks_access_allows_read_message_and_done(
         json={
             "title": "Public QR Task",
             "description": "Public flow",
+            "image_data": VALID_IMAGE_DATA,
             "assigned_to_user_id": str(caretaker.id),
             "building_id": str(building.id),
         },

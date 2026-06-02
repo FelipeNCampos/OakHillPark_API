@@ -1052,6 +1052,7 @@ def create_contractor_visit(
     ensure_contractor_visit_schema(session)
     _require_condominio(session, payload.condominio_id)
     building = _require_building(session, payload.condominio_id, payload.building_id)
+    check_in_at = payload.in_at or datetime.now(timezone.utc)
 
     item = ContractorVisit(
         name=payload.name.strip(),
@@ -1059,6 +1060,7 @@ def create_contractor_visit(
         block=building.nome,
         job_description=payload.job_description.strip(),
         mobile=payload.mobile.strip(),
+        in_at=check_in_at,
         condominio_id=payload.condominio_id,
     )
     session.add(item)
@@ -1084,7 +1086,14 @@ def close_contractor_visit(
     if item.out_at is not None:
         raise HTTPException(status_code=400, detail="Contractor already checked out")
 
-    item.out_at = datetime.now(timezone.utc)
+    check_out_at = payload.out_at or datetime.now(timezone.utc)
+    if check_out_at <= item.in_at:
+        raise HTTPException(
+            status_code=400,
+            detail="Contractor check out must be after check in",
+        )
+
+    item.out_at = check_out_at
     session.add(item)
     session.commit()
     session.refresh(item)

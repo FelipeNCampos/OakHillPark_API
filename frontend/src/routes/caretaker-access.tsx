@@ -13,6 +13,7 @@ const searchSchema = z.object({
   buildingId: z.string().optional().catch(""),
   building: z.string().optional().catch(""),
   buildingName: z.string().optional().catch(""),
+  condominioId: z.string().optional().catch(""),
 })
 
 const WORK_TIME_LABEL = "Work Time"
@@ -81,7 +82,8 @@ export const Route = createFileRoute("/caretaker-access")({
 function CaretakerAccess() {
   const { showSuccessToast, showErrorToast } = useCustomToast()
   const search = Route.useSearch() as z.infer<typeof searchSchema>
-  const { op, operation, mode, buildingId, building, buildingName } = search
+  const { op, operation, mode, buildingId, building, buildingName, condominioId } =
+    search
   const [showConfirmation, setShowConfirmation] = useState(false)
   const isWorkTimeMode = (mode || "").toLowerCase() === "work-time"
 
@@ -193,6 +195,16 @@ function CaretakerAccess() {
       setShowConfirmation(true)
       setTimeout(() => {
         if (typeof window !== "undefined") {
+          if (shouldRedirectToPublicTasks) {
+            const params = new URLSearchParams()
+            if (condominioId) {
+              params.set("condominioId", condominioId)
+            }
+            window.location.href = `/tasks-access${
+              params.size ? `?${params.toString()}` : ""
+            }`
+            return
+          }
           window.close()
           window.location.href = "about:blank"
         }
@@ -216,6 +228,8 @@ function CaretakerAccess() {
     Boolean(operationLabel) &&
     (isWorkTimeMode || Boolean(buildingId)) &&
     isSelectedOperationAllowed
+  const shouldRedirectToPublicTasks =
+    isWorkTimeMode && selectedOperation === "in"
 
   const handleConfirm = () => {
     if (!canSubmit) {
@@ -335,7 +349,9 @@ function CaretakerAccess() {
               Record confirmed
             </h2>
             <p className="mt-2 text-sm text-[rgba(0,0,0,0.7)]">
-              This page will close in 5 seconds.
+              {shouldRedirectToPublicTasks
+                ? "You will be redirected to Tasks in 5 seconds."
+                : "This page will close in 5 seconds."}
             </p>
           </div>
         </div>

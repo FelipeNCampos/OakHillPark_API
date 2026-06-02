@@ -9,6 +9,8 @@ import useCustomToast from "@/hooks/useCustomToast"
 type TaskStatus = "todo" | "done"
 type ApiTaskStatus = TaskStatus | "paused"
 type BoardMode = "manager" | "caretaker" | "public"
+type TaskPriority = 1 | 2 | 3
+type TaskPriorityFilter = "all" | "1" | "2" | "3"
 
 type ApiTask = {
   id: string
@@ -18,6 +20,7 @@ type ApiTask = {
   cover_image_data?: string | null
   requires_completion_image: boolean
   status: ApiTaskStatus
+  priority: TaskPriority
   assigned_to_user_id: string
   assigned_to_name: string
   building_id?: string | null
@@ -118,6 +121,11 @@ const statusLabel: Record<TaskStatus, string> = {
 }
 
 const TASK_STATUS_ORDER: TaskStatus[] = ["todo", "done"]
+const TASK_PRIORITY_OPTIONS: Array<{ value: TaskPriority; label: string }> = [
+  { value: 1, label: "Priority 1" },
+  { value: 2, label: "Priority 2" },
+  { value: 3, label: "Priority 3" },
+]
 
 const STATUS_EVENT_PREFIX = "[STATUS]"
 const COVER_IMAGE_PREFIX = "[COVER_IMAGE]"
@@ -189,6 +197,22 @@ const optimizeTaskImage = async (file: File) => {
 const normalizeTaskStatus = (status: ApiTaskStatus): TaskStatus =>
   status === "paused" ? "todo" : status
 
+const normalizeTaskPriority = (
+  priority: number | null | undefined,
+): TaskPriority => (priority === 1 || priority === 3 ? priority : 2)
+
+const taskPriorityCardClass: Record<TaskPriority, string> = {
+  1: "border-[#e0b8a8] bg-[#fff6f2] hover:bg-[#fff1eb]",
+  2: "border-[#d8d6b8] bg-[#fcfbef] hover:bg-[#f8f6e5]",
+  3: "border-[#bfd5cc] bg-[#f2faf6] hover:bg-[#ebf6f1]",
+}
+
+const taskPriorityBadgeClass: Record<TaskPriority, string> = {
+  1: "border-[#e0b8a8] bg-[#fae7df] text-[#7a4634]",
+  2: "border-[#d8d6b8] bg-[#efedcf] text-[#665f2f]",
+  3: "border-[#bfd5cc] bg-[#dcefe7] text-[#3f6655]",
+}
+
 const getStatusEventLabel = (text?: string | null): string => {
   if (!text) return ""
   const payload = text.replace(STATUS_EVENT_PREFIX, "").trim()
@@ -240,7 +264,10 @@ export function TasksBoard({
   const [newTitle, setNewTitle] = useState("")
   const [newImageData, setNewImageData] = useState<string | null>(null)
   const [newBuildingId, setNewBuildingId] = useState("common_area")
+  const [newPriority, setNewPriority] = useState<TaskPriority>(2)
   const [buildingFilter, setBuildingFilter] = useState("all")
+  const [priorityFilter, setPriorityFilter] =
+    useState<TaskPriorityFilter>("all")
   const [chatText, setChatText] = useState("")
   const [chatImageData, setChatImageData] = useState<string | null>(null)
   const [showCompletionPhotoPrompt, setShowCompletionPhotoPrompt] =
@@ -251,6 +278,7 @@ export function TasksBoard({
 
   const isManager = mode === "manager"
   const isPublic = mode === "public"
+  const shouldRequireCompletionPhoto = !isManager && !isPublic
 
   const resolveTaskEndpoint = (path = "") =>
     buildTaskApiPath(mode, publicCondominioId, path)
@@ -286,12 +314,29 @@ export function TasksBoard({
       (tasksData?.data || []).map((task) => ({
         ...task,
         status: normalizeTaskStatus(task.status as ApiTaskStatus),
+        priority: normalizeTaskPriority(task.priority),
       })),
     [tasksData],
   )
   const selectedTaskSummary = tasks.find((t) => t.id === selectedTaskId) || null
-  const commonAreaLabel = taskBoardMetadata?.common_area_label || "Common areas"
-  const buildingOptions = taskBoardMetadata?.buildings || []
+  const publicBuildingOptions = useMemo(() => {
+    const optionMap = new Map<string, string>()
+    tasks.forEach((task) => {
+      if (task.status !== "todo") return
+      if (!task.building_id) return
+      optionMap.set(task.building_id, task.building_label)
+    })
+    return Array.from(optionMap, ([id, name]) => ({ id, name })).sort((a, b) =>
+      a.name.localeCompare(b.name),
+    )
+  }, [tasks])
+  const commonAreaLabel =
+    taskBoardMetadata?.common_area_label ||
+    tasks.find((task) => !task.building_id)?.building_label ||
+    "Common areas"
+  const buildingOptions = isManager
+    ? taskBoardMetadata?.buildings || []
+    : publicBuildingOptions
   const visibleBuildingOptions = useMemo(
     () =>
       buildingOptions.filter(
@@ -300,13 +345,24 @@ export function TasksBoard({
       ),
     [buildingOptions],
   )
+  const hasCommonAreaTasks = useMemo(
+    () => tasks.some((task) => task.status === "todo" && !task.building_id),
+    [tasks],
+  )
   const filteredTasks = useMemo(() => {
-    if (buildingFilter === "all") return tasks
+    let nextTasks = tasks
     if (buildingFilter === "common_area") {
-      return tasks.filter((task) => !task.building_id)
+      nextTasks = nextTasks.filter((task) => !task.building_id)
+    } else if (buildingFilter !== "all") {
+      nextTasks = nextTasks.filter((task) => task.building_id === buildingFilter)
     }
-    return tasks.filter((task) => task.building_id === buildingFilter)
-  }, [buildingFilter, tasks])
+    if (priorityFilter !== "all") {
+      nextTasks = nextTasks.filter(
+        (task) => String(task.priority) === priorityFilter,
+      )
+    }
+    return nextTasks
+  }, [buildingFilter, priorityFilter, tasks])
 
   useEffect(() => {
     if (
@@ -349,6 +405,7 @@ export function TasksBoard({
     return {
       ...task,
       status: normalizeTaskStatus(task.status as ApiTaskStatus),
+      priority: normalizeTaskPriority(task.priority),
     }
   }, [selectedTaskData, selectedTaskSummary])
 
@@ -396,6 +453,7 @@ export function TasksBoard({
           title: newTitle.trim(),
           description: "",
           image_data: newImageData,
+          priority: newPriority,
           building_id:
             newBuildingId === "common_area" ? null : newBuildingId || null,
         },
@@ -405,6 +463,7 @@ export function TasksBoard({
       setNewTitle("")
       setNewImageData(null)
       setNewBuildingId("common_area")
+      setNewPriority(2)
       queryClient.invalidateQueries({ queryKey: ["tasks"] })
     },
     onError: (error: unknown) => {
@@ -553,7 +612,11 @@ export function TasksBoard({
   const moveTaskToStatus = (task: Task, nextStatus: TaskStatus) => {
     if (task.status === nextStatus || updateStatusMutation.isPending) return
     if (!isManager && task.status === "done") return
-    if (nextStatus === "done" && !isManager && task.requires_completion_image) {
+    if (
+      nextStatus === "done" &&
+      shouldRequireCompletionPhoto &&
+      task.requires_completion_image
+    ) {
       openTaskPopup(task.id, { promptCompletionPhoto: true })
       return
     }
@@ -596,7 +659,7 @@ export function TasksBoard({
       return
     }
     if (
-      !isManager &&
+      shouldRequireCompletionPhoto &&
       selectedTask.requires_completion_image &&
       !chatImageData
     ) {
@@ -661,30 +724,57 @@ export function TasksBoard({
               {subtitle}
             </p>
           )}
-          {isManager && (
-            <div className="w-full sm:w-72">
-              <label
-                htmlFor="tasks-building-filter"
-                className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
-              >
-                Building filter
-              </label>
-              <select
-                id="tasks-building-filter"
-                value={buildingFilter}
-                onChange={(e) => setBuildingFilter(e.target.value)}
-                className="w-full rounded border border-[#ddd] px-3 py-2 text-sm text-black"
-              >
-                <option value="all">All buildings</option>
-                <option value="common_area">
-                  {commonAreaLabel} (Common areas)
-                </option>
-                {visibleBuildingOptions.map((building) => (
-                  <option key={building.id} value={building.id}>
-                    {building.name}
-                  </option>
-                ))}
-              </select>
+          {(isManager || isPublic) && (
+            <div className="grid w-full gap-3 sm:w-[34rem] sm:grid-cols-2">
+              <div>
+                <label
+                  htmlFor="tasks-building-filter"
+                  className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+                >
+                  Building filter
+                </label>
+                <select
+                  id="tasks-building-filter"
+                  value={buildingFilter}
+                  onChange={(e) => setBuildingFilter(e.target.value)}
+                  className="w-full rounded border border-[#ddd] px-3 py-2 text-sm text-black"
+                >
+                  <option value="all">All buildings</option>
+                  {(isManager || hasCommonAreaTasks) && (
+                    <option value="common_area">
+                      {commonAreaLabel} (Common areas)
+                    </option>
+                  )}
+                  {visibleBuildingOptions.map((building) => (
+                    <option key={building.id} value={building.id}>
+                      {building.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label
+                  htmlFor="tasks-priority-filter"
+                  className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+                >
+                  Priority filter
+                </label>
+                <select
+                  id="tasks-priority-filter"
+                  value={priorityFilter}
+                  onChange={(e) =>
+                    setPriorityFilter(e.target.value as TaskPriorityFilter)
+                  }
+                  className="w-full rounded border border-[#ddd] px-3 py-2 text-sm text-black"
+                >
+                  <option value="all">All priorities</option>
+                  {TASK_PRIORITY_OPTIONS.map((option) => (
+                    <option key={option.value} value={String(option.value)}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
           )}
         </div>
@@ -693,7 +783,7 @@ export function TasksBoard({
       {isManager && (
         <div className="rounded-lg bg-white p-4 shadow-md sm:p-6">
           <h3 className="mb-3 text-lg font-bold text-[#55311c]">Create task</h3>
-          <div className="grid gap-3 md:grid-cols-3">
+          <div className="grid gap-3 md:grid-cols-4">
             <input
               value={newTitle}
               onChange={(e) => setNewTitle(e.target.value)}
@@ -711,6 +801,19 @@ export function TasksBoard({
               {visibleBuildingOptions.map((building) => (
                 <option key={building.id} value={building.id}>
                   {building.name}
+                </option>
+              ))}
+            </select>
+            <select
+              value={newPriority}
+              onChange={(e) =>
+                setNewPriority(Number(e.target.value) as TaskPriority)
+              }
+              className="rounded border border-[#ddd] px-3 py-2 text-sm text-black"
+            >
+              {TASK_PRIORITY_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
                 </option>
               ))}
             </select>
@@ -803,12 +906,19 @@ export function TasksBoard({
                   className={`w-full rounded border p-3 text-left transition-all ${
                     selectedTaskId === task.id
                       ? "border-[#8c7569] bg-[#f7f2ee]"
-                      : "border-[#e6ddd7] bg-white hover:bg-[#faf7f4]"
+                      : taskPriorityCardClass[task.priority]
                   }`}
                 >
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-[#8c7569]">
-                    {task.code}
-                  </p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-[#8c7569]">
+                      {task.code}
+                    </p>
+                    <span
+                      className={`shrink-0 rounded border px-2 py-0.5 text-[11px] font-semibold ${taskPriorityBadgeClass[task.priority]}`}
+                    >
+                      P{task.priority}
+                    </span>
+                  </div>
                   <p className="font-semibold text-[#55311c]">{task.title}</p>
                   <p className="mt-1 text-xs text-[#8c7569]">
                     Building: {task.building_label}
@@ -839,6 +949,9 @@ export function TasksBoard({
                   <h3 className="pr-2 text-lg font-bold text-[#55311c]">
                     {selectedTask.code} - {selectedTask.title}
                   </h3>
+                  <p className="mt-1 text-sm font-semibold text-[#8c7569]">
+                    Priority {selectedTask.priority}
+                  </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   {canMarkTaskAsDone(selectedTask) && (
@@ -923,7 +1036,7 @@ export function TasksBoard({
 
               <div className={`space-y-3 ${isPublic ? "lg:col-span-3" : "lg:col-span-2"}`}>
                 <h4 className="text-lg font-bold text-[#55311c]">Task Chat</h4>
-                {!isManager &&
+                {shouldRequireCompletionPhoto &&
                   selectedTask.requires_completion_image &&
                   selectedTask.status !== "done" && (
                     <div className="rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
@@ -989,6 +1102,7 @@ export function TasksBoard({
                         htmlFor="task-chat-image-input"
                         className="absolute bottom-3 left-3 flex h-9 w-9 cursor-pointer items-center justify-center rounded-full text-[#6b7280] transition-all duration-200 hover:bg-white/80 hover:text-[#55311c]"
                         title={
+                          shouldRequireCompletionPhoto &&
                           selectedTask.requires_completion_image
                             ? "Select photo"
                             : "Add media"
@@ -1050,7 +1164,7 @@ export function TasksBoard({
               </div>
             </div>
 
-            {showCompletionPhotoPrompt && !isManager && (
+            {showCompletionPhotoPrompt && shouldRequireCompletionPhoto && (
               <div className="absolute inset-0 flex items-center justify-center bg-black/30 p-4">
                 <div className="w-full max-w-sm rounded-lg bg-white p-5 shadow-xl">
                   <h4 className="text-base font-bold text-[#55311c]">

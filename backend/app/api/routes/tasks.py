@@ -193,6 +193,7 @@ def _task_to_public(
         cover_image_data=cover_image_data,
         requires_completion_image=requires_completion_image,
         status=_normalize_task_status(task.status),
+        priority=task.priority,
         condominio_id=task.condominio_id,
         building_id=task.building_id,
         building_label=str(building_label),
@@ -472,6 +473,7 @@ def create_task(
             title=payload.title.strip(),
             description=payload.description.strip(),
             status="todo",
+            priority=payload.priority,
             condominio_id=condominio_id,
             building_id=building_id,
             created_by_user_id=current_user.id,
@@ -522,7 +524,7 @@ def read_tasks(
         statement = (
             select(Task)
             .where(Task.condominio_id == condominio_id)
-            .order_by(Task.updated_at.desc())
+            .order_by(Task.priority.asc(), Task.updated_at.desc())
             .offset(skip)
             .limit(limit)
         )
@@ -535,7 +537,7 @@ def read_tasks(
         statement = (
             select(Task)
             .where(Task.assigned_to_user_id == current_user.id)
-            .order_by(Task.updated_at.desc())
+            .order_by(Task.priority.asc(), Task.updated_at.desc())
             .offset(skip)
             .limit(limit)
         )
@@ -590,6 +592,7 @@ def read_tasks(
                 cover_image_data=None,
                 requires_completion_image=task.id in task_ids_with_cover_image,
                 status=_normalize_task_status(task.status),
+                priority=task.priority,
                 condominio_id=task.condominio_id,
                 building_id=task.building_id,
                 building_label=building_label,
@@ -619,7 +622,7 @@ def read_public_tasks(
     statement = (
         select(Task)
         .where(Task.condominio_id == condominio_id)
-        .order_by(Task.updated_at.desc())
+        .order_by(Task.priority.asc(), Task.updated_at.desc())
         .offset(skip)
         .limit(limit)
     )
@@ -664,6 +667,7 @@ def read_public_tasks(
                 cover_image_data=None,
                 requires_completion_image=task.id in task_ids_with_cover_image,
                 status=_normalize_task_status(task.status),
+                priority=task.priority,
                 condominio_id=task.condominio_id,
                 building_id=task.building_id,
                 building_label=building_label,
@@ -721,12 +725,6 @@ def update_public_task_status(
         raise HTTPException(status_code=400, detail="Invalid task status")
 
     image_data = _normalize_task_image_data("image_data", payload.image_data)
-    requires_completion_image = bool(_get_task_cover_image_data(session, task.id))
-    if next_status == "done" and requires_completion_image and not image_data:
-        raise HTTPException(
-            status_code=400,
-            detail="A completion photo is required to finish this task",
-        )
 
     actor = _resolve_public_task_actor(session, task)
     previous_status = _normalize_task_status(task.status)

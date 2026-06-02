@@ -386,6 +386,7 @@ class Task(SQLModel, table=True):
     title: str = Field(max_length=255)
     description: str = Field(default="")
     status: str = Field(default="todo", max_length=20)  # todo | done
+    priority: int = Field(default=2, ge=1, le=3)
     condominio_id: uuid.UUID = Field(
         foreign_key="condominio.id", nullable=False, ondelete="CASCADE"
     )
@@ -439,6 +440,7 @@ class Reminder(SQLModel, table=True):
     action_task: bool = Field(default=False)
     task_title: str | None = Field(default=None, max_length=255)
     task_description: str | None = Field(default=None)
+    task_priority: int = Field(default=2, ge=1, le=3)
     condominio_id: uuid.UUID = Field(
         foreign_key="condominio.id", nullable=False, ondelete="CASCADE"
     )
@@ -1056,11 +1058,13 @@ class ContractorVisitCheckInCreate(SQLModel):
     building_id: uuid.UUID
     job_description: str = Field(min_length=1, max_length=255)
     mobile: str = Field(min_length=1, max_length=30)
+    in_at: datetime | None = None
 
 
 class ContractorVisitCheckOutCreate(SQLModel):
     condominio_id: uuid.UUID
     visit_id: uuid.UUID
+    out_at: datetime | None = None
 
 
 class ContractorAccessBuildingPublic(SQLModel):
@@ -1341,6 +1345,7 @@ class TaskCreate(SQLModel):
     image_data: str | None = None
     assigned_to_user_id: uuid.UUID | None = None
     building_id: uuid.UUID | None = None
+    priority: int = Field(default=2, ge=1, le=3)
 
 
 class TaskStatusUpdate(SQLModel):
@@ -1356,6 +1361,7 @@ class TaskPublic(SQLModel):
     cover_image_data: str | None = None
     requires_completion_image: bool = False
     status: str
+    priority: int
     condominio_id: uuid.UUID
     building_id: uuid.UUID | None = None
     building_label: str
@@ -1417,6 +1423,7 @@ class ReminderCreate(SQLModel):
     action_task: bool = False
     task_title: str | None = Field(default=None, max_length=255)
     task_description: str | None = Field(default=None)
+    task_priority: int = Field(default=2, ge=1, le=3)
 
 
 class ReminderUpdate(SQLModel):
@@ -1433,6 +1440,7 @@ class ReminderUpdate(SQLModel):
     action_task: bool | None = None
     task_title: str | None = Field(default=None, max_length=255)
     task_description: str | None = Field(default=None)
+    task_priority: int | None = Field(default=None, ge=1, le=3)
 
 
 class ReminderPublic(SQLModel):
@@ -1450,6 +1458,7 @@ class ReminderPublic(SQLModel):
     action_task: bool
     task_title: str | None
     task_description: str | None
+    task_priority: int
     condominio_id: uuid.UUID
     created_by_user_id: uuid.UUID
     last_triggered_on: date | None

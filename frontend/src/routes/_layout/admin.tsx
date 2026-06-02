@@ -466,6 +466,7 @@ function Admin() {
                   action_task: boolean
                   task_title?: string | null
                   task_description?: string | null
+                  task_priority: number
                 },
               })
             }
@@ -486,6 +487,7 @@ function Admin() {
                   action_task?: boolean
                   task_title?: string | null
                   task_description?: string | null
+                  task_priority?: number
                 },
               })
             }
@@ -504,6 +506,7 @@ function Admin() {
               action_task: true,
               task_title: "Site check",
               task_description: "Follow up the scheduled check",
+              task_priority: 2,
             }}
             searchPlaceholder="Search reminders"
             toolbarActions={[

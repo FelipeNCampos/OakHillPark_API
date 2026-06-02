@@ -19,6 +19,7 @@ from app.models import (
     Morador,
     NotificationHistory,
     Readings,
+    Reminder,
     Task,
     TaskMessage,
     User,
@@ -84,6 +85,7 @@ def db() -> Generator[Session, None, None]:
         )
         session.exec(delete(TaskMessage))
         session.exec(delete(Task))
+        session.exec(delete(Reminder))
         session.exec(delete(Morador))  # All moradores are test data
         session.exec(delete(NotificationHistory))
         session.exec(delete(Flat).where(Flat.building_id.in_(test_building_ids)))

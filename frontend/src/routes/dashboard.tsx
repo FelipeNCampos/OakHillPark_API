@@ -36,6 +36,7 @@ import {
 import { OpenAPI } from "@/client"
 import { ContractorHistoryContent } from "@/components/Admin/ContractorHistoryContent"
 import { TasksBoard } from "@/components/Tasks/TasksBoard"
+import { enforceHttpsUrl, resolveApiBase } from "@/config/api"
 import {
   Dialog,
   DialogContent,
@@ -692,22 +693,9 @@ const apiCall = async (
   endpoint: string,
   params?: ApiQueryParams | ApiRequestOptions,
 ) => {
-  const resolveApiBase = () => {
-    if (OpenAPI.BASE) return OpenAPI.BASE
-    if (typeof window !== "undefined") {
-      const { protocol, hostname, port } = window.location
-      if (hostname.startsWith("dashboard.")) {
-        return `${protocol}//api.${hostname.slice("dashboard.".length)}`
-      }
-      if (hostname === "localhost" && port === "5173") {
-        return "http://localhost:8000"
-      }
-      return `${protocol}//${hostname}${port ? `:${port}` : ""}`
-    }
-    return "http://localhost:8000"
-  }
-
-  const url = new URL(`${resolveApiBase()}${endpoint}`)
+  const url = new URL(
+    enforceHttpsUrl(`${resolveApiBase(OpenAPI.BASE)}${endpoint}`),
+  )
   const requestOptions = isRequestOptions(params) ? params : undefined
 
   if (!requestOptions && params) {
@@ -3122,19 +3110,11 @@ function CashFlowContent() {
     setReportPreviewError(null)
 
     try {
-      const resolveApiBase = () => {
-        if (OpenAPI.BASE) return OpenAPI.BASE
-        const { protocol, hostname, port } = window.location
-        if (hostname.startsWith("dashboard.")) {
-          return `${protocol}//api.${hostname.slice("dashboard.".length)}`
-        }
-        if (hostname === "localhost" && port === "5173") {
-          return "http://localhost:8000"
-        }
-        return `${protocol}//${hostname}${port ? `:${port}` : ""}`
-      }
-
-      const url = new URL(`${resolveApiBase()}/api/v1/cash-flow/report/`)
+      const url = new URL(
+        enforceHttpsUrl(
+          `${resolveApiBase(OpenAPI.BASE)}/api/v1/cash-flow/report/`,
+        ),
+      )
       url.searchParams.set("start_month", reportForm.startMonth)
       url.searchParams.set("end_month", reportForm.endMonth)
       url.searchParams.set(
@@ -5507,7 +5487,7 @@ function AddReadingsForm({
       // Submit all readings
       for (const reading of readings) {
         await fetch(
-          `${OpenAPI.BASE || "http://localhost:8000"}/api/v1/readings/`,
+          enforceHttpsUrl(`${resolveApiBase(OpenAPI.BASE)}/api/v1/readings/`),
           {
             method: "POST",
             headers: {
@@ -5742,7 +5722,9 @@ function AddFlatReadingsForm({
       // Submit all readings
       for (const reading of readings) {
         await fetch(
-          `${OpenAPI.BASE || "http://localhost:8000"}/api/v1/flat_readings/`,
+          enforceHttpsUrl(
+            `${resolveApiBase(OpenAPI.BASE)}/api/v1/flat_readings/`,
+          ),
           {
             method: "POST",
             headers: {
@@ -8245,7 +8227,7 @@ function TwilioContent() {
     let failed = 0
     let skipped = 0
 
-    const base = OpenAPI.BASE || "http://localhost:8000"
+    const base = enforceHttpsUrl(resolveApiBase(OpenAPI.BASE))
 
     for (const recipient of recipients) {
       try {
@@ -20978,7 +20960,9 @@ function AddResidentForm({
       const loadMorador = async () => {
         try {
           const response = await fetch(
-            `${OpenAPI.BASE || "http://localhost:8000"}/api/v1/moradores/${activeEditingId}`,
+            enforceHttpsUrl(
+              `${resolveApiBase(OpenAPI.BASE)}/api/v1/moradores/${activeEditingId}`,
+            ),
             {
               headers: {
                 Authorization: `Bearer ${localStorage.getItem("access_token")}`,
@@ -21072,8 +21056,10 @@ function AddResidentForm({
 
     try {
       const url = activeEditingId
-        ? `${OpenAPI.BASE || "http://localhost:8000"}/api/v1/moradores/${activeEditingId}`
-        : `${OpenAPI.BASE || "http://localhost:8000"}/api/v1/moradores/`
+        ? enforceHttpsUrl(
+            `${resolveApiBase(OpenAPI.BASE)}/api/v1/moradores/${activeEditingId}`,
+          )
+        : enforceHttpsUrl(`${resolveApiBase(OpenAPI.BASE)}/api/v1/moradores/`)
 
       const method = activeEditingId ? "PATCH" : "POST"
 

@@ -5,6 +5,7 @@ import { useForm } from "react-hook-form"
 import { z } from "zod"
 
 import { OpenAPI, UsersService } from "@/client"
+import { enforceHttpsUrl, resolveApiBase } from "@/config/api"
 import { AuthLayoutModal } from "@/components/Common/AuthLayoutModal"
 import {
   Form,
@@ -77,7 +78,7 @@ function CaretakerLogin() {
       const body = new URLSearchParams()
       body.set("username", data.username)
       body.set("password", data.password)
-      const base = OpenAPI.BASE || "http://localhost:8000"
+      const base = enforceHttpsUrl(resolveApiBase(OpenAPI.BASE))
       const response = await fetch(
         `${base}/api/v1/login/caretaker-access-token`,
         {

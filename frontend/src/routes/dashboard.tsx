@@ -36,7 +36,7 @@ import {
 import { OpenAPI } from "@/client"
 import { ContractorHistoryContent } from "@/components/Admin/ContractorHistoryContent"
 import { TasksBoard } from "@/components/Tasks/TasksBoard"
-import { resolveApiBase } from "@/config/api"
+import { enforceHttpsUrl, resolveApiBase } from "@/config/api"
 import {
   Dialog,
   DialogContent,
@@ -686,7 +686,9 @@ const apiCall = async (
   endpoint: string,
   params?: ApiQueryParams | ApiRequestOptions,
 ) => {
-  const url = new URL(`${resolveApiBase(OpenAPI.BASE)}${endpoint}`)
+  const url = new URL(
+    enforceHttpsUrl(`${resolveApiBase(OpenAPI.BASE)}${endpoint}`),
+  )
   const requestOptions = isRequestOptions(params) ? params : undefined
 
   if (!requestOptions && params) {
@@ -3082,7 +3084,11 @@ function CashFlowContent() {
     setReportPreviewError(null)
 
     try {
-      const url = new URL(`${resolveApiBase(OpenAPI.BASE)}/api/v1/cash-flow/report/`)
+      const url = new URL(
+        enforceHttpsUrl(
+          `${resolveApiBase(OpenAPI.BASE)}/api/v1/cash-flow/report/`,
+        ),
+      )
       url.searchParams.set("start_month", reportForm.startMonth)
       url.searchParams.set("end_month", reportForm.endMonth)
       url.searchParams.set(
@@ -5454,14 +5460,17 @@ function AddReadingsForm({
 
       // Submit all readings
       for (const reading of readings) {
-        await fetch(`${resolveApiBase(OpenAPI.BASE)}/api/v1/readings/`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${localStorage.getItem("access_token")}`,
+        await fetch(
+          enforceHttpsUrl(`${resolveApiBase(OpenAPI.BASE)}/api/v1/readings/`),
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${localStorage.getItem("access_token")}`,
+            },
+            body: JSON.stringify(reading),
           },
-          body: JSON.stringify(reading),
-        })
+        )
       }
 
       alert("Readings registered successfully!")
@@ -5686,14 +5695,19 @@ function AddFlatReadingsForm({
 
       // Submit all readings
       for (const reading of readings) {
-        await fetch(`${resolveApiBase(OpenAPI.BASE)}/api/v1/flat_readings/`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${localStorage.getItem("access_token")}`,
+        await fetch(
+          enforceHttpsUrl(
+            `${resolveApiBase(OpenAPI.BASE)}/api/v1/flat_readings/`,
+          ),
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${localStorage.getItem("access_token")}`,
+            },
+            body: JSON.stringify(reading),
           },
-          body: JSON.stringify(reading),
-        })
+        )
       }
 
       // Invalidate cache so new readings show up
@@ -8155,7 +8169,7 @@ function TwilioContent() {
     let failed = 0
     let skipped = 0
 
-    const base = resolveApiBase(OpenAPI.BASE)
+    const base = enforceHttpsUrl(resolveApiBase(OpenAPI.BASE))
 
     for (const recipient of recipients) {
       try {
@@ -20061,7 +20075,9 @@ function AddResidentForm({
       const loadMorador = async () => {
         try {
           const response = await fetch(
-            `${resolveApiBase(OpenAPI.BASE)}/api/v1/moradores/${activeEditingId}`,
+            enforceHttpsUrl(
+              `${resolveApiBase(OpenAPI.BASE)}/api/v1/moradores/${activeEditingId}`,
+            ),
             {
               headers: {
                 Authorization: `Bearer ${localStorage.getItem("access_token")}`,
@@ -20155,8 +20171,10 @@ function AddResidentForm({
 
     try {
       const url = activeEditingId
-        ? `${resolveApiBase(OpenAPI.BASE)}/api/v1/moradores/${activeEditingId}`
-        : `${resolveApiBase(OpenAPI.BASE)}/api/v1/moradores/`
+        ? enforceHttpsUrl(
+            `${resolveApiBase(OpenAPI.BASE)}/api/v1/moradores/${activeEditingId}`,
+          )
+        : enforceHttpsUrl(`${resolveApiBase(OpenAPI.BASE)}/api/v1/moradores/`)
 
       const method = activeEditingId ? "PATCH" : "POST"
 

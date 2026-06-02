@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import { z } from "zod"
 
 import { OpenAPI } from "@/client"
-import { resolveApiBase } from "@/config/api"
+import { enforceHttpsUrl, resolveApiBase } from "@/config/api"
 import useCustomToast from "@/hooks/useCustomToast"
 
 const searchSchema = z.object({
@@ -27,7 +27,9 @@ const publicApiCall = async (
   endpoint: string,
   params?: Record<string, any> | { method?: string; body?: any },
 ) => {
-  const url = new URL(`${resolveApiBase(OpenAPI.BASE)}${endpoint}`)
+  const url = new URL(
+    enforceHttpsUrl(`${resolveApiBase(OpenAPI.BASE)}${endpoint}`),
+  )
   const isRequestWithMethod = params && "method" in params
 
   if (!isRequestWithMethod && params) {

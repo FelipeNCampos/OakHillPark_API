@@ -10,12 +10,12 @@ import ReactDOM from "react-dom/client"
 import { OpenAPI } from "./client"
 import { ThemeProvider } from "./components/theme-provider"
 import { Toaster } from "./components/ui/sonner"
-import { resolveApiBase } from "./config/api"
+import { enforceHttpsUrl, resolveApiBase } from "./config/api"
 import "./index.css"
 import { routeTree } from "./routeTree.gen"
 import { clearAuthSession, isAuthSessionError } from "./utils"
 
-OpenAPI.BASE = resolveApiBase(import.meta.env.VITE_API_URL)
+OpenAPI.BASE = enforceHttpsUrl(resolveApiBase(import.meta.env.VITE_API_URL))
 OpenAPI.TOKEN = async () => {
   return localStorage.getItem("access_token") || ""
 }

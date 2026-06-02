@@ -7,7 +7,7 @@ import {
 import { useDeferredValue, useEffect, useMemo, useState } from "react"
 
 import { OpenAPI } from "@/client"
-import { resolveApiBase } from "@/config/api"
+import { enforceHttpsUrl, resolveApiBase } from "@/config/api"
 import {
   Dialog,
   DialogContent,
@@ -107,7 +107,9 @@ const apiCall = async (
   endpoint: string,
   params?: ApiQueryParams | ApiRequestOptions,
 ) => {
-  const url = new URL(`${resolveApiBase(OpenAPI.BASE)}${endpoint}`)
+  const url = new URL(
+    enforceHttpsUrl(`${resolveApiBase(OpenAPI.BASE)}${endpoint}`),
+  )
   const requestOptions = isRequestOptions(params) ? params : undefined
 
   if (!requestOptions && params) {

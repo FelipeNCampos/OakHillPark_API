@@ -31,6 +31,7 @@ export const enforceHttpsUrl = (value: string) => {
   if (!trimmedValue) return trimmedValue
 
   try {
+    const hadTrailingSlash = /\/$/.test(trimmedValue)
     const parsedUrl = new URL(trimmedValue)
     const isLocalhost =
       parsedUrl.hostname === "localhost" ||
@@ -39,10 +40,10 @@ export const enforceHttpsUrl = (value: string) => {
 
     if (parsedUrl.protocol === "http:" && !isLocalhost) {
       parsedUrl.protocol = "https:"
-      return parsedUrl.toString().replace(/\/$/, "")
+      return hadTrailingSlash ? parsedUrl.toString() : parsedUrl.toString().replace(/\/$/, "")
     }
 
-    return parsedUrl.toString().replace(/\/$/, "")
+    return hadTrailingSlash ? parsedUrl.toString() : parsedUrl.toString().replace(/\/$/, "")
   } catch {
     return /^http:\/\//i.test(trimmedValue)
       ? trimmedValue.replace(/^http:\/\//i, "https://")

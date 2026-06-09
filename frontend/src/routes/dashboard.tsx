@@ -699,6 +699,7 @@ type ApiQueryParams = Record<
   string | number | boolean | null | undefined
 >
 type ApiRequestOptions = { method?: string; body?: unknown }
+const FIRE_ALARM_CERTIFICATE_MAX_MEDIA_BYTES = 10 * 1024 * 1024
 
 const isRequestOptions = (
   params?: ApiQueryParams | ApiRequestOptions,
@@ -738,7 +739,21 @@ const apiCall = async (
     options.body = typeof body === "string" ? body : JSON.stringify(body)
   }
 
-  const response = await fetch(url.toString(), options)
+  let response: Response
+  try {
+    response = await fetch(url.toString(), options)
+  } catch (error) {
+    if (
+      error instanceof TypeError ||
+      (error instanceof Error &&
+        /fetch|network|load failed|failed to fetch/i.test(error.message))
+    ) {
+      throw new Error(
+        "Could not reach the API server. Check that the backend is running and try a smaller attachment if you selected a file.",
+      )
+    }
+    throw error
+  }
   if (!response.ok) {
     let message = "API call failed"
     try {
@@ -13323,19 +13338,23 @@ function FireAlarmSchedulePage() {
 
     try {
       setIsSendingReport(true)
-      await apiCall("/api/v1/utils/send-report-email/", {
-        method: "POST",
-        body: {
-          email_to: recipients.join(","),
-          subject: "Fire Alarm Report",
-          html_content: buildScheduleReportEmailHtml({
-            scheduleName: "Fire Alarm",
-            periodLabel: fireAlarmReportPeriodLabel,
+      await Promise.all(
+        recipients.map((email) =>
+          apiCall("/api/v1/utils/send-report-email/", {
+            method: "POST",
+            body: {
+              email_to: email,
+              subject: "Fire Alarm Report",
+              html_content: buildScheduleReportEmailHtml({
+                scheduleName: "Fire Alarm",
+                periodLabel: fireAlarmReportPeriodLabel,
+              }),
+              file_name: fireAlarmReportFileName,
+              file_data_base64: fileDataBase64,
+            },
           }),
-          file_name: fireAlarmReportFileName,
-          file_data_base64: fileDataBase64,
-        },
-      })
+        ),
+      )
       setReportRecipients(recipients)
       setReportEmailDraft("")
       showSuccessToast("Report sent by email")
@@ -13544,6 +13563,10 @@ function FireAlarmSchedulePage() {
     file: File | null,
   ) => {
     if (!file) return
+    if (file.size > FIRE_ALARM_CERTIFICATE_MAX_MEDIA_BYTES) {
+      showErrorToast("Certificate media is too large. Please use a file up to 10 MB.")
+      return
+    }
     try {
       const dataUrl = await readFileAsDataUrl(file)
       setCertificateForm((previous) =>

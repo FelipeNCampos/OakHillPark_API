@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useEffect, useMemo, useRef, useState } from "react"
+import jsPDF from "jspdf"
+import autoTable from "jspdf-autotable"
 import { ArrowUp, Paperclip, X } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { OpenAPI } from "@/client"
 import { enforceHttpsUrl, resolveApiBase } from "@/config/api"
@@ -62,6 +64,48 @@ type TaskBoardMetadata = {
     name: string
   }>
 }
+
+const isDateWithinRange = (date: string, dateFrom: string, dateTo: string) => {
+  if (dateFrom && date < dateFrom) return false
+  if (dateTo && date > dateTo) return false
+  return true
+}
+
+const buildDateRangeLabel = (dateFrom: string, dateTo: string) => {
+  const formatDate = (value: string) => {
+    if (!value) return ""
+    const [year, month, day] = value.split("-")
+    if (!year || !month || !day) return value
+    return `${day}/${month}/${year}`
+  }
+
+  if (dateFrom && dateTo) return `${formatDate(dateFrom)} to ${formatDate(dateTo)}`
+  if (dateFrom) return `From ${formatDate(dateFrom)}`
+  if (dateTo) return `Until ${formatDate(dateTo)}`
+  return "All dates"
+}
+
+const formatTaskReportDate = (value: string) => {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return "-"
+  return date.toLocaleString("en-GB", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+}
+
+const buildTaskReportEmailHtml = (periodLabel: string) => `
+  <div style="font-family:Arial,Helvetica,sans-serif;color:#2f2f2f;line-height:1.5;">
+    <h2 style="margin:0 0 12px;color:#55311c;">Hello,</h2>
+    <p style="margin:0 0 10px;">Please find attached your tasks report.</p>
+    <p style="margin:0 0 16px;"><strong>Period:</strong> ${periodLabel}</p>
+    <p style="margin:0 0 8px;">If you have any questions, please reply to this email.</p>
+    <p style="margin:0;color:#666;">OakHill Park Team</p>
+  </div>
+`.trim()
 
 const apiCall = async (
   endpoint: string,
@@ -268,6 +312,12 @@ export function TasksBoard({
   const [buildingFilter, setBuildingFilter] = useState("all")
   const [priorityFilter, setPriorityFilter] =
     useState<TaskPriorityFilter>("all")
+  const [isReportDialogOpen, setIsReportDialogOpen] = useState(false)
+  const [reportDateFrom, setReportDateFrom] = useState("")
+  const [reportDateTo, setReportDateTo] = useState("")
+  const [reportEmailDraft, setReportEmailDraft] = useState("")
+  const [reportRecipients, setReportRecipients] = useState<string[]>([])
+  const [isSendingReport, setIsSendingReport] = useState(false)
   const [chatText, setChatText] = useState("")
   const [chatImageData, setChatImageData] = useState<string | null>(null)
   const [showCompletionPhotoPrompt, setShowCompletionPhotoPrompt] =
@@ -423,6 +473,187 @@ export function TasksBoard({
     () => (isPublic ? (["todo"] as const) : TASK_STATUS_ORDER),
     [isPublic],
   )
+
+  const taskReportHeaders = useMemo(
+    () => [
+      "Code",
+      "Title",
+      "Building",
+      "Status",
+      "Priority",
+      "Assigned",
+      "Created",
+      "Updated",
+    ],
+    [],
+  )
+
+  const taskReportRows = useMemo(
+    () =>
+      tasks
+        .filter((task) =>
+          isDateWithinRange(
+            task.created_at.slice(0, 10),
+            reportDateFrom,
+            reportDateTo,
+          ),
+        )
+        .sort((a, b) => b.created_at.localeCompare(a.created_at))
+        .map((task) => [
+          task.code || "-",
+          task.title || "-",
+          task.building_label || "-",
+          statusLabel[task.status],
+          `P${task.priority}`,
+          task.assigned_to_name || "-",
+          formatTaskReportDate(task.created_at),
+          formatTaskReportDate(task.updated_at),
+        ]),
+    [reportDateFrom, reportDateTo, tasks],
+  )
+
+  const taskReportPeriodLabel = useMemo(
+    () => buildDateRangeLabel(reportDateFrom, reportDateTo),
+    [reportDateFrom, reportDateTo],
+  )
+
+  const createTaskReportDoc = useCallback(() => {
+    const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" })
+    const pageWidth = doc.internal.pageSize.getWidth()
+
+    doc.setFontSize(16)
+    doc.text("Tasks Report", pageWidth / 2, 36, { align: "center" })
+    doc.setFontSize(10)
+    doc.text(`Generated: ${new Date().toLocaleString("en-GB")}`, 40, 56)
+    doc.text(`Period: ${taskReportPeriodLabel}`, 40, 72)
+
+    autoTable(doc, {
+      startY: 90,
+      head: [taskReportHeaders],
+      body:
+        taskReportRows.length > 0
+          ? taskReportRows
+          : [["-", "-", "-", "-", "-", "-", "No tasks found.", "-"]],
+      theme: "grid",
+      styles: {
+        fontSize: 8,
+        cellPadding: 4,
+        lineColor: [180, 180, 180],
+        lineWidth: 0.4,
+      },
+      headStyles: {
+        fillColor: [140, 117, 105],
+        textColor: 255,
+        fontStyle: "bold",
+      },
+      bodyStyles: {
+        textColor: [40, 40, 40],
+      },
+      alternateRowStyles: {
+        fillColor: [245, 245, 245],
+      },
+    })
+
+    return doc
+  }, [taskReportHeaders, taskReportPeriodLabel, taskReportRows])
+
+  const taskReportDataUrl = useMemo(() => {
+    if (reportDateFrom && reportDateTo && reportDateFrom > reportDateTo) {
+      return ""
+    }
+    return createTaskReportDoc().output("datauristring")
+  }, [
+    createTaskReportDoc,
+    reportDateFrom,
+    reportDateTo,
+  ])
+
+  const taskReportFileName = `tasks-report-${new Date()
+    .toISOString()
+    .slice(0, 10)}.pdf`
+
+  const handleAddReportRecipient = () => {
+    const email = reportEmailDraft.trim()
+    if (!email) return
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      showErrorToast("Invalid email address")
+      return
+    }
+    setReportRecipients((current) =>
+      current.includes(email) ? current : [...current, email],
+    )
+    setReportEmailDraft("")
+  }
+
+  const handleDownloadTaskReport = () => {
+    if (reportDateFrom && reportDateTo && reportDateFrom > reportDateTo) {
+      showErrorToast("Invalid date range")
+      return
+    }
+    const link = document.createElement("a")
+    link.href = createTaskReportDoc().output("datauristring")
+    link.download = taskReportFileName
+    link.click()
+  }
+
+  const handleSendTaskReport = async () => {
+    if (reportDateFrom && reportDateTo && reportDateFrom > reportDateTo) {
+      showErrorToast("Invalid date range")
+      return
+    }
+
+    const draftEmail = reportEmailDraft.trim()
+    const recipients = draftEmail
+      ? Array.from(new Set([...reportRecipients, draftEmail]))
+      : reportRecipients
+
+    if (recipients.length === 0) {
+      showErrorToast("Add at least one email")
+      return
+    }
+
+    const invalidEmail = recipients.find(
+      (email) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email),
+    )
+    if (invalidEmail) {
+      showErrorToast(`Invalid email address: ${invalidEmail}`)
+      return
+    }
+
+    const fileDataBase64 =
+      createTaskReportDoc().output("datauristring").split(",")[1] || ""
+    if (!fileDataBase64) {
+      showErrorToast("Failed to prepare report file")
+      return
+    }
+
+    try {
+      setIsSendingReport(true)
+      await Promise.all(
+        recipients.map((email) =>
+          apiCall("/api/v1/utils/send-report-email/", {
+            method: "POST",
+            body: {
+              email_to: email,
+              subject: "Tasks Report",
+              html_content: buildTaskReportEmailHtml(taskReportPeriodLabel),
+              file_name: taskReportFileName,
+              file_data_base64: fileDataBase64,
+            },
+          }),
+        ),
+      )
+      setReportRecipients(recipients)
+      setReportEmailDraft("")
+      showSuccessToast("Report sent by email")
+    } catch (error) {
+      showErrorToast(
+        error instanceof Error ? error.message : "Failed to send report by email",
+      )
+    } finally {
+      setIsSendingReport(false)
+    }
+  }
 
   const allMessages = messagesData?.data || []
 
@@ -777,8 +1008,183 @@ export function TasksBoard({
               </div>
             </div>
           )}
+          {isManager && (
+            <button
+              type="button"
+              onClick={() => setIsReportDialogOpen(true)}
+              className="rounded-lg border border-[#8c7569] bg-white px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+            >
+              Report
+            </button>
+          )}
         </div>
       </div>
+
+      {isReportDialogOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div
+            className="flex h-[80vh] max-w-none flex-col overflow-hidden rounded-lg border border-[#e5e0dc] bg-white p-0 text-[#55311c] shadow-xl"
+            style={{ width: "76vw", maxWidth: "76vw" }}
+          >
+            <div className="border-b border-[#e5e0dc] px-6 py-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-bold text-[#55311c]">
+                    Tasks Report
+                  </h3>
+                  <p className="mt-1 text-sm text-[rgba(0,0,0,0.7)]">
+                    Generate a PDF report from tasks filtered by period.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsReportDialogOpen(false)}
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gray-200 text-[#55311c] hover:bg-gray-300"
+                  aria-label="Close"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+
+            <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 overflow-hidden md:grid-cols-[35%_65%]">
+              <div className="space-y-4 overflow-y-auto border-b border-[#e5e0dc] p-6 md:border-b-0 md:border-r">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <label
+                      htmlFor="tasks-report-date-from"
+                      className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+                    >
+                      Start date
+                    </label>
+                    <input
+                      id="tasks-report-date-from"
+                      type="date"
+                      value={reportDateFrom}
+                      onChange={(event) =>
+                        setReportDateFrom(event.target.value)
+                      }
+                      className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                    />
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="tasks-report-date-to"
+                      className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+                    >
+                      End date
+                    </label>
+                    <input
+                      id="tasks-report-date-to"
+                      type="date"
+                      min={reportDateFrom || undefined}
+                      value={reportDateTo}
+                      onChange={(event) => setReportDateTo(event.target.value)}
+                      className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="tasks-report-email"
+                    className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+                  >
+                    E-mail(s)
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      id="tasks-report-email"
+                      type="email"
+                      value={reportEmailDraft}
+                      onChange={(event) =>
+                        setReportEmailDraft(event.target.value)
+                      }
+                      onKeyDown={(event) => {
+                        if (event.key !== "Enter") return
+                        event.preventDefault()
+                        handleAddReportRecipient()
+                      }}
+                      placeholder="name@example.com"
+                      className="min-w-0 flex-1 rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddReportRecipient}
+                      className="rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c]"
+                      aria-label="Add email"
+                    >
+                      +
+                    </button>
+                  </div>
+                  {reportRecipients.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {reportRecipients.map((email) => (
+                        <span
+                          key={email}
+                          className="inline-flex items-center gap-2 rounded-full border border-[#d9d0ca] bg-[#f5f1ee] px-3 py-1 text-xs font-semibold text-[#55311c]"
+                        >
+                          {email}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setReportRecipients((current) =>
+                                current.filter((item) => item !== email),
+                              )
+                            }
+                            className="text-[#8a3d1b] hover:text-[#55311c]"
+                            aria-label={`Remove ${email}`}
+                          >
+                            x
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-3 text-xs text-[rgba(0,0,0,0.68)]">
+                  {taskReportRows.length} task
+                  {taskReportRows.length === 1 ? "" : "s"} in preview.
+                </div>
+              </div>
+
+              <div className="min-h-0 bg-[#f5f1ee] p-4">
+                {taskReportDataUrl ? (
+                  <iframe
+                    title="Tasks Report preview"
+                    src={taskReportDataUrl}
+                    className="h-full w-full rounded-lg border border-[#d9d0ca] bg-white"
+                  />
+                ) : (
+                  <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-[#d9d0ca] bg-white text-sm text-[rgba(0,0,0,0.65)]">
+                    Select a valid date range to preview.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex justify-center gap-2 border-t border-[#e5e0dc] px-6 py-4">
+              <button
+                type="button"
+                onClick={handleDownloadTaskReport}
+                disabled={!taskReportDataUrl}
+                className="rounded-lg border border-[#8c7569] px-5 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Download
+              </button>
+              <button
+                type="button"
+                onClick={handleSendTaskReport}
+                disabled={isSendingReport || !taskReportDataUrl}
+                className="rounded-lg bg-[#8c7569] px-5 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isSendingReport ? "Sending..." : "Send"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {isManager && (
         <div className="rounded-lg bg-white p-4 shadow-md sm:p-6">

@@ -176,6 +176,7 @@ const TASK_PRIORITY_OPTIONS: Array<{ value: TaskPriority; label: string }> = [
 const STATUS_EVENT_PREFIX = "[STATUS]"
 const COVER_IMAGE_PREFIX = "[COVER_IMAGE]"
 const HIDDEN_TASK_BUILDING_NAMES = new Set(["cleaner", "caretaker"])
+const TASKS_PER_PAGE = 15
 const MAX_TASK_IMAGE_INPUT_BYTES = 12 * 1024 * 1024
 const MAX_TASK_IMAGE_OUTPUT_LENGTH = 2_000_000
 const MAX_TASK_IMAGE_DIMENSION = 1400
@@ -315,6 +316,10 @@ export function TasksBoard({
   const [buildingFilter, setBuildingFilter] = useState("all")
   const [priorityFilter, setPriorityFilter] =
     useState<TaskPriorityFilter>("all")
+  const [taskPages, setTaskPages] = useState<Record<TaskStatus, number>>({
+    todo: 1,
+    done: 1,
+  })
   const [isReportDialogOpen, setIsReportDialogOpen] = useState(false)
   const [reportDateFrom, setReportDateFrom] = useState("")
   const [reportDateTo, setReportDateTo] = useState("")
@@ -476,6 +481,36 @@ export function TasksBoard({
     () => (isPublic ? (["todo"] as const) : TASK_STATUS_ORDER),
     [isPublic],
   )
+  const taskPageCounts = useMemo(
+    () => ({
+      todo: Math.max(1, Math.ceil(groupedTasks.todo.length / TASKS_PER_PAGE)),
+      done: Math.max(1, Math.ceil(groupedTasks.done.length / TASKS_PER_PAGE)),
+    }),
+    [groupedTasks],
+  )
+  const paginatedTasks = useMemo(() => {
+    const getPageItems = (status: TaskStatus) => {
+      const currentPage = Math.min(taskPages[status], taskPageCounts[status])
+      const startIndex = (currentPage - 1) * TASKS_PER_PAGE
+      return groupedTasks[status].slice(startIndex, startIndex + TASKS_PER_PAGE)
+    }
+
+    return {
+      todo: getPageItems("todo"),
+      done: getPageItems("done"),
+    }
+  }, [groupedTasks, taskPageCounts, taskPages])
+
+  useEffect(() => {
+    setTaskPages({ todo: 1, done: 1 })
+  }, [buildingFilter, priorityFilter])
+
+  useEffect(() => {
+    setTaskPages((current) => ({
+      todo: Math.min(current.todo, taskPageCounts.todo),
+      done: Math.min(current.done, taskPageCounts.done),
+    }))
+  }, [taskPageCounts])
 
   const taskReportHeaders = useMemo(
     () => [
@@ -1288,7 +1323,7 @@ export function TasksBoard({
               {statusLabel[status]}
             </h4>
             <div className="space-y-3">
-              {groupedTasks[status].map((task) => (
+              {paginatedTasks[status].map((task) => (
                 <div
                   key={task.id}
                   role="button"
@@ -1341,6 +1376,46 @@ export function TasksBoard({
               ))}
               {groupedTasks[status].length === 0 && (
                 <p className="text-xs text-[rgba(0,0,0,0.55)]">No tasks</p>
+              )}
+              {groupedTasks[status].length > 0 && (
+                <div className="flex flex-col gap-2 border-t border-[#eadfd8] pt-3 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-xs font-semibold text-[#8c7569]">
+                    Page {Math.min(taskPages[status], taskPageCounts[status])} of{" "}
+                    {taskPageCounts[status]} - {groupedTasks[status].length} task
+                    {groupedTasks[status].length === 1 ? "" : "s"}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setTaskPages((current) => ({
+                          ...current,
+                          [status]: Math.max(1, current[status] - 1),
+                        }))
+                      }
+                      disabled={taskPages[status] <= 1}
+                      className="rounded border border-[#8c7569] px-3 py-1 text-xs font-semibold text-[#55311c] hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Previous
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setTaskPages((current) => ({
+                          ...current,
+                          [status]: Math.min(
+                            taskPageCounts[status],
+                            current[status] + 1,
+                          ),
+                        }))
+                      }
+                      disabled={taskPages[status] >= taskPageCounts[status]}
+                      className="rounded border border-[#8c7569] px-3 py-1 text-xs font-semibold text-[#55311c] hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
               )}
             </div>
           </div>

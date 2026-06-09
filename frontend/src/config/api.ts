@@ -39,10 +39,10 @@ export const enforceHttpsUrl = (value: string) => {
 
     if (parsedUrl.protocol === "http:" && !isLocalhost) {
       parsedUrl.protocol = "https:"
-      return parsedUrl.toString()
+      return parsedUrl.toString().replace(/\/$/, "")
     }
 
-    return parsedUrl.toString()
+    return parsedUrl.toString().replace(/\/$/, "")
   } catch {
     return /^http:\/\//i.test(trimmedValue)
       ? trimmedValue.replace(/^http:\/\//i, "https://")

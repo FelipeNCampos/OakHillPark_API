@@ -112,8 +112,10 @@ const CARETAKER_BINS_QR_HIDDEN_BUILDING_NAMES = new Set([
   "cleaner",
   "caretaker",
   "contractor",
+  "martlett",
   "office",
 ])
+const CARETAKER_BINS_FALCON_MARTLETT_LABEL = "Falcon/Martlett"
 const QR_SPECIAL_CLEANER_BUILDING_LABEL = "Cleaner"
 const QR_TASKS_LABEL = "Task"
 const QR_BINS_LABEL = "Bins"
@@ -142,6 +144,23 @@ const isCaretakerBinsQrBuilding = (building: Building) =>
   !CARETAKER_BINS_QR_HIDDEN_BUILDING_NAMES.has(
     building.nome.trim().toLowerCase(),
   )
+
+const getCaretakerBinsQrBuildingLabel = (building: Building) =>
+  building.nome.trim().toLowerCase() === "falcon"
+    ? CARETAKER_BINS_FALCON_MARTLETT_LABEL
+    : building.nome || "Building"
+
+const getCaretakerBinsDisplayBuildingLabel = (buildingName?: string | null) => {
+  const trimmedName = buildingName?.trim()
+  if (!trimmedName) return "-"
+  const normalizedName = trimmedName.toLowerCase()
+  return normalizedName === "falcon" || normalizedName === "martlett"
+    ? CARETAKER_BINS_FALCON_MARTLETT_LABEL
+    : trimmedName
+}
+
+const getCaretakerBinsQrDownloadSlug = (label: string) =>
+  label.trim().toLowerCase().replace(/\W+/g, "-").replace(/^-|-$/g, "")
 
 type BinsDashboardGroupId =
   | "falcon-martlett-merlin-oaklodge"
@@ -1765,15 +1784,6 @@ const toDateInputValue = (date = new Date()) => {
   return `${year}-${month}-${day}`
 }
 
-const toTimeInputValue = (dateValue?: string | null) => {
-  if (!dateValue) return ""
-  const date = new Date(dateValue)
-  if (Number.isNaN(date.getTime())) return ""
-  const hours = String(date.getHours()).padStart(2, "0")
-  const minutes = String(date.getMinutes()).padStart(2, "0")
-  return `${hours}:${minutes}`
-}
-
 const toDateTimeLocalInputValue = (dateValue?: string | null) => {
   if (!dateValue) return ""
   const date = new Date(dateValue)
@@ -2397,7 +2407,7 @@ function ClientDashboard() {
       name: "Schedule",
       id: "schedule",
       items: [
-        { label: "Alarm schedule", id: "schedule-alarm" },
+        { label: "Fire Alarm", id: "schedule-alarm" },
         { label: "Lift schedule", id: "schedule-lift" },
         { label: "Emergency light", id: "schedule-light" },
       ],
@@ -8855,15 +8865,16 @@ function BinsQrCodesContent({
       return [...buildings]
         .filter(isCaretakerBinsQrBuilding)
         .sort((a, b) => a.nome.localeCompare(b.nome))
-        .map((building) => ({
-          key: String(building.id),
-          label: building.nome || "Building",
-          downloadSlug: (building.nome || "building")
-            .trim()
-            .toLowerCase()
-            .replace(/\s+/g, "-"),
-          building,
-        }))
+        .map((building) => {
+          const label = getCaretakerBinsQrBuildingLabel(building)
+
+          return {
+            key: String(building.id),
+            label,
+            downloadSlug: getCaretakerBinsQrDownloadSlug(label),
+            building,
+          }
+        })
     }
 
     return BINS_DASHBOARD_GROUP_OPTIONS.map((option) => {
@@ -12999,9 +13010,12 @@ function FireAlarmSchedulePage() {
   const [activeView, setActiveView] = useState<
     "schedule" | "history" | "certificates"
   >("schedule")
+  const [isReportDialogOpen, setIsReportDialogOpen] = useState(false)
   const [reportDateFrom, setReportDateFrom] = useState("")
   const [reportDateTo, setReportDateTo] = useState("")
-  const [reportEmail, setReportEmail] = useState("")
+  const [reportIncludeExtraInfo, setReportIncludeExtraInfo] = useState(true)
+  const [reportEmailDraft, setReportEmailDraft] = useState("")
+  const [reportRecipients, setReportRecipients] = useState<string[]>([])
   const [isSendingReport, setIsSendingReport] = useState(false)
   const [certificateSearch, setCertificateSearch] = useState("")
   const [certificateDateFrom, setCertificateDateFrom] = useState("")
@@ -13140,31 +13154,8 @@ function FireAlarmSchedulePage() {
     })
   }
 
-  async function handleSendReport() {
-    if (reportDateFrom && reportDateTo && reportDateFrom > reportDateTo) {
-      showErrorToast("Invalid date range")
-      return
-    }
-    if (!reportEmail.trim()) {
-      showErrorToast("Email is required")
-      return
-    }
-
-    const sourceLogs: FireAlarmLogByDate = {
-      ...allLogs,
-      [selectedDate]: rows,
-    }
-
-    const selectedDates = Object.keys(sourceLogs)
-      .filter((date) => isDateWithinRange(date, reportDateFrom, reportDateTo))
-      .sort((a, b) => b.localeCompare(a))
-
-    if (selectedDates.length === 0) {
-      showErrorToast("No alarm records found in the selected range")
-      return
-    }
-
-    const headers = [
+  const fireAlarmReportHeaders = useMemo(
+    () => [
       "Date",
       "Building",
       "Call Point",
@@ -13172,38 +13163,158 @@ function FireAlarmSchedulePage() {
       "Time",
       "Action Required",
       "Comments",
-    ]
-    const reportRows: (string | number)[][] = []
+    ],
+    [],
+  )
 
-    selectedDates.forEach((date) => {
-      const logRows = sourceLogs[date] || getDefaultFireAlarmRows()
-      const rowsForDate = getFireAlarmScheduleRowsForDate(date)
-      rowsForDate.forEach((entry) => {
-        const log = logRows[entry.buildingId] || {
-          time: "",
-          actionRequired: false,
-          comment: "",
-        }
-        reportRows.push([
-          formatDateToGb(date),
-          entry.buildingLabel,
-          entry.callPoint,
-          entry.location,
-          log.time || "-",
-          log.actionRequired ? "Yes" : "No",
-          log.comment || "-",
-        ])
+  const fireAlarmReportRows = useMemo(() => {
+    const sourceLogs: FireAlarmLogByDate = {
+      ...allLogs,
+      [selectedDate]: rows,
+    }
+    return Object.keys(sourceLogs)
+      .filter((date) => isDateWithinRange(date, reportDateFrom, reportDateTo))
+      .sort((a, b) => b.localeCompare(a))
+      .flatMap((date) => {
+        const logRows = sourceLogs[date] || getDefaultFireAlarmRows()
+        return getFireAlarmScheduleRowsForDate(date).map((entry) => {
+          const log = logRows[entry.buildingId] || {
+            time: "",
+            actionRequired: false,
+            comment: "",
+          }
+          return [
+            formatDateToGb(date),
+            entry.buildingLabel,
+            entry.callPoint,
+            entry.location,
+            log.time || "-",
+            log.actionRequired ? "Yes" : "No",
+            log.comment || "-",
+          ] as (string | number)[]
+        })
       })
+  }, [allLogs, reportDateFrom, reportDateTo, rows, selectedDate])
+
+  const fireAlarmReportPeriodLabel = useMemo(
+    () => buildDateRangeLabel(reportDateFrom, reportDateTo),
+    [reportDateFrom, reportDateTo],
+  )
+
+  const createFireAlarmReportDoc = () => {
+    const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" })
+    const pageWidth = doc.internal.pageSize.getWidth()
+    let startY = 64
+
+    doc.setFontSize(16)
+    doc.text("Fire Alarm Report", pageWidth / 2, 36, { align: "center" })
+
+    if (reportIncludeExtraInfo) {
+      doc.setFontSize(10)
+      doc.text(`Generated: ${new Date().toLocaleString("en-GB")}`, 40, 56)
+      doc.text(`Period: ${fireAlarmReportPeriodLabel}`, 40, 72)
+      startY = 90
+    }
+
+    autoTable(doc, {
+      startY,
+      head: [fireAlarmReportHeaders],
+      body:
+        fireAlarmReportRows.length > 0
+          ? fireAlarmReportRows
+          : [["-", "-", "-", "-", "-", "-", "No alarm records found."]],
+      theme: "grid",
+      styles: {
+        fontSize: 8,
+        cellPadding: 4,
+        lineColor: [180, 180, 180],
+        lineWidth: 0.4,
+      },
+      headStyles: {
+        fillColor: [140, 117, 105],
+        textColor: 255,
+        fontStyle: "bold",
+      },
+      bodyStyles: {
+        textColor: [40, 40, 40],
+      },
+      alternateRowStyles: {
+        fillColor: [245, 245, 245],
+      },
     })
 
-    const reportTitle = "Fire Alarm Schedule Report"
-    const fileName = `fire-alarm-schedule-${new Date().toISOString().slice(0, 10)}.pdf`
-    const fileDataBase64 = generatePdfTableReportBase64({
-      title: reportTitle,
-      dateRange: buildDateRangeLabel(reportDateFrom, reportDateTo),
-      headers,
-      rows: reportRows,
-    })
+    return doc
+  }
+
+  const fireAlarmReportDataUrl = useMemo(() => {
+    if (reportDateFrom && reportDateTo && reportDateFrom > reportDateTo) {
+      return ""
+    }
+    return createFireAlarmReportDoc().output("datauristring")
+  }, [
+    createFireAlarmReportDoc,
+    fireAlarmReportHeaders,
+    fireAlarmReportPeriodLabel,
+    fireAlarmReportRows,
+    reportDateFrom,
+    reportDateTo,
+    reportIncludeExtraInfo,
+  ])
+
+  const fireAlarmReportFileName = `fire-alarm-report-${new Date()
+    .toISOString()
+    .slice(0, 10)}.pdf`
+
+  const handleAddReportRecipient = () => {
+    const email = reportEmailDraft.trim()
+    if (!email) return
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      showErrorToast("Invalid email address")
+      return
+    }
+    setReportRecipients((current) =>
+      current.includes(email) ? current : [...current, email],
+    )
+    setReportEmailDraft("")
+  }
+
+  const handleDownloadFireAlarmReport = () => {
+    if (reportDateFrom && reportDateTo && reportDateFrom > reportDateTo) {
+      showErrorToast("Invalid date range")
+      return
+    }
+    const link = document.createElement("a")
+    link.href = createFireAlarmReportDoc().output("datauristring")
+    link.download = fireAlarmReportFileName
+    link.click()
+  }
+
+  async function handleSendReport() {
+    if (reportDateFrom && reportDateTo && reportDateFrom > reportDateTo) {
+      showErrorToast("Invalid date range")
+      return
+    }
+
+    const draftEmail = reportEmailDraft.trim()
+    const recipients = draftEmail
+      ? Array.from(new Set([...reportRecipients, draftEmail]))
+      : reportRecipients
+
+    if (recipients.length === 0) {
+      showErrorToast("Add at least one email")
+      return
+    }
+
+    const invalidEmail = recipients.find(
+      (email) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email),
+    )
+    if (invalidEmail) {
+      showErrorToast(`Invalid email address: ${invalidEmail}`)
+      return
+    }
+
+    const fileDataBase64 =
+      createFireAlarmReportDoc().output("datauristring").split(",")[1] || ""
 
     if (!fileDataBase64) {
       showErrorToast("Failed to prepare report file")
@@ -13215,16 +13326,18 @@ function FireAlarmSchedulePage() {
       await apiCall("/api/v1/utils/send-report-email/", {
         method: "POST",
         body: {
-          email_to: reportEmail.trim(),
-          subject: reportTitle,
+          email_to: recipients.join(","),
+          subject: "Fire Alarm Report",
           html_content: buildScheduleReportEmailHtml({
             scheduleName: "Fire Alarm",
-            periodLabel: buildDateRangeLabel(reportDateFrom, reportDateTo),
+            periodLabel: fireAlarmReportPeriodLabel,
           }),
-          file_name: fileName,
+          file_name: fireAlarmReportFileName,
           file_data_base64: fileDataBase64,
         },
       })
+      setReportRecipients(recipients)
+      setReportEmailDraft("")
       showSuccessToast("Report sent by email")
     } catch (error) {
       const message =
@@ -14119,74 +14232,6 @@ function FireAlarmSchedulePage() {
           </button>
         </div>
 
-        <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
-          <h4 className="mb-3 text-sm font-semibold text-[#55311c]">
-            Generate report
-          </h4>
-          <p className="mb-3 text-xs text-[rgba(0,0,0,0.65)]">
-            Enter email and optional date range to send the PDF report.
-          </p>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-            <div>
-              <label
-                htmlFor="alarm-report-email"
-                className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
-              >
-                Email
-              </label>
-              <input
-                id="alarm-report-email"
-                type="email"
-                value={reportEmail}
-                onChange={(event) => setReportEmail(event.target.value)}
-                placeholder="report@email.com"
-                className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
-              />
-            </div>
-            <div>
-              <label
-                htmlFor="alarm-report-date-from"
-                className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
-              >
-                Date from
-              </label>
-              <input
-                id="alarm-report-date-from"
-                type="date"
-                value={reportDateFrom}
-                onChange={(event) => setReportDateFrom(event.target.value)}
-                className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
-              />
-            </div>
-            <div>
-              <label
-                htmlFor="alarm-report-date-to"
-                className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
-              >
-                Date to
-              </label>
-              <input
-                id="alarm-report-date-to"
-                type="date"
-                min={reportDateFrom || undefined}
-                value={reportDateTo}
-                onChange={(event) => setReportDateTo(event.target.value)}
-                className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
-              />
-            </div>
-            <div className="flex items-end">
-              <button
-                type="button"
-                onClick={handleSendReport}
-                disabled={isSendingReport}
-                className="w-full rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {isSendingReport ? "Sending..." : "Send by email"}
-              </button>
-            </div>
-          </div>
-        </div>
-
         <div className="overflow-x-auto">
           <table className="w-full min-w-[760px] border-collapse">
             <thead>
@@ -14357,10 +14402,17 @@ function FireAlarmSchedulePage() {
       <div className="flex flex-col gap-3 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h3 className="text-lg font-bold text-[#55311c]">
-            Fire alarm schedule
+            Fire alarm
           </h3>
         </div>
         <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setIsReportDialogOpen(true)}
+            className="self-start rounded-lg border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] sm:self-auto"
+          >
+            Report
+          </button>
           <button
             type="button"
             onClick={() => setActiveView("history")}
@@ -14377,6 +14429,166 @@ function FireAlarmSchedulePage() {
           </button>
         </div>
       </div>
+
+      <Dialog open={isReportDialogOpen} onOpenChange={setIsReportDialogOpen}>
+        <DialogContent className="flex h-[80vh] w-[80vw] max-w-none flex-col border-[#e5e0dc] bg-white p-0 text-[#55311c]">
+          <DialogHeader className="border-b border-[#e5e0dc] px-6 py-4">
+            <DialogTitle className="text-[#55311c]">
+              Fire Alarm Report
+            </DialogTitle>
+            <DialogDescription className="text-[rgba(0,0,0,0.7)]">
+              Generate a PDF report from alarm records filtered by period.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 overflow-hidden md:grid-cols-2">
+            <div className="space-y-4 overflow-y-auto border-b border-[#e5e0dc] p-6 md:border-b-0 md:border-r">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label
+                    htmlFor="fire-alarm-report-date-from"
+                    className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+                  >
+                    Date from
+                  </label>
+                  <input
+                    id="fire-alarm-report-date-from"
+                    type="date"
+                    value={reportDateFrom}
+                    onChange={(event) => setReportDateFrom(event.target.value)}
+                    className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                  />
+                </div>
+                <div>
+                  <label
+                    htmlFor="fire-alarm-report-date-to"
+                    className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+                  >
+                    Date to
+                  </label>
+                  <input
+                    id="fire-alarm-report-date-to"
+                    type="date"
+                    min={reportDateFrom || undefined}
+                    value={reportDateTo}
+                    onChange={(event) => setReportDateTo(event.target.value)}
+                    className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                  />
+                </div>
+              </div>
+
+              <label
+                className="inline-flex items-center gap-2 text-sm font-semibold text-[#55311c]"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <input
+                  type="checkbox"
+                  checked={reportIncludeExtraInfo}
+                  onChange={(event) =>
+                    setReportIncludeExtraInfo(event.target.checked)
+                  }
+                  className="h-4 w-4 cursor-pointer"
+                />
+                Extra information
+              </label>
+
+              <div>
+                <label
+                  htmlFor="fire-alarm-report-email"
+                  className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+                >
+                  E-mail(s)
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    id="fire-alarm-report-email"
+                    type="email"
+                    value={reportEmailDraft}
+                    onChange={(event) => setReportEmailDraft(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter") return
+                      event.preventDefault()
+                      handleAddReportRecipient()
+                    }}
+                    placeholder="name@example.com"
+                    className="min-w-0 flex-1 rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddReportRecipient}
+                    className="rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c]"
+                    aria-label="Add email"
+                  >
+                    +
+                  </button>
+                </div>
+                {reportRecipients.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {reportRecipients.map((email) => (
+                      <span
+                        key={email}
+                        className="inline-flex items-center gap-2 rounded-full border border-[#d9d0ca] bg-[#f5f1ee] px-3 py-1 text-xs font-semibold text-[#55311c]"
+                      >
+                        {email}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setReportRecipients((current) =>
+                              current.filter((item) => item !== email),
+                            )
+                          }
+                          className="text-[#8a3d1b] hover:text-[#55311c]"
+                          aria-label={`Remove ${email}`}
+                        >
+                          x
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-3 text-xs text-[rgba(0,0,0,0.68)]">
+                {fireAlarmReportRows.length} row
+                {fireAlarmReportRows.length === 1 ? "" : "s"} in preview.
+              </div>
+            </div>
+
+            <div className="min-h-0 bg-[#f5f1ee] p-4">
+              {fireAlarmReportDataUrl ? (
+                <iframe
+                  title="Fire Alarm Report preview"
+                  src={fireAlarmReportDataUrl}
+                  className="h-full w-full rounded-lg border border-[#d9d0ca] bg-white"
+                />
+              ) : (
+                <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-[#d9d0ca] bg-white text-sm text-[rgba(0,0,0,0.65)]">
+                  Select a valid date range to preview.
+                </div>
+              )}
+            </div>
+          </div>
+
+          <DialogFooter className="justify-center border-t border-[#e5e0dc] px-6 py-4 sm:justify-center">
+            <button
+              type="button"
+              onClick={handleDownloadFireAlarmReport}
+              disabled={!fireAlarmReportDataUrl}
+              className="rounded-lg border border-[#8c7569] px-5 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Download
+            </button>
+            <button
+              type="button"
+              onClick={handleSendReport}
+              disabled={isSendingReport || !fireAlarmReportDataUrl}
+              className="rounded-lg bg-[#8c7569] px-5 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isSendingReport ? "Sending..." : "Send"}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <div className="rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
         <div className="mb-3 flex items-center justify-between gap-3">
@@ -14487,7 +14699,7 @@ function FireAlarmSchedulePage() {
                     {row.buildingLabel}
                   </td>
                   <td className="border border-[#e5e0dc] px-3 py-2 text-sm font-semibold text-[#55311c]">
-                    <div className="flex flex-col items-start gap-2">
+                    <div className="flex flex-row items-start justify-between gap-2">
                       <span>{row.callPoint}</span>
                       <button
                         type="button"
@@ -17456,11 +17668,11 @@ function CaretakerSummary({
       if (!duration) return
       const buildingId =
         session.inRecord?.building_id || session.outRecord?.building_id
-      const buildingLabel =
+      const buildingLabel = getCaretakerBinsDisplayBuildingLabel(
         (buildingId && buildingMap.get(buildingId)) ||
-        session.inRecord?.building_nome ||
-        session.outRecord?.building_nome ||
-        "-"
+          session.inRecord?.building_nome ||
+          session.outRecord?.building_nome,
+      )
       const current = totals.get(buildingLabel) || 0
       totals.set(buildingLabel, current + duration)
     })
@@ -17487,11 +17699,11 @@ function CaretakerSummary({
     return binSessionsGrouped.map((session, index) => {
       const buildingId =
         session.inRecord?.building_id || session.outRecord?.building_id
-      const buildingLabel =
+      const buildingLabel = getCaretakerBinsDisplayBuildingLabel(
         (buildingId && buildingMap.get(buildingId)) ||
-        session.inRecord?.building_nome ||
-        session.outRecord?.building_nome ||
-        "-"
+          session.inRecord?.building_nome ||
+          session.outRecord?.building_nome,
+      )
       const dateValue =
         session.inRecord?.data || session.outRecord?.data || null
       const sortTime = dateValue ? new Date(dateValue).getTime() : 0
@@ -20342,6 +20554,45 @@ function ResidentsContent() {
     )
   }
 
+  const renderReadingTypeToggles = (morador?: Morador) => {
+    if (!morador) return null
+
+    const toggleOptions = [
+      { label: "Normal", value: 2 },
+      { label: "Gas", value: 4 },
+    ]
+
+    return (
+      <div
+        className="mt-1 flex flex-nowrap items-center gap-2 whitespace-nowrap text-[10px] font-semibold leading-none text-[#55311c]"
+        onClick={(event) => event.stopPropagation()}
+      >
+        {toggleOptions.map((option) => (
+          <label
+            key={option.value}
+            className="inline-flex shrink-0 items-center gap-1"
+          >
+            <input
+              type="checkbox"
+              checked={(morador.reading_types & option.value) !== 0}
+              onClick={(event) => event.stopPropagation()}
+              onChange={() =>
+                handleCheckboxChange(
+                  morador.id,
+                  morador.reading_types,
+                  option.value,
+                )
+              }
+              disabled={updateReadingTypesMutation.isPending}
+              className="h-3 w-3 shrink-0 cursor-pointer"
+            />
+            <span>{option.label}</span>
+          </label>
+        ))}
+      </div>
+    )
+  }
+
   const renderResidentIdentity = (morador?: Morador) => {
     if (!morador) return "-"
     const hasSecondaryTenantIdentity =
@@ -20613,7 +20864,10 @@ function ResidentsContent() {
                             {renderFlatPlates(row)}
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
-                            {renderResidentIdentity(row.owner_1)}
+                            <div className="min-w-0">
+                              {renderResidentIdentity(row.owner_1)}
+                              {renderReadingTypeToggles(row.owner_1)}
+                            </div>
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
                             <div className="flex flex-col">
@@ -20623,7 +20877,10 @@ function ResidentsContent() {
                             </div>
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
-                            {renderResidentIdentity(row.owner_2)}
+                            <div className="min-w-0">
+                              {renderResidentIdentity(row.owner_2)}
+                              {renderReadingTypeToggles(row.owner_2)}
+                            </div>
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
                             <div className="flex flex-col">

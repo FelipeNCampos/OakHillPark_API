@@ -1,0 +1,40 @@
+services:
+  db:
+    ports:
+      - "5432:5432"
+
+  adminer:
+    ports:
+      - "8080:8080"
+    networks:
+      - default
+    labels:
+      - traefik.enable=false
+
+  prestart:
+    networks:
+      - default
+
+  backend:
+    ports:
+      - "8000:8000"
+    networks:
+      - default
+    labels:
+      - traefik.enable=false
+
+  frontend:
+    ports:
+      - "5173:80"
+    build:
+      args:
+        - VITE_API_URL=http://localhost:8000
+        - NODE_ENV=production
+    networks:
+      - default
+    labels:
+      - traefik.enable=false
+
+networks:
+  traefik-public:
+    external: false

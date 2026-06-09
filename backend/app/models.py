@@ -441,6 +441,9 @@ class Reminder(SQLModel, table=True):
     task_title: str | None = Field(default=None, max_length=255)
     task_description: str | None = Field(default=None)
     task_priority: int = Field(default=2, ge=1, le=3)
+    task_building_id: uuid.UUID | None = Field(
+        default=None, foreign_key="building.id", ondelete="SET NULL"
+    )
     condominio_id: uuid.UUID = Field(
         foreign_key="condominio.id", nullable=False, ondelete="CASCADE"
     )
@@ -1424,6 +1427,7 @@ class ReminderCreate(SQLModel):
     task_title: str | None = Field(default=None, max_length=255)
     task_description: str | None = Field(default=None)
     task_priority: int = Field(default=2, ge=1, le=3)
+    task_building_id: uuid.UUID | None = None
 
 
 class ReminderUpdate(SQLModel):
@@ -1441,6 +1445,7 @@ class ReminderUpdate(SQLModel):
     task_title: str | None = Field(default=None, max_length=255)
     task_description: str | None = Field(default=None)
     task_priority: int | None = Field(default=None, ge=1, le=3)
+    task_building_id: uuid.UUID | None = None
 
 
 class ReminderPublic(SQLModel):
@@ -1459,6 +1464,7 @@ class ReminderPublic(SQLModel):
     task_title: str | None
     task_description: str | None
     task_priority: int
+    task_building_id: uuid.UUID | None
     condominio_id: uuid.UUID
     created_by_user_id: uuid.UUID
     last_triggered_on: date | None

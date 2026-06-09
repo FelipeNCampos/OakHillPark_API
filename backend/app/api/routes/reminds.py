@@ -9,6 +9,7 @@ from sqlmodel import func, select
 
 from app.api.deps import CurrentUser, SessionDep
 from app.models import (
+    Building,
     Condominio,
     Funcionario,
     Reminder,
@@ -62,6 +63,7 @@ def _reminder_to_public(reminder: Reminder) -> ReminderPublic:
         task_title=reminder.task_title,
         task_description=reminder.task_description,
         task_priority=reminder.task_priority,
+        task_building_id=reminder.task_building_id,
         condominio_id=reminder.condominio_id,
         created_by_user_id=reminder.created_by_user_id,
         last_triggered_on=reminder.last_triggered_on,
@@ -110,6 +112,24 @@ def _normalize_reminder_sms_to(value: str | None) -> str | None:
             detail="SMS destination must be a valid phone number",
         )
     return normalized
+
+
+def _validate_task_building(
+    session: SessionDep,
+    *,
+    condominio_id,
+    building_id,
+) -> None:
+    if not building_id:
+        return
+    building = session.exec(
+        select(Building.id).where(
+            Building.id == building_id,
+            Building.condominio_id == condominio_id,
+        )
+    ).first()
+    if not building:
+        raise HTTPException(status_code=404, detail="Building not found")
 
 
 def _validate_weekday_mask(weekday_mask: int) -> None:
@@ -306,6 +326,7 @@ def _create_task_from_reminder(
                 status="todo",
                 priority=reminder.task_priority,
                 condominio_id=condominio_id,
+                building_id=reminder.task_building_id,
                 created_by_user_id=created_by_user_id,
                 assigned_to_user_id=caretaker.id,
                 created_at=now,
@@ -397,6 +418,11 @@ def create_reminder(
     normalized_sms_to = (
         _normalize_reminder_sms_to(payload.sms_to) if payload.action_sms else None
     )
+    _validate_task_building(
+        session,
+        condominio_id=condominio_id,
+        building_id=payload.task_building_id,
+    )
 
     now = datetime.now(timezone.utc)
     reminder = Reminder(
@@ -416,6 +442,7 @@ def create_reminder(
             payload.task_description.strip() if payload.task_description else None
         ),
         task_priority=payload.task_priority,
+        task_building_id=payload.task_building_id if payload.action_task else None,
         condominio_id=condominio_id,
         created_by_user_id=current_user.id,
         created_at=now,
@@ -470,6 +497,8 @@ def update_reminder(
         reminder.action_sms = payload.action_sms
     if payload.action_task is not None:
         reminder.action_task = payload.action_task
+        if not reminder.action_task:
+            reminder.task_building_id = None
 
     if "sms_to" in payload.model_fields_set:
         reminder.sms_to = (
@@ -483,6 +512,15 @@ def update_reminder(
         reminder.task_description = (payload.task_description or "").strip() or None
     if payload.task_priority is not None:
         reminder.task_priority = payload.task_priority
+    if "task_building_id" in payload.model_fields_set:
+        _validate_task_building(
+            session,
+            condominio_id=condominio_id,
+            building_id=payload.task_building_id,
+        )
+        reminder.task_building_id = (
+            payload.task_building_id if reminder.action_task else None
+        )
 
     _validate_schedule_config(
         schedule_unit=reminder.schedule_unit,

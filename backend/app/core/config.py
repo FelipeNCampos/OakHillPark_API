@@ -44,9 +44,16 @@ class Settings(BaseSettings):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def all_cors_origins(self) -> list[str]:
-        return [str(origin).rstrip("/") for origin in self.BACKEND_CORS_ORIGINS] + [
-            self.FRONTEND_HOST
+        origins = [str(origin).rstrip("/") for origin in self.BACKEND_CORS_ORIGINS] + [
+            self.FRONTEND_HOST.rstrip("/")
         ]
+        if self.ENVIRONMENT == "local":
+            origins.extend(
+                f"http://{host}:{port}"
+                for host in ("localhost", "127.0.0.1")
+                for port in (3000, 4173, 5173, 5174, 5175, 5176)
+            )
+        return list(dict.fromkeys(origins))
 
     PROJECT_NAME: str
     SENTRY_DSN: HttpUrl | None = None

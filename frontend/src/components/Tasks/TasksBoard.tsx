@@ -135,7 +135,9 @@ const apiCall = async (
         /fetch|network|load failed|failed to fetch/i.test(error.message))
     ) {
       throw new Error(
-        "Could not reach the API server. If you attached a photo, try a smaller image.",
+        `Could not reach the API server at ${requestUrl}. Current page: ${
+          typeof window === "undefined" ? "unknown" : window.location.origin
+        }. If you attached a photo, try a smaller image.`,
       )
     }
     throw error
@@ -629,20 +631,18 @@ export function TasksBoard({
 
     try {
       setIsSendingReport(true)
-      await Promise.all(
-        recipients.map((email) =>
-          apiCall("/api/v1/utils/send-report-email/", {
-            method: "POST",
-            body: {
-              email_to: email,
-              subject: "Tasks Report",
-              html_content: buildTaskReportEmailHtml(taskReportPeriodLabel),
-              file_name: taskReportFileName,
-              file_data_base64: fileDataBase64,
-            },
-          }),
-        ),
-      )
+      for (const email of recipients) {
+        await apiCall("/api/v1/utils/send-report-email/", {
+          method: "POST",
+          body: {
+            email_to: email,
+            subject: "Tasks Report",
+            html_content: buildTaskReportEmailHtml(taskReportPeriodLabel),
+            file_name: taskReportFileName,
+            file_data_base64: fileDataBase64,
+          },
+        })
+      }
       setReportRecipients(recipients)
       setReportEmailDraft("")
       showSuccessToast("Report sent by email")

@@ -626,7 +626,7 @@ class SMSNotificationCreate(SQLModel):
 
 
 class ReportEmailCreate(SQLModel):
-    email_to: EmailStr
+    email_to: str = Field(min_length=1, max_length=2000)
     subject: str = Field(min_length=1, max_length=255)
     html_content: str = Field(default="")
     file_name: str = Field(min_length=1, max_length=255)

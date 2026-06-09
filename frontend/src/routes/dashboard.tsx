@@ -749,7 +749,9 @@ const apiCall = async (
         /fetch|network|load failed|failed to fetch/i.test(error.message))
     ) {
       throw new Error(
-        "Could not reach the API server. Check that the backend is running and try a smaller attachment if you selected a file.",
+        `Could not reach the API server at ${url.toString()}. Current page: ${
+          typeof window === "undefined" ? "unknown" : window.location.origin
+        }. Check that the backend is running and try a smaller attachment if you selected a file.`,
       )
     }
     throw error
@@ -13338,23 +13340,21 @@ function FireAlarmSchedulePage() {
 
     try {
       setIsSendingReport(true)
-      await Promise.all(
-        recipients.map((email) =>
-          apiCall("/api/v1/utils/send-report-email/", {
-            method: "POST",
-            body: {
-              email_to: email,
-              subject: "Fire Alarm Report",
-              html_content: buildScheduleReportEmailHtml({
-                scheduleName: "Fire Alarm",
-                periodLabel: fireAlarmReportPeriodLabel,
-              }),
-              file_name: fireAlarmReportFileName,
-              file_data_base64: fileDataBase64,
-            },
-          }),
-        ),
-      )
+      for (const email of recipients) {
+        await apiCall("/api/v1/utils/send-report-email/", {
+          method: "POST",
+          body: {
+            email_to: email,
+            subject: "Fire Alarm Report",
+            html_content: buildScheduleReportEmailHtml({
+              scheduleName: "Fire Alarm",
+              periodLabel: fireAlarmReportPeriodLabel,
+            }),
+            file_name: fireAlarmReportFileName,
+            file_data_base64: fileDataBase64,
+          },
+        })
+      }
       setReportRecipients(recipients)
       setReportEmailDraft("")
       showSuccessToast("Report sent by email")

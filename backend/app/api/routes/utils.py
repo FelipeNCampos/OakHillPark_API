@@ -1,5 +1,6 @@
 import base64
 import binascii
+from pydantic import TypeAdapter, ValidationError
 
 from fastapi import APIRouter, Depends, Form, HTTPException
 from pydantic.networks import EmailStr
@@ -26,6 +27,17 @@ from app.utils import (
 )
 
 router = APIRouter(prefix="/utils", tags=["utils"])
+email_adapter = TypeAdapter(EmailStr)
+
+
+def _parse_email_recipients(value: str) -> list[str]:
+    recipients = [item.strip() for item in value.split(",") if item.strip()]
+    if not recipients:
+        raise HTTPException(status_code=422, detail="Email is required")
+    try:
+        return [str(email_adapter.validate_python(email)) for email in recipients]
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail="Invalid email address") from exc
 
 
 @router.post(
@@ -155,14 +167,16 @@ def send_report_email(payload: ReportEmailCreate, current_user: CurrentUser) -> 
     html_content = payload.html_content.strip() or (
         "<p>Hello,</p><p>Your readings report is attached as PDF.</p>"
     )
+    recipients = _parse_email_recipients(str(payload.email_to))
     try:
-        send_email_with_attachment(
-            email_to=str(payload.email_to),
-            subject=payload.subject.strip(),
-            html_content=html_content,
-            file_name=payload.file_name.strip(),
-            file_bytes=file_bytes,
-        )
+        for recipient in recipients:
+            send_email_with_attachment(
+                email_to=recipient,
+                subject=payload.subject.strip(),
+                html_content=html_content,
+                file_name=payload.file_name.strip(),
+                file_bytes=file_bytes,
+            )
     except AssertionError:
         raise HTTPException(
             status_code=400,

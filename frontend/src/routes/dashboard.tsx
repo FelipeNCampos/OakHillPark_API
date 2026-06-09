@@ -494,6 +494,7 @@ interface ReminderItem {
   task_title?: string | null
   task_description?: string | null
   task_priority: number
+  task_building_id?: EntityId | null
   last_triggered_on?: string | null
   updated_at: string
 }
@@ -7157,6 +7158,7 @@ function RemindsContent() {
     task_title: "",
     task_description: "",
     task_priority: "2",
+    task_building_id: "",
   })
 
   const { data: remindsData, isLoading } = useQuery<
@@ -7165,6 +7167,19 @@ function RemindsContent() {
     queryKey: ["reminds"],
     queryFn: () => apiCall("/api/v1/reminds/"),
   })
+  const { data: reminderBuildingsData } = useQuery<ApiListResponse<Building>>({
+    queryKey: ["buildings", "reminds"],
+    queryFn: () => apiCall("/api/v1/buildings/condominio"),
+    enabled: showModal || Boolean(remindsData?.data?.length),
+  })
+  const reminderBuildings = reminderBuildingsData?.data || []
+  const reminderBuildingMap = useMemo(() => {
+    const map = new Map<EntityId, string>()
+    reminderBuildings.forEach((building) => {
+      map.set(building.id, building.nome)
+    })
+    return map
+  }, [reminderBuildings])
 
   const resetForm = () => {
     setFormData({
@@ -7182,6 +7197,7 @@ function RemindsContent() {
       task_title: "",
       task_description: "",
       task_priority: "2",
+      task_building_id: "",
     })
   }
 
@@ -7419,6 +7435,10 @@ function RemindsContent() {
       task_title: formData.task_title.trim() || null,
       task_description: formData.task_description.trim() || null,
       task_priority: Number(formData.task_priority),
+      task_building_id:
+        formData.action_task && formData.task_building_id
+          ? formData.task_building_id
+          : null,
     }
 
     if (editingId) {
@@ -7446,6 +7466,7 @@ function RemindsContent() {
       task_title: reminder.task_title || "",
       task_description: reminder.task_description || "",
       task_priority: String(reminder.task_priority || 2),
+      task_building_id: reminder.task_building_id ? String(reminder.task_building_id) : "",
     })
     setShowModal(true)
   }
@@ -7508,6 +7529,12 @@ function RemindsContent() {
                     {reminder.action_task && (
                       <p className="text-xs text-[rgba(0,0,0,0.55)]">
                         Task priority: {reminder.task_priority || 2}
+                        {reminder.task_building_id
+                          ? ` - Building: ${
+                              reminderBuildingMap.get(reminder.task_building_id) ||
+                              "Selected building"
+                            }`
+                          : " - Building: Common areas"}
                       </p>
                     )}
                     {reminder.last_triggered_on && (
@@ -7887,27 +7914,55 @@ function RemindsContent() {
                     />
                   </div>
                   <div>
-                    <label
-                      htmlFor="remind-task-priority"
-                      className="mb-1 block text-sm font-semibold text-[#55311c]"
-                    >
-                      Task priority
-                    </label>
-                    <select
-                      id="remind-task-priority"
-                      value={formData.task_priority}
-                      onChange={(e) =>
-                        setFormData((prev) => ({
-                          ...prev,
-                          task_priority: e.target.value,
-                        }))
-                      }
-                      className="w-full rounded border border-[#d9d0ca] px-3 py-2 text-[#55311c] focus:border-[#8c7569] focus:outline-none"
-                    >
-                      <option value="1">Priority 1</option>
-                      <option value="2">Priority 2</option>
-                      <option value="3">Priority 3</option>
-                    </select>
+                    <div>
+                      <label
+                        htmlFor="remind-task-priority"
+                        className="mb-1 block text-sm font-semibold text-[#55311c]"
+                      >
+                        Task priority
+                      </label>
+                      <select
+                        id="remind-task-priority"
+                        value={formData.task_priority}
+                        onChange={(e) =>
+                          setFormData((prev) => ({
+                            ...prev,
+                            task_priority: e.target.value,
+                          }))
+                        }
+                        className="w-full rounded border border-[#d9d0ca] px-3 py-2 text-[#55311c] focus:border-[#8c7569] focus:outline-none"
+                      >
+                        <option value="1">Priority 1</option>
+                        <option value="2">Priority 2</option>
+                        <option value="3">Priority 3</option>
+                      </select>
+                    </div>
+                    <div className="mt-3">
+                      <label
+                        htmlFor="remind-task-building"
+                        className="mb-1 block text-sm font-semibold text-[#55311c]"
+                      >
+                        Building
+                      </label>
+                      <select
+                        id="remind-task-building"
+                        value={formData.task_building_id}
+                        onChange={(e) =>
+                          setFormData((prev) => ({
+                            ...prev,
+                            task_building_id: e.target.value,
+                          }))
+                        }
+                        className="w-full rounded border border-[#d9d0ca] px-3 py-2 text-[#55311c] focus:border-[#8c7569] focus:outline-none"
+                      >
+                        <option value="">Common areas</option>
+                        {reminderBuildings.map((building) => (
+                          <option key={building.id} value={String(building.id)}>
+                            {building.nome}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                   <div>
                     <label

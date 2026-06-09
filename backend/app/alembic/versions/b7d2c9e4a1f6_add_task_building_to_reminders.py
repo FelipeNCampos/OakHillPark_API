@@ -1,7 +1,7 @@
 """add task building to reminders
 
 Revision ID: b7d2c9e4a1f6
-Revises: bc3f8a1d9e42
+Revises: e6b9a2c4d8f1
 Create Date: 2026-06-09 00:00:00.000000
 """
 
@@ -11,7 +11,7 @@ from sqlalchemy import inspect
 
 
 revision = "b7d2c9e4a1f6"
-down_revision = "bc3f8a1d9e42"
+down_revision = "e6b9a2c4d8f1"
 branch_labels = None
 depends_on = None
 

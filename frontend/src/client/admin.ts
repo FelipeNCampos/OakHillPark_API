@@ -127,6 +127,7 @@ export type ReminderPublic = {
   task_title?: string | null
   task_description?: string | null
   task_priority: number
+  task_building_id?: string | null
   condominio_id: string
   created_by_user_id: string
   last_triggered_on?: string | null
@@ -150,6 +151,7 @@ export type ReminderCreate = {
   task_title?: string | null
   task_description?: string | null
   task_priority: number
+  task_building_id?: string | null
 }
 
 export type ReminderUpdate = {
@@ -167,6 +169,7 @@ export type ReminderUpdate = {
   task_title?: string | null
   task_description?: string | null
   task_priority?: number
+  task_building_id?: string | null
 }
 
 export type ReminderExecutionSummary = {

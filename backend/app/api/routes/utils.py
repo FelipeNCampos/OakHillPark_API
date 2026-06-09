@@ -2,7 +2,7 @@ import base64
 import binascii
 from pydantic import TypeAdapter, ValidationError
 
-from fastapi import APIRouter, Depends, Form, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException
 from pydantic.networks import EmailStr
 from sqlmodel import func, select
 
@@ -38,6 +38,23 @@ def _parse_email_recipients(value: str) -> list[str]:
         return [str(email_adapter.validate_python(email)) for email in recipients]
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail="Invalid email address") from exc
+
+
+def _send_report_email_attachment(
+    *,
+    recipient: str,
+    subject: str,
+    html_content: str,
+    file_name: str,
+    file_bytes: bytes,
+) -> None:
+    send_email_with_attachment(
+        email_to=recipient,
+        subject=subject,
+        html_content=html_content,
+        file_name=file_name,
+        file_bytes=file_bytes,
+    )
 
 
 @router.post(
@@ -145,7 +162,11 @@ def send_email_notification(
     "/send-report-email/",
     status_code=201,
 )
-def send_report_email(payload: ReportEmailCreate, current_user: CurrentUser) -> Message:
+def send_report_email(
+    payload: ReportEmailCreate,
+    current_user: CurrentUser,
+    background_tasks: BackgroundTasks,
+) -> Message:
     """
     Send report PDF by email (manager or superuser).
     """
@@ -168,23 +189,35 @@ def send_report_email(payload: ReportEmailCreate, current_user: CurrentUser) -> 
         "<p>Hello,</p><p>Your readings report is attached as PDF.</p>"
     )
     recipients = _parse_email_recipients(str(payload.email_to))
+    subject = payload.subject.strip()
+    file_name = payload.file_name.strip()
+
     try:
-        for recipient in recipients:
-            send_email_with_attachment(
-                email_to=recipient,
-                subject=payload.subject.strip(),
-                html_content=html_content,
-                file_name=payload.file_name.strip(),
-                file_bytes=file_bytes,
-            )
+        if not subject:
+            raise AssertionError
+        if not file_name:
+            raise AssertionError
+        # Check email configuration before returning so obvious setup issues remain visible.
+        from app.core.config import settings
+
+        assert settings.emails_enabled
     except AssertionError:
         raise HTTPException(
             status_code=400,
             detail="Email is not configured. Set SMTP_HOST and EMAILS_FROM_EMAIL.",
         )
-    except RuntimeError as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
-    return Message(message="Report sent successfully")
+
+    for recipient in recipients:
+        background_tasks.add_task(
+            _send_report_email_attachment,
+            recipient=recipient,
+            subject=subject,
+            html_content=html_content,
+            file_name=file_name,
+            file_bytes=file_bytes,
+        )
+
+    return Message(message="Report email queued successfully")
 
 
 @router.get(

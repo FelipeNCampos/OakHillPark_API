@@ -2702,7 +2702,7 @@ function OverviewContent({
     {
       title: "Schedules",
       items: [
-        { label: "Alarm schedule", tabId: "schedule-alarm" },
+        { label: "Fire Alarm", tabId: "schedule-alarm" },
         { label: "Lift schedule", tabId: "schedule-lift" },
         { label: "Emergency light", tabId: "schedule-light" },
       ],
@@ -14217,7 +14217,7 @@ function FireAlarmSchedulePage() {
         <div className="flex items-center justify-between rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
           <div>
             <h3 className="text-lg font-bold text-[#55311c]">
-              Fire alarm schedule history
+              Fire alarm history
             </h3>
             <p className="text-sm text-[rgba(0,0,0,0.65)]">
               Choose a saved date to edit or remove the record.
@@ -14394,7 +14394,7 @@ function FireAlarmSchedulePage() {
     if (deletedDates.delete(selectedDate)) {
       writeDateSetToStorage(FIRE_ALARM_DELETED_DATES_STORAGE_KEY, deletedDates)
     }
-    showSuccessToast("Alarm schedule saved")
+    showSuccessToast("Fire alarm saved")
   }
 
   return (

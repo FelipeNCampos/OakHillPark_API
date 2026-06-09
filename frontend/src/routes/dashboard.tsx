@@ -14431,7 +14431,10 @@ function FireAlarmSchedulePage() {
       </div>
 
       <Dialog open={isReportDialogOpen} onOpenChange={setIsReportDialogOpen}>
-        <DialogContent className="flex h-[80vh] w-[80vw] max-w-none flex-col border-[#e5e0dc] bg-white p-0 text-[#55311c]">
+        <DialogContent
+          className="flex h-[80vh] max-w-none flex-col border-[#e5e0dc] bg-white p-0 text-[#55311c]"
+          style={{ width: "76vw", maxWidth: "76vw" }}
+        >
           <DialogHeader className="border-b border-[#e5e0dc] px-6 py-4">
             <DialogTitle className="text-[#55311c]">
               Fire Alarm Report
@@ -14441,7 +14444,7 @@ function FireAlarmSchedulePage() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 overflow-hidden md:grid-cols-2">
+          <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 overflow-hidden md:grid-cols-[35%_65%]">
             <div className="space-y-4 overflow-y-auto border-b border-[#e5e0dc] p-6 md:border-b-0 md:border-r">
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>

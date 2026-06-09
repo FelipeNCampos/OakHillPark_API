@@ -289,6 +289,7 @@ const buildTaskApiPath = (
     return `/api/v1/tasks/public${path}${queryPrefix}condominio_id=${encodeURIComponent(publicCondominioId)}`
   }
 
+  if (!path) return "/api/v1/tasks/"
   return `/api/v1/tasks${path}`
 }
 

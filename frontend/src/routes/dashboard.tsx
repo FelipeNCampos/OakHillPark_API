@@ -1765,15 +1765,6 @@ const toDateInputValue = (date = new Date()) => {
   return `${year}-${month}-${day}`
 }
 
-const toTimeInputValue = (dateValue?: string | null) => {
-  if (!dateValue) return ""
-  const date = new Date(dateValue)
-  if (Number.isNaN(date.getTime())) return ""
-  const hours = String(date.getHours()).padStart(2, "0")
-  const minutes = String(date.getMinutes()).padStart(2, "0")
-  return `${hours}:${minutes}`
-}
-
 const toDateTimeLocalInputValue = (dateValue?: string | null) => {
   if (!dateValue) return ""
   const date = new Date(dateValue)

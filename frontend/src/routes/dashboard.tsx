@@ -121,6 +121,52 @@ const QR_TASKS_LABEL = "Task"
 const QR_BINS_LABEL = "Bins"
 const QR_CARETAKER_BINS_LABEL = "Caretaker Bins"
 const QR_WORK_TIME_LABEL = "Work Time"
+const FLAT_READING_TYPE_LOW = 1
+const FLAT_READING_TYPE_NORMAL = 2
+const FLAT_READING_TYPE_GAS = 4
+const FLAT_READING_TYPE_GARAGE = 8
+const READING_BUILDING_ORDER = [
+  "falcon",
+  "martlett",
+  "merlin",
+  "oak lodge",
+  "northwood",
+]
+
+const normalizeBuildingNameForOrder = (buildingName: string) =>
+  buildingName.trim().toLowerCase().replace(/\s+/g, " ")
+
+const getReadingBuildingOrder = (buildingName: string) => {
+  const order = READING_BUILDING_ORDER.indexOf(
+    normalizeBuildingNameForOrder(buildingName),
+  )
+  return order === -1 ? READING_BUILDING_ORDER.length : order
+}
+
+const compareReadingBuildingNames = (a: string, b: string) => {
+  const orderCompare = getReadingBuildingOrder(a) - getReadingBuildingOrder(b)
+  if (orderCompare !== 0) return orderCompare
+  return a.localeCompare(b)
+}
+
+const compareReadingBuildings = (
+  a: Pick<Building, "nome">,
+  b: Pick<Building, "nome">,
+) =>
+  compareReadingBuildingNames(a.nome, b.nome)
+
+const isNorthwoodFlatOne = ({
+  buildingName,
+  flatNumber,
+  flatLabel,
+}: {
+  buildingName?: string | null
+  flatNumber?: number | null
+  flatLabel?: string | null
+}) =>
+  buildingName?.trim().toLowerCase() === "northwood" &&
+  flatNumber === 1 &&
+  !(flatLabel || "").trim()
 
 const isCleanerQrBuilding = (building: Building) =>
   QR_SPECIAL_CLEANER_BUILDING_NAMES.has(building.nome.trim().toLowerCase())
@@ -694,6 +740,14 @@ const formatFlatLabel = (
   flatNumber?: number | null,
   flatLabel?: string | null,
 ) => `Flat ${formatFlatNumber(flatNumber, flatLabel)}`
+
+const compareReadingFlats = (
+  a: Pick<Flat, "numero" | "label">,
+  b: Pick<Flat, "numero" | "label">,
+) => {
+  if (a.numero !== b.numero) return a.numero - b.numero
+  return (a.label || "").localeCompare(b.label || "")
+}
 
 type ApiQueryParams = Record<
   string,
@@ -2405,6 +2459,7 @@ function ClientDashboard() {
       name: "Readings",
       id: "readings",
       items: [
+        { label: "All", id: "readings-all" },
         { label: "Buildings", id: "buildings" },
         { label: "Flats", id: "flats" },
       ],
@@ -2449,6 +2504,8 @@ function ClientDashboard() {
     switch (activeTab) {
       case "overview":
         return <OverviewContent user={user} onNavigate={setActiveTab} />
+      case "readings-all":
+        return <AllReadingsContent />
       case "buildings":
         return <BuildingsReadingsContent />
       case "buildings-add":
@@ -2702,6 +2759,7 @@ function OverviewContent({
     {
       title: "Readings",
       items: [
+        { label: "All", tabId: "readings-all" },
         { label: "Buildings", tabId: "buildings" },
         { label: "Flats", tabId: "flats" },
       ],
@@ -4229,6 +4287,54 @@ function CashFlowContent() {
   )
 }
 
+function AllReadingsContent() {
+  const { data: buildingsData, isLoading: buildingsLoading } = useQuery<
+    ApiListResponse<Building>
+  >({
+    queryKey: ["buildings"],
+    queryFn: () => apiCall("/api/v1/buildings/condominio"),
+  })
+
+  const buildings = (buildingsData?.data || []) as Building[]
+  const visibleBuildings = useMemo(
+    () =>
+      buildings
+        .filter((building) => {
+          const normalizedName = building.nome.trim().toLowerCase()
+          const hasBuildingReadings =
+            !READING_HIDDEN_BUILDING_NAMES.has(normalizedName) &&
+            building.reading_types !== 0
+          const hasFlatReadings =
+            !FLAT_READING_HIDDEN_BUILDING_NAMES.has(normalizedName) &&
+            (building.flats || []).some((flat) => flat.reading_types !== 0)
+          return hasBuildingReadings || hasFlatReadings
+        })
+        .sort(compareReadingBuildings),
+    [buildings],
+  )
+
+  if (buildingsLoading) {
+    return (
+      <div className="mx-auto max-w-[110rem]">
+        <div className="rounded-lg bg-white p-8 text-center shadow-md">
+          <p className="text-[#55311c]">Loading readings...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!visibleBuildings.length) {
+    return (
+      <div className="mx-auto max-w-[110rem]">
+        <div className="rounded-lg bg-white p-8 text-center shadow-md">
+          <p className="text-[#55311c]">No readings configured</p>
+        </div>
+      </div>
+    )
+  }
+
+  return <AddAllReadingsForm buildings={visibleBuildings} />
+}
 
 function BuildingsReadingsContent({
   initialShowForm = false,
@@ -4253,10 +4359,12 @@ function BuildingsReadingsContent({
   const buildings = (buildingsData?.data || []) as Building[]
   const visibleBuildings = useMemo(
     () =>
-      buildings.filter((building) => {
-        const normalizedName = building.nome.trim().toLowerCase()
-        return !READING_HIDDEN_BUILDING_NAMES.has(normalizedName)
-      }),
+      buildings
+        .filter((building) => {
+          const normalizedName = building.nome.trim().toLowerCase()
+          return !READING_HIDDEN_BUILDING_NAMES.has(normalizedName)
+        })
+        .sort(compareReadingBuildings),
     [buildings],
   )
 
@@ -4364,22 +4472,20 @@ function BuildingsReadingsContent({
           </p>
           <div className="w-full overflow-x-auto pb-1">
             <div className="flex min-w-max gap-3">
-              {[...visibleBuildings]
-                .sort((a, b) => a.nome.localeCompare(b.nome))
-                .map((building) => (
-                  <button
-                    key={building.id}
-                    onClick={() => setSelectedBuildingId(building.id)}
-                    className={`rounded-lg px-5 py-2.5 font-['Nunito',sans-serif] font-semibold whitespace-nowrap transition-all duration-200 ${
-                      selectedBuildingId === building.id
-                        ? "bg-[#55311c] text-white shadow-lg"
-                        : "bg-[#e8e4e1] text-[#55311c] hover:bg-[#ddd8d5]"
-                    }`}
-                    type="button"
-                  >
-                    {building.nome}
-                  </button>
-                ))}
+              {visibleBuildings.map((building) => (
+                <button
+                  key={building.id}
+                  onClick={() => setSelectedBuildingId(building.id)}
+                  className={`rounded-lg px-5 py-2.5 font-['Nunito',sans-serif] font-semibold whitespace-nowrap transition-all duration-200 ${
+                    selectedBuildingId === building.id
+                      ? "bg-[#55311c] text-white shadow-lg"
+                      : "bg-[#e8e4e1] text-[#55311c] hover:bg-[#ddd8d5]"
+                  }`}
+                  type="button"
+                >
+                  {building.nome}
+                </button>
+              ))}
             </div>
           </div>
         </div>
@@ -5337,6 +5443,7 @@ function BuildingReadingsTable({
                   />
                 </div>
               )}
+
             </div>
 
             <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end">
@@ -5439,6 +5546,391 @@ function BuildingReadingsTable({
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function AddAllReadingsForm({ buildings }: { buildings: Building[] }) {
+  const [buildingFormData, setBuildingFormData] = useState<
+    Record<string, Record<string, string>>
+  >({})
+  const [flatFormData, setFlatFormData] = useState<
+    Record<string, Record<string, string>>
+  >({})
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const queryClient = useQueryClient()
+  const { showSuccessToast, showErrorToast } = useCustomToast()
+
+  useEffect(() => {
+    const nextBuildingData: Record<string, Record<string, string>> = {}
+    const nextFlatData: Record<string, Record<string, string>> = {}
+
+    buildings.forEach((building) => {
+      const normalizedName = building.nome.trim().toLowerCase()
+      const showBuildingReadings =
+        !READING_HIDDEN_BUILDING_NAMES.has(normalizedName) &&
+        building.reading_types !== 0
+
+      if (showBuildingReadings) {
+        const buildingKey = String(building.id)
+        nextBuildingData[buildingKey] = {}
+        if ((building.reading_types & FLAT_READING_TYPE_LOW) !== 0) {
+          nextBuildingData[buildingKey].low = ""
+        }
+        if ((building.reading_types & FLAT_READING_TYPE_NORMAL) !== 0) {
+          nextBuildingData[buildingKey].normal = ""
+        }
+        if ((building.reading_types & FLAT_READING_TYPE_GAS) !== 0) {
+          nextBuildingData[buildingKey].gas = ""
+        }
+      }
+
+      if (FLAT_READING_HIDDEN_BUILDING_NAMES.has(normalizedName)) return
+
+      building.flats?.forEach((flat) => {
+        if (flat.reading_types === 0) return
+
+        const flatKey = String(flat.id)
+        nextFlatData[flatKey] = {}
+        if ((flat.reading_types & FLAT_READING_TYPE_LOW) !== 0) {
+          nextFlatData[flatKey].low = ""
+        }
+        if ((flat.reading_types & FLAT_READING_TYPE_NORMAL) !== 0) {
+          nextFlatData[flatKey].normal = ""
+        }
+        if ((flat.reading_types & FLAT_READING_TYPE_GAS) !== 0) {
+          nextFlatData[flatKey].gas = ""
+        }
+        if ((flat.reading_types & FLAT_READING_TYPE_GARAGE) !== 0) {
+          nextFlatData[flatKey].garage = ""
+        }
+      })
+    })
+
+    setBuildingFormData(nextBuildingData)
+    setFlatFormData(nextFlatData)
+  }, [buildings])
+
+  const getTipoValue = (type: string) => {
+    if (type === "low") return FLAT_READING_TYPE_LOW
+    if (type === "normal") return FLAT_READING_TYPE_NORMAL
+    if (type === "gas") return FLAT_READING_TYPE_GAS
+    if (type === "garage") return FLAT_READING_TYPE_GARAGE
+    return 0
+  }
+
+  const clearSubmittedValues = () => {
+    setBuildingFormData((current) =>
+      Object.fromEntries(
+        Object.entries(current).map(([id, types]) => [
+          id,
+          Object.fromEntries(Object.keys(types).map((type) => [type, ""])),
+        ]),
+      ),
+    )
+    setFlatFormData((current) =>
+      Object.fromEntries(
+        Object.entries(current).map(([id, types]) => [
+          id,
+          Object.fromEntries(Object.keys(types).map((type) => [type, ""])),
+        ]),
+      ),
+    )
+  }
+
+  const handleBuildingInputChange = (
+    buildingId: EntityId,
+    type: string,
+    value: string,
+  ) => {
+    const buildingKey = String(buildingId)
+    setBuildingFormData((prev) => ({
+      ...prev,
+      [buildingKey]: {
+        ...prev[buildingKey],
+        [type]: value,
+      },
+    }))
+  }
+
+  const handleFlatInputChange = (
+    flatId: EntityId,
+    type: string,
+    value: string,
+  ) => {
+    const flatKey = String(flatId)
+    setFlatFormData((prev) => ({
+      ...prev,
+      [flatKey]: {
+        ...prev[flatKey],
+        [type]: value,
+      },
+    }))
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setIsSubmitting(true)
+
+    try {
+      const buildingReadings: NewReadingPayload[] = []
+      const flatReadings: NewReadingPayload[] = []
+      const flatReadingDate = new Date().toISOString()
+
+      Object.entries(buildingFormData).forEach(([buildingId, types]) => {
+        Object.entries(types).forEach(([type, value]) => {
+          if (!value.trim()) return
+          buildingReadings.push({
+            building_id: buildingId,
+            tipo: getTipoValue(type),
+            valor: parseInt(value, 10),
+          })
+        })
+      })
+
+      Object.entries(flatFormData).forEach(([flatId, types]) => {
+        Object.entries(types).forEach(([type, value]) => {
+          if (!value.trim()) return
+          flatReadings.push({
+            flat_id: flatId,
+            tipo: getTipoValue(type),
+            valor: parseInt(value, 10),
+            data: flatReadingDate,
+          })
+        })
+      })
+
+      if (buildingReadings.length === 0 && flatReadings.length === 0) {
+        showErrorToast("Add at least one reading value")
+        return
+      }
+
+      for (const reading of buildingReadings) {
+        await apiCall("/api/v1/readings/", {
+          method: "POST",
+          body: reading,
+        })
+      }
+      for (const reading of flatReadings) {
+        await apiCall("/api/v1/flat_readings/", {
+          method: "POST",
+          body: reading,
+        })
+      }
+
+      queryClient.invalidateQueries({ queryKey: ["readings"] })
+      queryClient.invalidateQueries({ queryKey: ["flat_readings"] })
+      showSuccessToast("Readings registered successfully!")
+      clearSubmittedValues()
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Error creating readings"
+      showErrorToast(message)
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const renderReadingInput = ({
+    id,
+    label,
+    value,
+    onChange,
+  }: {
+    id: string
+    label: string
+    value: string
+    onChange: (value: string) => void
+  }) => (
+    <div>
+      <label
+        className="mb-2 block font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+        htmlFor={id}
+      >
+        {label}
+      </label>
+      <input
+        type="number"
+        id={id}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+        placeholder={`Valor ${label}`}
+      />
+    </div>
+  )
+
+  return (
+    <div className="mx-auto max-w-[110rem]">
+      <div className="rounded-lg bg-white p-4 shadow-md sm:p-8">
+        <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
+            All - Readings
+          </h2>
+        </div>
+
+        <form onSubmit={handleSubmit}>
+          <div className="space-y-6">
+            {buildings.map((building) => {
+              const normalizedName = building.nome.trim().toLowerCase()
+              const showBuildingReadings =
+                !READING_HIDDEN_BUILDING_NAMES.has(normalizedName) &&
+                buildingFormData[String(building.id)] !== undefined
+              const buildingFields = buildingFormData[String(building.id)] || {}
+              const flatRows = FLAT_READING_HIDDEN_BUILDING_NAMES.has(
+                normalizedName,
+              )
+                ? []
+                : [...(building.flats || [])]
+                    .filter((flat) => flat.reading_types !== 0)
+                    .sort(compareReadingFlats)
+
+              if (!showBuildingReadings && flatRows.length === 0) return null
+
+              return (
+                <section
+                  key={building.id}
+                  className="rounded-lg border-2 border-[#8c7569] p-4 sm:p-6"
+                >
+                  <h3 className="font-['Nunito',sans-serif] text-xl font-bold text-[#8c7569]">
+                    {building.nome}
+                  </h3>
+
+                  {showBuildingReadings && (
+                    <div className="mt-4">
+                      <h4 className="mb-3 font-['Nunito',sans-serif] text-base font-bold text-[#55311c]">
+                        Building readings
+                      </h4>
+                      <div className="grid gap-4 md:grid-cols-3">
+                        {"low" in buildingFields &&
+                          renderReadingInput({
+                            id: `all-building-${building.id}-low`,
+                            label: "Low",
+                            value: buildingFields.low || "",
+                            onChange: (value) =>
+                              handleBuildingInputChange(
+                                building.id,
+                                "low",
+                                value,
+                              ),
+                          })}
+                        {"normal" in buildingFields &&
+                          renderReadingInput({
+                            id: `all-building-${building.id}-normal`,
+                            label: "Normal",
+                            value: buildingFields.normal || "",
+                            onChange: (value) =>
+                              handleBuildingInputChange(
+                                building.id,
+                                "normal",
+                                value,
+                              ),
+                          })}
+                        {"gas" in buildingFields &&
+                          renderReadingInput({
+                            id: `all-building-${building.id}-gas`,
+                            label: "Gas",
+                            value: buildingFields.gas || "",
+                            onChange: (value) =>
+                              handleBuildingInputChange(
+                                building.id,
+                                "gas",
+                                value,
+                              ),
+                          })}
+                      </div>
+                    </div>
+                  )}
+
+                  {flatRows.length > 0 && (
+                    <div className="mt-5">
+                      <h4 className="mb-3 font-['Nunito',sans-serif] text-base font-bold text-[#55311c]">
+                        Flat readings
+                      </h4>
+                      <div className="space-y-4">
+                        {flatRows.map((flat) => {
+                          const flatFields = flatFormData[String(flat.id)] || {}
+
+                          return (
+                            <div
+                              key={flat.id}
+                              className="rounded-lg border-2 border-[#ddd] p-4"
+                            >
+                              <h5 className="mb-3 font-['Nunito',sans-serif] text-base font-semibold text-[#55311c]">
+                                {formatFlatLabel(flat.numero, flat.label)}
+                              </h5>
+                              <div className="grid gap-4 md:grid-cols-4">
+                                {"low" in flatFields &&
+                                  renderReadingInput({
+                                    id: `all-flat-${flat.id}-low`,
+                                    label: "Low",
+                                    value: flatFields.low || "",
+                                    onChange: (value) =>
+                                      handleFlatInputChange(
+                                        flat.id,
+                                        "low",
+                                        value,
+                                      ),
+                                  })}
+                                {"normal" in flatFields &&
+                                  renderReadingInput({
+                                    id: `all-flat-${flat.id}-normal`,
+                                    label: "Normal",
+                                    value: flatFields.normal || "",
+                                    onChange: (value) =>
+                                      handleFlatInputChange(
+                                        flat.id,
+                                        "normal",
+                                        value,
+                                      ),
+                                  })}
+                                {"gas" in flatFields &&
+                                  renderReadingInput({
+                                    id: `all-flat-${flat.id}-gas`,
+                                    label: "Gas",
+                                    value: flatFields.gas || "",
+                                    onChange: (value) =>
+                                      handleFlatInputChange(
+                                        flat.id,
+                                        "gas",
+                                        value,
+                                      ),
+                                  })}
+                                {"garage" in flatFields &&
+                                  renderReadingInput({
+                                    id: `all-flat-${flat.id}-garage`,
+                                    label: "Garage",
+                                    value: flatFields.garage || "",
+                                    onChange: (value) =>
+                                      handleFlatInputChange(
+                                        flat.id,
+                                        "garage",
+                                        value,
+                                      ),
+                                  })}
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </section>
+              )
+            })}
+          </div>
+
+          <div className="mt-8 flex justify-end">
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="w-full rounded-lg bg-[#8c7569] px-6 py-3 font-['Nunito',sans-serif] font-semibold text-white transition-all duration-300 hover:bg-[#55311c] disabled:opacity-50 sm:w-auto"
+            >
+              {isSubmitting ? "Saving..." : "Save Readings"}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   )
 }
@@ -5555,101 +6047,99 @@ function AddReadingsForm({
 
         <form onSubmit={handleSubmit}>
           <div className="space-y-6">
-            {[...buildings]
-              .sort((a, b) => a.nome.localeCompare(b.nome))
-              .map((building) => {
-                const hasLow = (building.reading_types & 1) !== 0
-                const hasNormal = (building.reading_types & 2) !== 0
-                const hasGas = (building.reading_types & 4) !== 0
+            {[...buildings].sort(compareReadingBuildings).map((building) => {
+              const hasLow = (building.reading_types & 1) !== 0
+              const hasNormal = (building.reading_types & 2) !== 0
+              const hasGas = (building.reading_types & 4) !== 0
 
-                return (
-                  <div
-                    key={building.id}
-                    className="rounded-lg border-2 border-[#ddd] p-6"
-                  >
-                    <h3 className="mb-4 font-['Nunito',sans-serif] text-xl font-bold text-[#55311c]">
-                      {building.nome}
-                    </h3>
+              return (
+                <div
+                  key={building.id}
+                  className="rounded-lg border-2 border-[#ddd] p-6"
+                >
+                  <h3 className="mb-4 font-['Nunito',sans-serif] text-xl font-bold text-[#55311c]">
+                    {building.nome}
+                  </h3>
 
-                    <div className="grid gap-4 md:grid-cols-3">
-                      {hasLow && (
-                        <div>
-                          <label
-                            className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
-                            htmlFor={`building-${building.id}-low`}
-                          >
-                            Low
-                          </label>
-                          <input
-                            type="number"
-                            id={`building-${building.id}-low`}
-                            value={formData[String(building.id)]?.low || ""}
-                            onChange={(e) =>
-                              handleInputChange(
-                                building.id,
-                                "low",
-                                e.target.value,
-                              )
-                            }
-                            className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
-                            placeholder="Valor Low"
-                          />
-                        </div>
-                      )}
+                  <div className="grid gap-4 md:grid-cols-3">
+                    {hasLow && (
+                      <div>
+                        <label
+                          className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                          htmlFor={`building-${building.id}-low`}
+                        >
+                          Low
+                        </label>
+                        <input
+                          type="number"
+                          id={`building-${building.id}-low`}
+                          value={formData[String(building.id)]?.low || ""}
+                          onChange={(e) =>
+                            handleInputChange(
+                              building.id,
+                              "low",
+                              e.target.value,
+                            )
+                          }
+                          className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+                          placeholder="Valor Low"
+                        />
+                      </div>
+                    )}
 
-                      {hasNormal && (
-                        <div>
-                          <label
-                            className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
-                            htmlFor={`building-${building.id}-normal`}
-                          >
-                            Normal
-                          </label>
-                          <input
-                            type="number"
-                            id={`building-${building.id}-normal`}
-                            value={formData[String(building.id)]?.normal || ""}
-                            onChange={(e) =>
-                              handleInputChange(
-                                building.id,
-                                "normal",
-                                e.target.value,
-                              )
-                            }
-                            className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
-                            placeholder="Valor Normal"
-                          />
-                        </div>
-                      )}
+                    {hasNormal && (
+                      <div>
+                        <label
+                          className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                          htmlFor={`building-${building.id}-normal`}
+                        >
+                          Normal
+                        </label>
+                        <input
+                          type="number"
+                          id={`building-${building.id}-normal`}
+                          value={formData[String(building.id)]?.normal || ""}
+                          onChange={(e) =>
+                            handleInputChange(
+                              building.id,
+                              "normal",
+                              e.target.value,
+                            )
+                          }
+                          className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+                          placeholder="Valor Normal"
+                        />
+                      </div>
+                    )}
 
-                      {hasGas && (
-                        <div>
-                          <label
-                            className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
-                            htmlFor={`building-${building.id}-gas`}
-                          >
-                            Gas
-                          </label>
-                          <input
-                            type="number"
-                            id={`building-${building.id}-gas`}
-                            value={formData[String(building.id)]?.gas || ""}
-                            onChange={(e) =>
-                              handleInputChange(
-                                building.id,
-                                "gas",
-                                e.target.value,
-                              )
-                            }
-                            className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
-                            placeholder="Valor Gas"
-                          />
-                        </div>
-                      )}
-                    </div>
+                    {hasGas && (
+                      <div>
+                        <label
+                          className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                          htmlFor={`building-${building.id}-gas`}
+                        >
+                          Gas
+                        </label>
+                        <input
+                          type="number"
+                          id={`building-${building.id}-gas`}
+                          value={formData[String(building.id)]?.gas || ""}
+                          onChange={(e) =>
+                            handleInputChange(
+                              building.id,
+                              "gas",
+                              e.target.value,
+                            )
+                          }
+                          className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+                          placeholder="Valor Gas"
+                        />
+                      </div>
+                    )}
                   </div>
-                )
-              })}
+                </div>
+              )
+            })}
           </div>
 
           <div className="mt-8 flex justify-end gap-4">
@@ -5698,13 +6188,15 @@ function AddFlatReadingsForm({
 
         const flatKey = String(flat.id)
         initialData[flatKey] = {}
-        const hasLow = (flat.reading_types & 1) !== 0
-        const hasNormal = (flat.reading_types & 2) !== 0
-        const hasGas = (flat.reading_types & 4) !== 0
+        const hasLow = (flat.reading_types & FLAT_READING_TYPE_LOW) !== 0
+        const hasNormal = (flat.reading_types & FLAT_READING_TYPE_NORMAL) !== 0
+        const hasGas = (flat.reading_types & FLAT_READING_TYPE_GAS) !== 0
+        const hasGarage = (flat.reading_types & FLAT_READING_TYPE_GARAGE) !== 0
 
         if (hasLow) initialData[flatKey].low = ""
         if (hasNormal) initialData[flatKey].normal = ""
         if (hasGas) initialData[flatKey].gas = ""
+        if (hasGarage) initialData[flatKey].garage = ""
       })
     })
     setFormData(initialData)
@@ -5733,9 +6225,10 @@ function AddFlatReadingsForm({
         Object.entries(types).forEach(([type, value]) => {
           if (value && value.trim() !== "") {
             let tipoValue = 0
-            if (type === "low") tipoValue = 1
-            else if (type === "normal") tipoValue = 2
-            else if (type === "gas") tipoValue = 4
+            if (type === "low") tipoValue = FLAT_READING_TYPE_LOW
+            else if (type === "normal") tipoValue = FLAT_READING_TYPE_NORMAL
+            else if (type === "gas") tipoValue = FLAT_READING_TYPE_GAS
+            else if (type === "garage") tipoValue = FLAT_READING_TYPE_GARAGE
 
             readings.push({
               flat_id: flatId,
@@ -5784,6 +6277,7 @@ function AddFlatReadingsForm({
       flats: building.flats?.filter((flat) => flat.reading_types !== 0) || [],
     }))
     .filter((building) => building.flats.length > 0)
+    .sort(compareReadingBuildings)
 
   if (buildingsWithFlats.length === 0) {
     return (
@@ -5838,11 +6332,16 @@ function AddFlatReadingsForm({
 
                 <div className="space-y-4">
                   {[...building.flats]
-                    .sort((a, b) => a.numero - b.numero)
+                    .sort(compareReadingFlats)
                     .map((flat) => {
-                      const hasLow = (flat.reading_types & 1) !== 0
-                      const hasNormal = (flat.reading_types & 2) !== 0
-                      const hasGas = (flat.reading_types & 4) !== 0
+                      const hasLow =
+                        (flat.reading_types & FLAT_READING_TYPE_LOW) !== 0
+                      const hasNormal =
+                        (flat.reading_types & FLAT_READING_TYPE_NORMAL) !== 0
+                      const hasGas =
+                        (flat.reading_types & FLAT_READING_TYPE_GAS) !== 0
+                      const hasGarage =
+                        (flat.reading_types & FLAT_READING_TYPE_GARAGE) !== 0
 
                       return (
                         <div
@@ -5930,6 +6429,33 @@ function AddFlatReadingsForm({
                                 />
                               </div>
                             )}
+
+                            {hasGarage && (
+                              <div>
+                                <label
+                                  className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                                  htmlFor={`flat-${flat.id}-garage`}
+                                >
+                                  Garage
+                                </label>
+                                <input
+                                  type="number"
+                                  id={`flat-${flat.id}-garage`}
+                                  value={
+                                    formData[String(flat.id)]?.garage || ""
+                                  }
+                                  onChange={(e) =>
+                                    handleInputChange(
+                                      flat.id,
+                                      "garage",
+                                      e.target.value,
+                                    )
+                                  }
+                                  className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+                                  placeholder="Valor Garage"
+                                />
+                              </div>
+                            )}
                           </div>
                         </div>
                       )
@@ -5982,10 +6508,12 @@ function FlatsReadingsContent({
   const buildings = (buildingsData?.data || []) as Building[]
   const visibleBuildings = useMemo(
     () =>
-      buildings.filter((building) => {
-        const normalizedName = building.nome.trim().toLowerCase()
-        return !FLAT_READING_HIDDEN_BUILDING_NAMES.has(normalizedName)
-      }),
+      buildings
+        .filter((building) => {
+          const normalizedName = building.nome.trim().toLowerCase()
+          return !FLAT_READING_HIDDEN_BUILDING_NAMES.has(normalizedName)
+        })
+        .sort(compareReadingBuildings),
     [buildings],
   )
   const firstBuildingId = visibleBuildings[0]?.id
@@ -6097,22 +6625,20 @@ function FlatsReadingsContent({
           </p>
           <div className="w-full overflow-x-auto pb-1">
             <div className="flex min-w-max gap-3">
-              {[...visibleBuildings]
-                .sort((a, b) => a.nome.localeCompare(b.nome))
-                .map((building) => (
-                  <button
-                    key={building.id}
-                    onClick={() => setSelectedBuildingId(building.id)}
-                    className={`rounded-lg px-5 py-2.5 font-['Nunito',sans-serif] font-semibold whitespace-nowrap transition-all duration-200 ${
-                      selectedBuildingId === building.id
-                        ? "bg-[#55311c] text-white shadow-lg"
-                        : "bg-[#e8e4e1] text-[#55311c] hover:bg-[#ddd8d5]"
-                    }`}
-                    type="button"
-                  >
-                    {building.nome}
-                  </button>
-                ))}
+              {visibleBuildings.map((building) => (
+                <button
+                  key={building.id}
+                  onClick={() => setSelectedBuildingId(building.id)}
+                  className={`rounded-lg px-5 py-2.5 font-['Nunito',sans-serif] font-semibold whitespace-nowrap transition-all duration-200 ${
+                    selectedBuildingId === building.id
+                      ? "bg-[#55311c] text-white shadow-lg"
+                      : "bg-[#e8e4e1] text-[#55311c] hover:bg-[#ddd8d5]"
+                  }`}
+                  type="button"
+                >
+                  {building.nome}
+                </button>
+              ))}
             </div>
           </div>
         </div>
@@ -6127,7 +6653,7 @@ function FlatsReadingsContent({
               <div className="w-full overflow-x-auto pb-1">
                 <div className="flex min-w-max gap-3">
                   {[...flats]
-                    .sort((a, b) => a.numero - b.numero)
+                    .sort(compareReadingFlats)
                     .map((flat) => (
                       <button
                         key={flat.id}
@@ -6216,10 +6742,11 @@ function FlatReadingsTable({
 
   const readings = (readingsData?.data || []) as Reading[]
 
-  // Determine which types this flat has (bitmask: 1=Low, 2=Normal, 4=Gas)
-  const hasLow = (flat.reading_types & 1) !== 0
-  const hasNormal = (flat.reading_types & 2) !== 0
-  const hasGas = (flat.reading_types & 4) !== 0
+  // Determine which types this flat has (bitmask: 1=Low, 2=Normal, 4=Gas, 8=Garage)
+  const hasLow = (flat.reading_types & FLAT_READING_TYPE_LOW) !== 0
+  const hasNormal = (flat.reading_types & FLAT_READING_TYPE_NORMAL) !== 0
+  const hasGas = (flat.reading_types & FLAT_READING_TYPE_GAS) !== 0
+  const hasGarage = (flat.reading_types & FLAT_READING_TYPE_GARAGE) !== 0
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
   const [editingRow, setEditingRow] = useState<ProcessedReading | null>(null)
@@ -6228,6 +6755,7 @@ function FlatReadingsTable({
     low?: string
     normal?: string
     gas?: string
+    garage?: string
   }>({})
   const [showReportModal, setShowReportModal] = useState(false)
   const [reportDateFrom, setReportDateFrom] = useState("")
@@ -6253,9 +6781,11 @@ function FlatReadingsTable({
     low?: number
     normal?: number
     gas?: number
+    garage?: number
     lowId?: EntityId
     normalId?: EntityId
     gasId?: EntityId
+    garageId?: EntityId
   }
 
   // Group readings by date
@@ -6270,19 +6800,24 @@ function FlatReadingsTable({
         low: undefined,
         normal: undefined,
         gas: undefined,
+        garage: undefined,
       }
     }
-    if (reading.tipo === 1) {
+    if (reading.tipo === FLAT_READING_TYPE_LOW) {
       readingsByDate[dateStr].low = reading.valor
       readingsByDate[dateStr].lowId = reading.id
     }
-    if (reading.tipo === 2) {
+    if (reading.tipo === FLAT_READING_TYPE_NORMAL) {
       readingsByDate[dateStr].normal = reading.valor
       readingsByDate[dateStr].normalId = reading.id
     }
-    if (reading.tipo === 4) {
+    if (reading.tipo === FLAT_READING_TYPE_GAS) {
       readingsByDate[dateStr].gas = reading.valor
       readingsByDate[dateStr].gasId = reading.id
+    }
+    if (reading.tipo === FLAT_READING_TYPE_GARAGE) {
+      readingsByDate[dateStr].garage = reading.valor
+      readingsByDate[dateStr].garageId = reading.id
     }
   }
 
@@ -6304,6 +6839,8 @@ function FlatReadingsTable({
     normalPercent?: string
     gasUsed?: number
     gasPercent?: string
+    garageUsed?: number
+    garagePercent?: string
   }
 
   const processedData: ProcessedReading[] = sortedReadings.map(
@@ -6500,6 +7037,30 @@ function FlatReadingsTable({
         )
       }
 
+      if (
+        editingRow.garageId &&
+        editValues.garage !== undefined &&
+        editValues.garage.trim() !== "" &&
+        (Number(editValues.garage) !== editingRow.garage || dateChanged)
+      ) {
+        updates.push(
+          apiCall(`/api/v1/flat_readings/${editingRow.garageId}`, {
+            method: "PATCH",
+            body: {
+              valor: Number(editValues.garage),
+              ...(nextDate ? { data: nextDate } : {}),
+            },
+          }),
+        )
+      } else if (editingRow.garageId && dateChanged) {
+        updates.push(
+          apiCall(`/api/v1/flat_readings/${editingRow.garageId}`, {
+            method: "PATCH",
+            body: { data: nextDate },
+          }),
+        )
+      }
+
       if (updates.length === 0) {
         showErrorToast("No changes detected")
         return
@@ -6559,6 +7120,11 @@ function FlatReadingsTable({
         values.push(row.gas ?? "-")
         values.push(index === 0 ? "All" : (row.gasUsed ?? "-"))
         values.push(index === 0 ? "no data" : (row.gasPercent ?? "-"))
+      }
+      if (hasGarage) {
+        values.push(row.garage ?? "-")
+        values.push(index === 0 ? "All" : (row.garageUsed ?? "-"))
+        values.push(index === 0 ? "no data" : (row.garagePercent ?? "-"))
       }
       return values
     })
@@ -6855,6 +7421,21 @@ function FlatReadingsTable({
                     className={`border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-700 ${getPercentColor(row.gasPercent)}`}
                   >
                     {index === 0 ? "no data" : (row.gasPercent ?? "-")}
+                  </td>
+                </>
+              )}
+              {hasGarage && (
+                <>
+                  <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-700">
+                    {row.garage ?? "-"}
+                  </td>
+                  <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-700">
+                    {index === 0 ? "All" : (row.garageUsed ?? "-")}
+                  </td>
+                  <td
+                    className={`border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-700 ${getPercentColor(row.garagePercent)}`}
+                  >
+                    {index === 0 ? "no data" : (row.garagePercent ?? "-")}
                   </td>
                 </>
               )}
@@ -20372,10 +20953,12 @@ function ResidentsContent() {
   const buildings = buildingsData?.data || []
   const residentFilterBuildings = useMemo(
     () =>
-      buildings.filter((building) => {
-        const normalizedName = building.nome.trim().toLowerCase()
-        return !["office", "cleaner", "caretaker"].includes(normalizedName)
-      }),
+      buildings
+        .filter((building) => {
+          const normalizedName = building.nome.trim().toLowerCase()
+          return !["office", "cleaner", "caretaker"].includes(normalizedName)
+        })
+        .sort(compareReadingBuildings),
     [buildings],
   )
 
@@ -20391,7 +20974,10 @@ function ResidentsContent() {
   const sortedResidents = useMemo(
     () =>
       [...Residents].sort((a, b) => {
-        const buildingCompare = a.building_nome.localeCompare(b.building_nome)
+        const buildingCompare = compareReadingBuildingNames(
+          a.building_nome,
+          b.building_nome,
+        )
         if (buildingCompare !== 0) return buildingCompare
         if (a.flat_numero !== b.flat_numero)
           return a.flat_numero - b.flat_numero
@@ -20456,7 +21042,10 @@ function ResidentsContent() {
     })
 
     return [...groups.values()].sort((a, b) => {
-      const buildingCompare = a.building_nome.localeCompare(b.building_nome)
+      const buildingCompare = compareReadingBuildingNames(
+        a.building_nome,
+        b.building_nome,
+      )
       if (buildingCompare !== 0) return buildingCompare
       if (a.flat_numero !== b.flat_numero) return a.flat_numero - b.flat_numero
       return (a.flat_label || "").localeCompare(b.flat_label || "")
@@ -20562,9 +21151,10 @@ function ResidentsContent() {
     id: EntityId,
     currentTypes: number,
     typeValue: number,
+    allowGarage = false,
   ) => {
     // Flats do not support Low (bit 1), always keep it disabled.
-    const baseTypes = currentTypes & ~1
+    const baseTypes = currentTypes & ~FLAT_READING_TYPE_LOW
     let newTypes = baseTypes
     if (baseTypes & typeValue) {
       // Remove this type
@@ -20572,6 +21162,9 @@ function ResidentsContent() {
     } else {
       // Add this type
       newTypes = baseTypes | typeValue
+    }
+    if (!allowGarage) {
+      newTypes = newTypes & ~FLAT_READING_TYPE_GARAGE
     }
     updateReadingTypesMutation.mutate({ id, readingTypes: newTypes })
   }
@@ -20638,9 +21231,17 @@ function ResidentsContent() {
   const renderReadingTypeToggles = (morador?: Morador) => {
     if (!morador) return null
 
+    const allowGarage = isNorthwoodFlatOne({
+      buildingName: morador.building_nome,
+      flatNumber: morador.flat_numero,
+      flatLabel: morador.flat_label,
+    })
     const toggleOptions = [
-      { label: "Normal", value: 2 },
-      { label: "Gas", value: 4 },
+      { label: "Normal", value: FLAT_READING_TYPE_NORMAL },
+      { label: "Gas", value: FLAT_READING_TYPE_GAS },
+      ...(allowGarage
+        ? [{ label: "Garage", value: FLAT_READING_TYPE_GARAGE }]
+        : []),
     ]
 
     return (
@@ -20662,6 +21263,7 @@ function ResidentsContent() {
                   morador.id,
                   morador.reading_types,
                   option.value,
+                  allowGarage,
                 )
               }
               disabled={updateReadingTypesMutation.isPending}
@@ -21022,19 +21624,28 @@ function ResidentsContent() {
                         <th className="border border-gray-400 px-4 py-3 text-center font-['Nunito',sans-serif] font-semibold text-white">
                           Gas
                         </th>
+                        <th className="border border-gray-400 px-4 py-3 text-center font-['Nunito',sans-serif] font-semibold text-white">
+                          Garage
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
-                      {paginatedResidents.map((morador) => (
-                        <tr
-                          key={morador.id}
-                          className="cursor-pointer hover:bg-[#f5f1ee]"
-                          onClick={() =>
-                            openResidentEdit(morador.id, {
-                              editTitle: `Edit ${getResidentRoleEditToken(morador.cargo)}`,
-                            })
-                          }
-                        >
+                      {paginatedResidents.map((morador) => {
+                        const allowGarage = isNorthwoodFlatOne({
+                          buildingName: morador.building_nome,
+                          flatNumber: morador.flat_numero,
+                          flatLabel: morador.flat_label,
+                        })
+                        return (
+                          <tr
+                            key={morador.id}
+                            className="cursor-pointer hover:bg-[#f5f1ee]"
+                            onClick={() =>
+                              openResidentEdit(morador.id, {
+                                editTitle: `Edit ${getResidentRoleEditToken(morador.cargo)}`,
+                              })
+                            }
+                          >
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
                             {morador.building_nome}
                           </td>
@@ -21083,13 +21694,18 @@ function ResidentsContent() {
                           <td className="border border-gray-400 px-4 py-3 text-center">
                             <input
                               type="checkbox"
-                              checked={(morador.reading_types & 2) !== 0}
+                              checked={
+                                (morador.reading_types &
+                                  FLAT_READING_TYPE_NORMAL) !==
+                                0
+                              }
                               onClick={(event) => event.stopPropagation()}
                               onChange={() =>
                                 handleCheckboxChange(
                                   morador.id,
                                   morador.reading_types,
-                                  2,
+                                  FLAT_READING_TYPE_NORMAL,
+                                  allowGarage,
                                 )
                               }
                               disabled={updateReadingTypesMutation.isPending}
@@ -21099,21 +21715,54 @@ function ResidentsContent() {
                           <td className="border border-gray-400 px-4 py-3 text-center">
                             <input
                               type="checkbox"
-                              checked={(morador.reading_types & 4) !== 0}
+                              checked={
+                                (morador.reading_types &
+                                  FLAT_READING_TYPE_GAS) !==
+                                0
+                              }
                               onClick={(event) => event.stopPropagation()}
                               onChange={() =>
                                 handleCheckboxChange(
                                   morador.id,
                                   morador.reading_types,
-                                  4,
+                                  FLAT_READING_TYPE_GAS,
+                                  allowGarage,
                                 )
                               }
                               disabled={updateReadingTypesMutation.isPending}
                               className="h-4 w-4 cursor-pointer"
                             />
                           </td>
+                          <td className="border border-gray-400 px-4 py-3 text-center">
+                            {allowGarage ? (
+                              <input
+                                type="checkbox"
+                                checked={
+                                  (morador.reading_types &
+                                    FLAT_READING_TYPE_GARAGE) !==
+                                  0
+                                }
+                                onClick={(event) => event.stopPropagation()}
+                                onChange={() =>
+                                  handleCheckboxChange(
+                                    morador.id,
+                                    morador.reading_types,
+                                    FLAT_READING_TYPE_GARAGE,
+                                    allowGarage,
+                                  )
+                                }
+                                disabled={updateReadingTypesMutation.isPending}
+                                className="h-4 w-4 cursor-pointer"
+                              />
+                            ) : (
+                              <span className="text-xs text-[rgba(85,49,28,0.45)]">
+                                -
+                              </span>
+                            )}
+                          </td>
                         </tr>
-                      ))}
+                        )
+                      })}
                     </tbody>
                   </>
                 )}
@@ -21333,9 +21982,8 @@ function AddResidentForm({
   useEffect(() => {
     const allFlats: Array<{ id: string; label: string }> = []
 
-    // Sort buildings by nome and flats by numero
-    const sortedBuildings = [...(buildingsData?.data || [])].sort((a, b) =>
-      a.nome.localeCompare(b.nome),
+    const sortedBuildings = [...(buildingsData?.data || [])].sort(
+      compareReadingBuildings,
     )
 
     sortedBuildings.forEach((building) => {

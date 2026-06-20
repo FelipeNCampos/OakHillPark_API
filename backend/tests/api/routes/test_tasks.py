@@ -95,6 +95,7 @@ def test_tasks_lifecycle(client: TestClient, db: Session) -> None:
         "assigned_to_user_id": str(caretaker.id),
         "building_id": str(building.id),
         "priority": 1,
+        "weather": "rain",
     }
     create_task = client.post(
         f"{settings.API_V1_STR}/tasks/",
@@ -108,6 +109,7 @@ def test_tasks_lifecycle(client: TestClient, db: Session) -> None:
     assert task["building_id"] == str(building.id)
     assert task["building_label"] == building.nome
     assert task["priority"] == 1
+    assert task["weather"] == "rain"
 
     caretaker_password = random_lower_string()
     caretaker = crud.update_user(
@@ -253,6 +255,32 @@ def test_tasks_are_ordered_by_priority(client: TestClient, db: Session) -> None:
     assert task_ids.index(high_priority.json()["id"]) < task_ids.index(
         low_priority.json()["id"]
     )
+
+
+def test_task_creation_rejects_invalid_weather(
+    client: TestClient, db: Session
+) -> None:
+    _, _, caretaker = _ensure_condominio_and_users(db)
+
+    manager_headers = user_authentication_headers(
+        client=client,
+        email=settings.FIRST_SUPERUSER,
+        password=settings.FIRST_SUPERUSER_PASSWORD,
+    )
+
+    create_task = client.post(
+        f"{settings.API_V1_STR}/tasks/",
+        headers=manager_headers,
+        json={
+            "title": "Invalid weather task",
+            "description": "",
+            "assigned_to_user_id": str(caretaker.id),
+            "weather": "storm",
+        },
+    )
+
+    assert create_task.status_code == 400
+    assert create_task.json()["detail"] == "Invalid task weather"
 
 
 def test_reminder_created_task_uses_configured_priority(

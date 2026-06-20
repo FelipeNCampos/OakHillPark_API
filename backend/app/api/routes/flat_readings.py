@@ -9,6 +9,7 @@ from sqlmodel import func, select
 
 from app.api.deps import SessionDep, require_cargo
 from app.models import (
+    Building,
     Flat,
     FlatReading,
     FlatReadingCreate,
@@ -21,6 +22,7 @@ from app.utils import send_sms_notification
 
 router = APIRouter(prefix="/flat_readings", tags=["flat_readings"])
 logger = logging.getLogger(__name__)
+FLAT_READING_TYPE_GARAGE = 8
 
 
 def _normalize_phone_to_e164(
@@ -57,9 +59,10 @@ def _build_flat_readings_sms_message(
     reading_date: datetime,
     normal_value: int | None,
     gas_value: int | None,
+    garage_value: int | None,
 ) -> str | None:
-    # Notify only the utility types requested for the flow (normal/gas).
-    if normal_value is None and gas_value is None:
+    # Notify only the utility types requested for the flow (normal/gas/garage).
+    if normal_value is None and gas_value is None and garage_value is None:
         return None
 
     date_str = reading_date.astimezone(timezone.utc).strftime("%d/%m/%Y")
@@ -75,6 +78,8 @@ def _build_flat_readings_sms_message(
         parts.append(f"Normal: {normal_value}")
     if gas_value is not None:
         parts.append(f"Gas: {gas_value}")
+    if garage_value is not None:
+        parts.append(f"Garage: {garage_value}")
     values = " | ".join(parts)
     return (
         f"OakHill Park: reading update for {flat_ref} on {date_str}. "
@@ -82,9 +87,36 @@ def _build_flat_readings_sms_message(
     )
 
 
+def _is_northwood_flat_1(session: SessionDep, flat: Flat) -> bool:
+    building = session.get(Building, flat.building_id)
+    return bool(
+        building
+        and building.nome.strip().lower() == "northwood"
+        and flat.numero == 1
+        and not (flat.label or "").strip()
+    )
+
+
+def _ensure_flat_reading_type_allowed(
+    session: SessionDep, flat_id: uuid.UUID, tipo: int
+) -> None:
+    if tipo != FLAT_READING_TYPE_GARAGE:
+        return
+
+    flat = session.get(Flat, flat_id)
+    if not flat:
+        raise HTTPException(status_code=404, detail="Flat not found")
+
+    if not _is_northwood_flat_1(session, flat):
+        raise HTTPException(
+            status_code=400,
+            detail="Garage readings are only available for Northwood flat 1",
+        )
+
+
 def _send_flat_reading_sms(session: SessionDep, flat_reading: FlatReading) -> None:
-    # Flow applies only to normal/gas flat readings.
-    if flat_reading.tipo not in (2, 4):
+    # Flow applies only to normal/gas/garage flat readings.
+    if flat_reading.tipo not in (2, 4, FLAT_READING_TYPE_GARAGE):
         return
 
     flat = session.get(Flat, flat_reading.flat_id)
@@ -112,28 +144,39 @@ def _send_flat_reading_sms(session: SessionDep, flat_reading: FlatReading) -> No
             FlatReading.flat_id == flat_reading.flat_id,
             FlatReading.data >= day_start,
             FlatReading.data < day_end,
-            FlatReading.tipo.in_([2, 4]),
+            FlatReading.tipo.in_([2, 4, FLAT_READING_TYPE_GARAGE]),
         )
         .order_by(FlatReading.data.desc())
     ).all()
 
     latest_normal: int | None = None
     latest_gas: int | None = None
+    latest_garage: int | None = None
     for reading in day_readings:
         if reading.tipo == 2 and latest_normal is None:
             latest_normal = reading.valor
         if reading.tipo == 4 and latest_gas is None:
             latest_gas = reading.valor
-        if latest_normal is not None and latest_gas is not None:
+        if reading.tipo == FLAT_READING_TYPE_GARAGE and latest_garage is None:
+            latest_garage = reading.valor
+        if (
+            latest_normal is not None
+            and latest_gas is not None
+            and latest_garage is not None
+        ):
             break
 
     has_normal_config = (flat.reading_types & 2) != 0
     has_gas_config = (flat.reading_types & 4) != 0
-    has_both_types = has_normal_config and has_gas_config
+    has_garage_config = (flat.reading_types & FLAT_READING_TYPE_GARAGE) != 0
 
-    # If the flat tracks both utilities, wait until both readings are present
-    # and send a single combined SMS.
-    if has_both_types and (latest_normal is None or latest_gas is None):
+    # If the flat tracks multiple utilities, wait until all configured
+    # readings are present and send a single combined SMS.
+    if has_normal_config and latest_normal is None:
+        return
+    if has_gas_config and latest_gas is None:
+        return
+    if has_garage_config and latest_garage is None:
         return
 
     message = _build_flat_readings_sms_message(
@@ -142,6 +185,7 @@ def _send_flat_reading_sms(session: SessionDep, flat_reading: FlatReading) -> No
         reading_date=flat_reading.data,
         normal_value=latest_normal,
         gas_value=latest_gas,
+        garage_value=latest_garage,
     )
     if not message:
         return
@@ -200,6 +244,9 @@ def read_flat_reading(session: SessionDep, id: uuid.UUID) -> Any:
 
 @router.post("/", response_model=FlatReadingPublic, dependencies=[Depends(require_cargo(2))])
 def create_flat_reading(*, session: SessionDep, flat_reading_in: FlatReadingCreate) -> Any:
+    _ensure_flat_reading_type_allowed(
+        session, flat_reading_in.flat_id, flat_reading_in.tipo
+    )
     flat_reading = FlatReading.model_validate(flat_reading_in)
     session.add(flat_reading)
     session.commit()
@@ -214,6 +261,9 @@ def update_flat_reading(*, session: SessionDep, id: uuid.UUID, flat_reading_in: 
     if not flat_reading:
         raise HTTPException(status_code=404, detail="Flat reading not found")
     update_dict = flat_reading_in.model_dump(exclude_unset=True)
+    next_flat_id = update_dict.get("flat_id", flat_reading.flat_id)
+    next_tipo = update_dict.get("tipo", flat_reading.tipo)
+    _ensure_flat_reading_type_allowed(session, next_flat_id, next_tipo)
     flat_reading.sqlmodel_update(update_dict)
     session.add(flat_reading)
     session.commit()

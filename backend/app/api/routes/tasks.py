@@ -34,6 +34,7 @@ from app.models import (
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 TASK_ALLOWED_STATUSES = {"todo", "done"}
+TASK_ALLOWED_WEATHER = {"sun", "rain"}
 STATUS_EVENT_PREFIX = "[STATUS]"
 COVER_IMAGE_PREFIX = "[COVER_IMAGE]"
 TASK_CODE_PATTERN = re.compile(r"^task-(\d+)$")
@@ -132,6 +133,13 @@ def _normalize_task_status(status: str) -> str:
     return normalized
 
 
+def _normalize_task_weather(weather: str | None) -> str:
+    normalized = (weather or "sun").strip().lower()
+    if normalized not in TASK_ALLOWED_WEATHER:
+        raise HTTPException(status_code=400, detail="Invalid task weather")
+    return normalized
+
+
 def _normalize_task_image_data(field_name: str, value: str | None) -> str | None:
     if not value:
         return None
@@ -194,6 +202,7 @@ def _task_to_public(
         requires_completion_image=requires_completion_image,
         status=_normalize_task_status(task.status),
         priority=task.priority,
+        weather=_normalize_task_weather(task.weather),
         condominio_id=task.condominio_id,
         building_id=task.building_id,
         building_label=str(building_label),
@@ -465,6 +474,7 @@ def create_task(
             )
 
     cover_image_data = _normalize_task_image_data("image_data", payload.image_data)
+    weather = _normalize_task_weather(payload.weather)
 
     for _attempt in range(3):
         now = datetime.now(timezone.utc)
@@ -474,6 +484,7 @@ def create_task(
             description=payload.description.strip(),
             status="todo",
             priority=payload.priority,
+            weather=weather,
             condominio_id=condominio_id,
             building_id=building_id,
             created_by_user_id=current_user.id,
@@ -593,6 +604,7 @@ def read_tasks(
                 requires_completion_image=task.id in task_ids_with_cover_image,
                 status=_normalize_task_status(task.status),
                 priority=task.priority,
+                weather=_normalize_task_weather(task.weather),
                 condominio_id=task.condominio_id,
                 building_id=task.building_id,
                 building_label=building_label,
@@ -668,6 +680,7 @@ def read_public_tasks(
                 requires_completion_image=task.id in task_ids_with_cover_image,
                 status=_normalize_task_status(task.status),
                 priority=task.priority,
+                weather=_normalize_task_weather(task.weather),
                 condominio_id=task.condominio_id,
                 building_id=task.building_id,
                 building_label=building_label,

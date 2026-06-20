@@ -139,7 +139,7 @@ class FlatBase(SQLModel):
     label: str | None = Field(default=None, max_length=20)
     status: bool = Field(default=False)
     building_id: uuid.UUID
-    reading_types: int = Field(default=0, ge=0, le=7)  # Bitmask: 1=Low, 2=Normal, 4=Gas
+    reading_types: int = Field(default=0, ge=0, le=15)  # Bitmask: 1=Low, 2=Normal, 4=Gas, 8=Garage
     car1: str | None = Field(default=None, max_length=50)
     car2: str | None = Field(default=None, max_length=50)
     car3: str | None = Field(default=None, max_length=50)
@@ -148,7 +148,7 @@ class Flat(FlatBase, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     occupied: bool = Field(default=False)
     status: bool = Field(default=False) # 0 owner | 1 rented
-    reading_types: int = Field(default=0)  # Reading types this flat has (bitmask: 1=Low, 2=Normal, 4=Gas)
+    reading_types: int = Field(default=0)  # Reading types this flat has (bitmask: 1=Low, 2=Normal, 4=Gas, 8=Garage)
     building_id: uuid.UUID = Field(
         foreign_key="building.id", nullable=False, ondelete="CASCADE"
     )
@@ -387,6 +387,7 @@ class Task(SQLModel, table=True):
     description: str = Field(default="")
     status: str = Field(default="todo", max_length=20)  # todo | done
     priority: int = Field(default=2, ge=1, le=3)
+    weather: str = Field(default="sun", max_length=20)
     condominio_id: uuid.UUID = Field(
         foreign_key="condominio.id", nullable=False, ondelete="CASCADE"
     )
@@ -586,7 +587,7 @@ class FlatReading(SQLModel, table=True):
         default_factory=get_datetime_utc,
         sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
     )
-    tipo: int = Field(default=0)  # 1=Low, 2=Normal, 4=Gas
+    tipo: int = Field(default=0)  # 1=Low, 2=Normal, 4=Gas, 8=Garage
     valor: int
     flat_id: uuid.UUID = Field(
         foreign_key="flat.id", nullable=False, ondelete="CASCADE"
@@ -758,7 +759,7 @@ class FlatUpdate(SQLModel):
     label: str | None = Field(default=None, max_length=20)
     status: bool | None = None
     building_id: uuid.UUID | None = None
-    reading_types: int | None = Field(default=None, ge=0, le=7)
+    reading_types: int | None = Field(default=None, ge=0, le=15)
     car1: str | None = Field(default=None, max_length=50)
     car2: str | None = Field(default=None, max_length=50)
     car3: str | None = Field(default=None, max_length=50)
@@ -775,7 +776,7 @@ class FlatsPublic(SQLModel):
 
 class FlatReadingBase(SQLModel):
     data: datetime
-    tipo: int = Field(default=0)  # 1=Low, 2=Normal, 4=Gas
+    tipo: int = Field(default=0)  # 1=Low, 2=Normal, 4=Gas, 8=Garage
     valor: int
     flat_id: uuid.UUID
 
@@ -851,7 +852,7 @@ class MoradorWithFlatPublic(MoradorBase):
     flat_numero: int
     flat_label: str | None = None
     building_nome: str
-    reading_types: int  # Bitmask for reading types: 1=Low, 2=Normal, 4=Gas
+    reading_types: int  # Bitmask for reading types: 1=Low, 2=Normal, 4=Gas, 8=Garage
     car1: str | None = None
     car2: str | None = None
     car3: str | None = None
@@ -1349,6 +1350,7 @@ class TaskCreate(SQLModel):
     assigned_to_user_id: uuid.UUID | None = None
     building_id: uuid.UUID | None = None
     priority: int = Field(default=2, ge=1, le=3)
+    weather: str = Field(default="sun", max_length=20)
 
 
 class TaskStatusUpdate(SQLModel):
@@ -1365,6 +1367,7 @@ class TaskPublic(SQLModel):
     requires_completion_image: bool = False
     status: str
     priority: int
+    weather: str
     condominio_id: uuid.UUID
     building_id: uuid.UUID | None = None
     building_label: str

@@ -13,6 +13,8 @@ type ApiTaskStatus = TaskStatus | "paused"
 type BoardMode = "manager" | "caretaker" | "public"
 type TaskPriority = 1 | 2 | 3
 type TaskPriorityFilter = "all" | "1" | "2" | "3"
+type TaskWeather = "sun" | "rain"
+type TaskWeatherFilter = "all" | TaskWeather
 
 type ApiTask = {
   id: string
@@ -23,6 +25,7 @@ type ApiTask = {
   requires_completion_image: boolean
   status: ApiTaskStatus
   priority: TaskPriority
+  weather?: TaskWeather | null
   assigned_to_user_id: string
   assigned_to_name: string
   building_id?: string | null
@@ -172,6 +175,10 @@ const TASK_PRIORITY_OPTIONS: Array<{ value: TaskPriority; label: string }> = [
   { value: 2, label: "Priority 2" },
   { value: 3, label: "Priority 3" },
 ]
+const TASK_WEATHER_OPTIONS: Array<{ value: TaskWeather; label: string }> = [
+  { value: "sun", label: "Sun" },
+  { value: "rain", label: "Rain" },
+]
 
 const STATUS_EVENT_PREFIX = "[STATUS]"
 const COVER_IMAGE_PREFIX = "[COVER_IMAGE]"
@@ -248,6 +255,14 @@ const normalizeTaskPriority = (
   priority: number | null | undefined,
 ): TaskPriority => (priority === 1 || priority === 3 ? priority : 2)
 
+const normalizeTaskWeather = (
+  weather: string | null | undefined,
+): TaskWeather => (weather === "rain" ? "rain" : "sun")
+
+const getTaskWeatherLabel = (weather: string | null | undefined) =>
+  TASK_WEATHER_OPTIONS.find((option) => option.value === normalizeTaskWeather(weather))
+    ?.label || "Sun"
+
 const taskPriorityCardClass: Record<TaskPriority, string> = {
   1: "border-[#e0b8a8] bg-[#fff6f2] hover:bg-[#fff1eb]",
   2: "border-[#d8d6b8] bg-[#fcfbef] hover:bg-[#f8f6e5]",
@@ -313,9 +328,11 @@ export function TasksBoard({
   const [newImageData, setNewImageData] = useState<string | null>(null)
   const [newBuildingId, setNewBuildingId] = useState("common_area")
   const [newPriority, setNewPriority] = useState<TaskPriority>(2)
+  const [newWeather, setNewWeather] = useState<TaskWeather>("sun")
   const [buildingFilter, setBuildingFilter] = useState("all")
   const [priorityFilter, setPriorityFilter] =
     useState<TaskPriorityFilter>("all")
+  const [weatherFilter, setWeatherFilter] = useState<TaskWeatherFilter>("all")
   const [taskPages, setTaskPages] = useState<Record<TaskStatus, number>>({
     todo: 1,
     done: 1,
@@ -373,6 +390,7 @@ export function TasksBoard({
         ...task,
         status: normalizeTaskStatus(task.status as ApiTaskStatus),
         priority: normalizeTaskPriority(task.priority),
+        weather: normalizeTaskWeather(task.weather),
       })),
     [tasksData],
   )
@@ -419,8 +437,11 @@ export function TasksBoard({
         (task) => String(task.priority) === priorityFilter,
       )
     }
+    if (weatherFilter !== "all") {
+      nextTasks = nextTasks.filter((task) => task.weather === weatherFilter)
+    }
     return nextTasks
-  }, [buildingFilter, priorityFilter, tasks])
+  }, [buildingFilter, priorityFilter, tasks, weatherFilter])
 
   useEffect(() => {
     if (
@@ -464,6 +485,7 @@ export function TasksBoard({
       ...task,
       status: normalizeTaskStatus(task.status as ApiTaskStatus),
       priority: normalizeTaskPriority(task.priority),
+      weather: normalizeTaskWeather(task.weather),
     }
   }, [selectedTaskData, selectedTaskSummary])
 
@@ -503,7 +525,7 @@ export function TasksBoard({
 
   useEffect(() => {
     setTaskPages({ todo: 1, done: 1 })
-  }, [buildingFilter, priorityFilter])
+  }, [buildingFilter, priorityFilter, weatherFilter])
 
   useEffect(() => {
     setTaskPages((current) => ({
@@ -519,6 +541,7 @@ export function TasksBoard({
       "Building",
       "Status",
       "Priority",
+      "Wheather",
       "Assigned",
       "Created",
       "Updated",
@@ -543,6 +566,7 @@ export function TasksBoard({
           task.building_label || "-",
           statusLabel[task.status],
           `P${task.priority}`,
+          getTaskWeatherLabel(task.weather),
           task.assigned_to_name || "-",
           formatTaskReportDate(task.created_at),
           formatTaskReportDate(task.updated_at),
@@ -571,7 +595,7 @@ export function TasksBoard({
       body:
         taskReportRows.length > 0
           ? taskReportRows
-          : [["-", "-", "-", "-", "-", "-", "No tasks found.", "-"]],
+          : [["-", "-", "-", "-", "-", "-", "-", "No tasks found.", "-"]],
       theme: "grid",
       styles: {
         fontSize: 8,
@@ -721,6 +745,7 @@ export function TasksBoard({
           description: "",
           image_data: newImageData,
           priority: newPriority,
+          weather: newWeather,
           building_id:
             newBuildingId === "common_area" ? null : newBuildingId || null,
         },
@@ -731,6 +756,7 @@ export function TasksBoard({
       setNewImageData(null)
       setNewBuildingId("common_area")
       setNewPriority(2)
+      setNewWeather("sun")
       queryClient.invalidateQueries({ queryKey: ["tasks"] })
     },
     onError: (error: unknown) => {
@@ -992,7 +1018,7 @@ export function TasksBoard({
             </p>
           )}
           {(isManager || isPublic) && (
-            <div className="grid w-full gap-3 sm:w-[34rem] sm:grid-cols-2">
+            <div className="grid w-full gap-3 sm:w-[51rem] sm:grid-cols-3">
               <div>
                 <label
                   htmlFor="tasks-building-filter"
@@ -1015,6 +1041,29 @@ export function TasksBoard({
                   {visibleBuildingOptions.map((building) => (
                     <option key={building.id} value={building.id}>
                       {building.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label
+                  htmlFor="tasks-weather-filter"
+                  className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]"
+                >
+                  Wheather filter
+                </label>
+                <select
+                  id="tasks-weather-filter"
+                  value={weatherFilter}
+                  onChange={(e) =>
+                    setWeatherFilter(e.target.value as TaskWeatherFilter)
+                  }
+                  className="w-full rounded border border-[#ddd] px-3 py-2 text-sm text-black"
+                >
+                  <option value="all">All wheather</option>
+                  {TASK_WEATHER_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
                     </option>
                   ))}
                 </select>
@@ -1225,7 +1274,7 @@ export function TasksBoard({
       {isManager && (
         <div className="rounded-lg bg-white p-4 shadow-md sm:p-6">
           <h3 className="mb-3 text-lg font-bold text-[#55311c]">Create task</h3>
-          <div className="grid gap-3 md:grid-cols-4">
+          <div className="grid gap-3 md:grid-cols-5">
             <input
               value={newTitle}
               onChange={(e) => setNewTitle(e.target.value)}
@@ -1254,6 +1303,17 @@ export function TasksBoard({
               className="rounded border border-[#ddd] px-3 py-2 text-sm text-black"
             >
               {TASK_PRIORITY_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <select
+              value={newWeather}
+              onChange={(e) => setNewWeather(e.target.value as TaskWeather)}
+              className="rounded border border-[#ddd] px-3 py-2 text-sm text-black"
+            >
+              {TASK_WEATHER_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
@@ -1364,6 +1424,9 @@ export function TasksBoard({
                   <p className="font-semibold text-[#55311c]">{task.title}</p>
                   <p className="mt-1 text-xs text-[#8c7569]">
                     Building: {task.building_label}
+                  </p>
+                  <p className="mt-1 text-xs text-[#8c7569]">
+                    Wheather: {getTaskWeatherLabel(task.weather)}
                   </p>
                   <p className="mt-1 line-clamp-2 text-xs text-[rgba(0,0,0,0.65)]">
                     {task.description || "No description"}
@@ -1479,6 +1542,9 @@ export function TasksBoard({
                     Building: {selectedTask.building_label}
                   </p>
                 )}
+                <p className="mt-2 text-sm font-semibold text-[#8c7569]">
+                  Wheather: {getTaskWeatherLabel(selectedTask.weather)}
+                </p>
               </div>
             </div>
 

@@ -265,6 +265,52 @@ def test_update_morador_sms_preference(
     assert payload["receives_flat_reading_sms"] is True
 
 
+def test_update_morador_reading_types_allows_garage_for_northwood_flat_1(
+    client: TestClient, superuser_token_headers: dict[str, str], db: Session
+) -> None:
+    _, building, flat = _create_test_condominio_flat(db)
+    building.nome = "Northwood"
+    flat.numero = 1
+    flat.label = None
+    db.add(building)
+    db.add(flat)
+    db.commit()
+    db.refresh(flat)
+
+    morador = _create_test_morador(db, flat.id)
+
+    response = client.patch(
+        f"{settings.API_V1_STR}/moradores/{morador.id}/reading-types",
+        headers=superuser_token_headers,
+        json={"reading_types": 8},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["reading_types"] == 8
+    db.refresh(flat)
+    assert flat.reading_types == 8
+
+
+def test_update_morador_reading_types_rejects_garage_for_other_flats(
+    client: TestClient, superuser_token_headers: dict[str, str], db: Session
+) -> None:
+    _, _, flat = _create_test_condominio_flat(db)
+    morador = _create_test_morador(db, flat.id)
+
+    response = client.patch(
+        f"{settings.API_V1_STR}/moradores/{morador.id}/reading-types",
+        headers=superuser_token_headers,
+        json={"reading_types": 8},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == (
+        "Garage readings are only available for Northwood flat 1"
+    )
+    db.refresh(flat)
+    assert flat.reading_types == 0
+
+
 def test_update_morador_to_labeled_flat(
     client: TestClient, superuser_token_headers: dict[str, str], db: Session
 ) -> None:

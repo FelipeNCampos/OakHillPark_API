@@ -2,6 +2,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import case
 from sqlmodel import col, func, or_, select
 
 from app.api.deps import SessionDep, require_cargo
@@ -18,6 +19,28 @@ from app.models import (
 )
 
 router = APIRouter(prefix="/moradores", tags=["moradores"])
+
+BUILDING_READING_ORDER = ("Falcon", "Martlett", "Merlin", "Oak Lodge", "Northwood")
+FLAT_READING_TYPE_LOW = 1
+FLAT_READING_TYPE_NORMAL = 2
+FLAT_READING_TYPE_GAS = 4
+FLAT_READING_TYPE_GARAGE = 8
+FLAT_READING_TYPES_MAX = (
+    FLAT_READING_TYPE_LOW
+    | FLAT_READING_TYPE_NORMAL
+    | FLAT_READING_TYPE_GAS
+    | FLAT_READING_TYPE_GARAGE
+)
+
+
+def _building_reading_order_expression() -> Any:
+    return case(
+        *(
+            (func.lower(Building.nome) == building_name.lower(), index)
+            for index, building_name in enumerate(BUILDING_READING_ORDER)
+        ),
+        else_=len(BUILDING_READING_ORDER),
+    )
 
 
 def _normalize_car_value(value: str | None) -> str | None:
@@ -80,7 +103,12 @@ def read_moradores(
         select(Morador, Flat, Building)
         .join(Flat, col(Morador.flat_id) == col(Flat.id))
         .join(Building, col(Flat.building_id) == col(Building.id))
-        .order_by(Building.nome, Flat.numero, Flat.label)
+        .order_by(
+            _building_reading_order_expression(),
+            Building.nome,
+            Flat.numero,
+            Flat.label,
+        )
     )
 
     # Filter by building if provided
@@ -155,6 +183,14 @@ def read_moradores(
         for morador, flat, building in results
     ]
     return MoradoresWithFlatPublic(data=moradores_with_flat, count=count)
+
+
+def _is_northwood_flat_1(flat: Flat, building: Building) -> bool:
+    return (
+        building.nome.strip().lower() == "northwood"
+        and flat.numero == 1
+        and not (flat.label or "").strip()
+    )
 
 
 @router.get(
@@ -234,7 +270,13 @@ def update_morador_reading_types(
     *, session: SessionDep, id: uuid.UUID, request_body: dict
 ) -> Any:
     """Update reading types for a morador's flat"""
-    reading_types = request_body.get("reading_types", 0)
+    try:
+        reading_types = int(request_body.get("reading_types", 0))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="Invalid reading types")
+
+    if reading_types < 0 or reading_types > FLAT_READING_TYPES_MAX:
+        raise HTTPException(status_code=422, detail="Invalid reading types")
 
     morador = session.get(Morador, id)
     if not morador:
@@ -244,16 +286,24 @@ def update_morador_reading_types(
     if not flat:
         raise HTTPException(status_code=404, detail="Flat not found")
 
+    building = session.get(Building, flat.building_id)
+    if not building:
+        raise HTTPException(status_code=404, detail="Building not found")
+
+    if (reading_types & FLAT_READING_TYPE_GARAGE) and not _is_northwood_flat_1(
+        flat, building
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Garage readings are only available for Northwood flat 1",
+        )
+
     flat.reading_types = reading_types
     session.add(flat)
     session.commit()
     session.refresh(flat)
 
     # Return the updated morador with flat info
-    building = session.get(Building, flat.building_id)
-    if not building:
-        raise HTTPException(status_code=404, detail="Building not found")
-
     return MoradorWithFlatPublic(
         id=morador.id,
         cargo=morador.cargo,

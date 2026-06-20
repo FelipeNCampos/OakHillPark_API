@@ -5,9 +5,39 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import func, select
 
 from app.api.deps import SessionDep, require_cargo
-from app.models import Flat, FlatCreate, FlatPublic, FlatUpdate, FlatsPublic, Message
+from app.models import (
+    Building,
+    Flat,
+    FlatCreate,
+    FlatPublic,
+    FlatsPublic,
+    FlatUpdate,
+    Message,
+)
 
 router = APIRouter(prefix="/flats", tags=["flats"])
+FLAT_READING_TYPE_GARAGE = 8
+
+
+def _is_northwood_flat_1(session: SessionDep, flat: Flat) -> bool:
+    building = session.get(Building, flat.building_id)
+    return bool(
+        building
+        and building.nome.strip().lower() == "northwood"
+        and flat.numero == 1
+        and not (flat.label or "").strip()
+    )
+
+
+def _ensure_flat_reading_types_allowed(session: SessionDep, flat: Flat) -> None:
+    if (flat.reading_types & FLAT_READING_TYPE_GARAGE) == 0:
+        return
+    if _is_northwood_flat_1(session, flat):
+        return
+    raise HTTPException(
+        status_code=400,
+        detail="Garage readings are only available for Northwood flat 1",
+    )
 
 
 @router.get("/", response_model=FlatsPublic, dependencies=[Depends(require_cargo(2))])
@@ -30,6 +60,7 @@ def read_flat(session: SessionDep, id: uuid.UUID) -> Any:
 @router.post("/", response_model=FlatPublic, dependencies=[Depends(require_cargo(2))])
 def create_flat(*, session: SessionDep, flat_in: FlatCreate) -> Any:
     flat = Flat.model_validate(flat_in)
+    _ensure_flat_reading_types_allowed(session, flat)
     session.add(flat)
     session.commit()
     session.refresh(flat)
@@ -43,6 +74,7 @@ def update_flat(*, session: SessionDep, id: uuid.UUID, flat_in: FlatUpdate) -> A
         raise HTTPException(status_code=404, detail="Flat not found")
     update_dict = flat_in.model_dump(exclude_unset=True)
     flat.sqlmodel_update(update_dict)
+    _ensure_flat_reading_types_allowed(session, flat)
     session.add(flat)
     session.commit()
     session.refresh(flat)

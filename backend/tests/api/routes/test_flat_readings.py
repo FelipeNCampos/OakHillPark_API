@@ -133,3 +133,94 @@ def test_create_flat_reading_skips_sms_when_no_contact_opted_in(
 
     assert response.status_code == 200
     sms_mock.assert_not_called()
+
+
+def test_create_garage_flat_reading_sends_sms_for_northwood_flat_1(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    db: Session,
+) -> None:
+    condominio = Condominio.model_validate(CondominioCreate(nome="Northwood SMS"))
+    db.add(condominio)
+    db.flush()
+
+    building = Building.model_validate(
+        BuildingCreate(
+            nome="Northwood",
+            condominio_id=condominio.id,
+            reading_types=0,
+        )
+    )
+    db.add(building)
+    db.flush()
+
+    flat = Flat.model_validate(
+        FlatCreate(
+            numero=1,
+            status=True,
+            building_id=building.id,
+            reading_types=8,
+        )
+    )
+    db.add(flat)
+    db.flush()
+
+    tenant = Morador.model_validate(
+        MoradorCreate(
+            cargo=2,
+            nome="Northwood Tenant",
+            email=None,
+            mobile="07700992222",
+            receives_flat_reading_sms=True,
+            flat_id=flat.id,
+        )
+    )
+    db.add(tenant)
+    db.commit()
+    db.refresh(flat)
+
+    with patch(
+        "app.api.routes.flat_readings.send_sms_notification",
+        return_value="SM123",
+    ) as sms_mock:
+        response = client.post(
+            f"{settings.API_V1_STR}/flat_readings/",
+            headers=superuser_token_headers,
+            json={
+                "flat_id": str(flat.id),
+                "tipo": 8,
+                "valor": 55,
+                "data": datetime(2026, 3, 15, 8, 0, tzinfo=timezone.utc).isoformat(),
+            },
+        )
+
+    assert response.status_code == 200
+    sms_mock.assert_called_once()
+    kwargs = sms_mock.call_args.kwargs
+    assert kwargs["phone_to"] == "+447700992222"
+    assert "Garage: 55" in kwargs["body"]
+    assert "flat 1" in kwargs["body"]
+
+
+def test_create_garage_flat_reading_rejects_non_northwood_flat_1(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    db: Session,
+) -> None:
+    _, _, flat, _, _ = _create_flat_reading_sms_scenario(db)
+
+    response = client.post(
+        f"{settings.API_V1_STR}/flat_readings/",
+        headers=superuser_token_headers,
+        json={
+            "flat_id": str(flat.id),
+            "tipo": 8,
+            "valor": 55,
+            "data": datetime(2026, 3, 15, 8, 0, tzinfo=timezone.utc).isoformat(),
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == (
+        "Garage readings are only available for Northwood flat 1"
+    )

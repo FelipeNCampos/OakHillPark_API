@@ -2,6 +2,7 @@ import uuid
 from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import case
 from sqlalchemy.orm import InstrumentedAttribute, selectinload
 from sqlmodel import func, select
 
@@ -17,6 +18,18 @@ from app.models import (
 )
 
 router = APIRouter(prefix="/buildings", tags=["buildings"])
+
+BUILDING_READING_ORDER = ("Falcon", "Martlett", "Merlin", "Oak Lodge", "Northwood")
+
+
+def _building_reading_order_expression() -> Any:
+    return case(
+        *(
+            (func.lower(Building.nome) == building_name.lower(), index)
+            for index, building_name in enumerate(BUILDING_READING_ORDER)
+        ),
+        else_=len(BUILDING_READING_ORDER),
+    )
 
 
 @router.get("/condominio", response_model=BuildingsPublic, dependencies=[Depends(require_cargo(1))])
@@ -37,6 +50,7 @@ def read_buildings_by_condominio(
         select(Building)
         .where(Building.condominio_id == condominio_id)
         .options(selectinload(cast(InstrumentedAttribute, Building.flats)))
+        .order_by(_building_reading_order_expression(), Building.nome.asc())
         .offset(skip)
         .limit(limit)
     )
@@ -48,7 +62,13 @@ def read_buildings_by_condominio(
 def read_buildings(session: SessionDep, skip: int = 0, limit: int = 100) -> Any:
     count_statement = select(func.count()).select_from(Building)
     count = session.exec(count_statement).one()
-    statement = select(Building).options(selectinload(cast(InstrumentedAttribute, Building.flats))).offset(skip).limit(limit)
+    statement = (
+        select(Building)
+        .options(selectinload(cast(InstrumentedAttribute, Building.flats)))
+        .order_by(_building_reading_order_expression(), Building.nome.asc())
+        .offset(skip)
+        .limit(limit)
+    )
     buildings = session.exec(statement).all()
     return BuildingsPublic(data=buildings, count=count)
 

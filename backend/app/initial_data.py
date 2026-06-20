@@ -4,7 +4,7 @@ import uuid
 from datetime import date
 from pathlib import Path
 
-from sqlmodel import Session, select
+from sqlmodel import Session, or_, select
 
 from app import crud
 from app.core.db import engine, init_db
@@ -58,6 +58,35 @@ def ensure_northwood_flat_1a(session: Session, condominio: Condominio) -> None:
     )
     session.commit()
     logger.info("Ensured Northwood flat 1A exists")
+
+
+def ensure_northwood_flat_1_garage(session: Session, condominio: Condominio) -> None:
+    northwood = session.exec(
+        select(Building).where(
+            Building.condominio_id == condominio.id,
+            Building.nome == "Northwood",
+        )
+    ).first()
+    if not northwood:
+        return
+
+    flat = session.exec(
+        select(Flat).where(
+            Flat.building_id == northwood.id,
+            Flat.numero == 1,
+            or_(Flat.label.is_(None), Flat.label == ""),
+        )
+    ).first()
+    if not flat:
+        return
+
+    if (flat.reading_types & 8) != 0:
+        return
+
+    flat.reading_types = flat.reading_types | 8
+    session.add(flat)
+    session.commit()
+    logger.info("Ensured Northwood flat 1 has garage readings enabled")
 
 
 def ensure_cleaner_building(session: Session, condominio: Condominio) -> None:
@@ -183,6 +212,7 @@ def create_initial_data() -> None:
 
             session.commit()
             ensure_northwood_flat_1a(session, condominio)
+            ensure_northwood_flat_1_garage(session, condominio)
             ensure_cleaner_building(session, condominio)
             ensure_caretaker_building(session, condominio)
             ensure_fire_alarm_schedule_seed(session)
@@ -201,8 +231,8 @@ def create_initial_data() -> None:
             "Falcon": 12,
             "Martlett": 16,
             "Merlin": 11,
-            "Northwood": 12,
             "Oak Lodge": 14,
+            "Northwood": 12,
             "Office": 0,  # Office doesn't have flats
             "Cleaner": 0,
             "Caretaker": 0,
@@ -238,7 +268,10 @@ def create_initial_data() -> None:
                 flat = Flat(
                     numero=flat_number,
                     status=True,
-                    building_id=building.id
+                    building_id=building.id,
+                    reading_types=8
+                    if building_name == "Northwood" and flat_number == 1
+                    else 0,
                 )
                 session.add(flat)
 

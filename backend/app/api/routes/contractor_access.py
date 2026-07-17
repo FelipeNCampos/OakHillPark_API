@@ -55,7 +55,18 @@ TEMPORARY_CONTRACTOR_DOOR_CODES = {
     "Oak": "Back Door: CY1285\nBoiler: CZ9612YX",
     "Oak Lodge": "Back Door: CY1285\nBoiler: CZ9612YX",
 }
-CONTRACTOR_ACCESS_HIDDEN_BUILDINGS = {"cleaner", "caretaker", "contractor"}
+CONTRACTOR_ACCESS_BUILDING_ORDER = (
+    "Falcon",
+    "Martlett",
+    "Merlin",
+    "Oak Lodge",
+    "Northwood",
+    "Estate OHP",
+)
+CONTRACTOR_ACCESS_BUILDING_ORDER_BY_NORMALISED_NAME = {
+    " ".join(name.casefold().split()): position
+    for position, name in enumerate(CONTRACTOR_ACCESS_BUILDING_ORDER)
+}
 NEXT_INTERVAL_UNITS = {"week", "month"}
 CONTRACTOR_MEDIA_FIELDS = (
     ("extra_media_name", "extra_media_data"),
@@ -148,7 +159,10 @@ def _get_contractor_door_code(building_name: str) -> str | None:
 
 
 def _is_visible_contractor_access_building(building_name: str) -> bool:
-    return _normalise_building_name(building_name) not in CONTRACTOR_ACCESS_HIDDEN_BUILDINGS
+    return (
+        _normalise_building_name(building_name)
+        in CONTRACTOR_ACCESS_BUILDING_ORDER_BY_NORMALISED_NAME
+    )
 
 
 def _contractor_visit_to_public(item: ContractorVisit) -> ContractorVisitPublic:
@@ -985,6 +999,11 @@ def read_contractor_access_buildings(
     visible_rows = [
         item for item in rows if _is_visible_contractor_access_building(item.nome)
     ]
+    visible_rows.sort(
+        key=lambda item: CONTRACTOR_ACCESS_BUILDING_ORDER_BY_NORMALISED_NAME[
+            _normalise_building_name(item.nome)
+        ]
+    )
 
     return ContractorAccessBuildingsPublic(
         data=[

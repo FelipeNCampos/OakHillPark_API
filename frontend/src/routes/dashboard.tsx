@@ -11,7 +11,9 @@ import { GlobalWorkerOptions } from "pdfjs-dist"
 import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url"
 import {
   CircleDollarSign,
+  Copy,
   FileSpreadsheet,
+  Link2,
   Pencil,
   Plus,
   Search,
@@ -466,6 +468,22 @@ interface CashFlowReportFormState {
   startMonth: string
   endMonth: string
   includeInvoiceTable: boolean
+}
+
+interface CashFlowShareLink {
+  id: string
+  url: string | null
+  date_from: string
+  date_to: string
+  expires_at: string
+  revoked_at: string | null
+  created_at: string
+  status: "active" | "expired" | "revoked"
+}
+
+interface CashFlowShareLinksResponse {
+  data: CashFlowShareLink[]
+  count: number
 }
 
 interface CaretakerRecordEditState {
@@ -2892,6 +2910,26 @@ function CashFlowContent() {
     null,
   )
   const [sendingReport, setSendingReport] = useState(false)
+  const [isShareOpen, setIsShareOpen] = useState(false)
+  const [shareDateFrom, setShareDateFrom] = useState(() =>
+    getMonthDateRange(getCurrentMonthInputValue()).dateFrom,
+  )
+  const [shareDateTo, setShareDateTo] = useState(() =>
+    getMonthDateRange(getCurrentMonthInputValue()).dateTo,
+  )
+  const [shareExpiryPreset, setShareExpiryPreset] = useState<
+    "24h" | "7d" | "30d" | "custom"
+  >("7d")
+  const [shareCustomExpiry, setShareCustomExpiry] = useState(() =>
+    toDateTimeLocalInputValue(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()),
+  )
+  const [shareError, setShareError] = useState<string | null>(null)
+  const [shareNotice, setShareNotice] = useState<string | null>(null)
+  const [creatingShareLink, setCreatingShareLink] = useState(false)
+  const [revokingShareLinkId, setRevokingShareLinkId] = useState<string | null>(
+    null,
+  )
+  const [hidingShareLinkId, setHidingShareLinkId] = useState<string | null>(null)
   const [, setReportFile] = useState<{
     fileName: string
     periodLabel: string
@@ -2957,6 +2995,12 @@ function CashFlowContent() {
         search: deferredSearch || undefined,
       }),
     placeholderData: keepPreviousData,
+  })
+
+  const shareLinksQuery = useQuery<CashFlowShareLinksResponse>({
+    queryKey: ["cash-flow-share-links"],
+    queryFn: () => apiCall("/api/v1/cash-flow/share-links/"),
+    enabled: isShareOpen,
   })
 
   const cumulativeBalanceQuery = useQuery<CashFlowRecordsResponse>({
@@ -3066,6 +3110,125 @@ function CashFlowContent() {
       if (current) URL.revokeObjectURL(current)
       return null
     })
+  }
+
+  const openShareModal = () => {
+    const range = getMonthDateRange(selectedMonth)
+    setShareDateFrom(range.dateFrom)
+    setShareDateTo(range.dateTo)
+    if (shareExpiryPreset !== "custom") {
+      const hours =
+        shareExpiryPreset === "24h" ? 24 : shareExpiryPreset === "7d" ? 168 : 720
+      setShareCustomExpiry(
+        toDateTimeLocalInputValue(
+          new Date(Date.now() + hours * 60 * 60 * 1000).toISOString(),
+        ),
+      )
+    }
+    setShareError(null)
+    setShareNotice(null)
+    setIsShareOpen(true)
+  }
+
+  const closeShareModal = () => {
+    if (creatingShareLink || revokingShareLinkId || hidingShareLinkId) return
+    setIsShareOpen(false)
+    setShareError(null)
+  }
+
+  const resolveShareExpiration = () => {
+    return parseDateTimeLocalToIso(shareCustomExpiry)
+  }
+
+  const selectShareExpirationPreset = (preset: "24h" | "7d" | "30d") => {
+    const hours = preset === "24h" ? 24 : preset === "7d" ? 168 : 720
+    const expiresAt = new Date()
+    expiresAt.setHours(expiresAt.getHours() + hours)
+    setShareExpiryPreset(preset)
+    setShareCustomExpiry(toDateTimeLocalInputValue(expiresAt.toISOString()))
+  }
+
+  const copyShareUrl = async (url: string) => {
+    try {
+      await navigator.clipboard.writeText(url)
+      setFeedback({ type: "success", message: "Shared link copied to clipboard." })
+      setShareNotice("Share link copied.")
+    } catch {
+      setShareError("Unable to copy the link. Please copy it from the field.")
+    }
+  }
+
+  const handleCreateShareLink = async (
+    event: React.FormEvent<HTMLFormElement>,
+  ) => {
+    event.preventDefault()
+    setShareError(null)
+    if (!shareDateFrom || !shareDateTo || shareDateFrom > shareDateTo) {
+      setShareError("Start date must be before or equal to end date.")
+      return
+    }
+    const expiresAt = resolveShareExpiration()
+    if (!expiresAt || new Date(expiresAt).getTime() <= Date.now()) {
+      setShareError("Choose a future expiration date and time.")
+      return
+    }
+
+    setCreatingShareLink(true)
+    try {
+      await apiCall("/api/v1/cash-flow/share-links/", {
+        method: "POST",
+        body: {
+          date_from: shareDateFrom,
+          date_to: shareDateTo,
+          expires_at: expiresAt,
+        },
+      })
+      setShareNotice("Share link created.")
+      await queryClient.invalidateQueries({ queryKey: ["cash-flow-share-links"] })
+    } catch (error) {
+      setShareError(
+        error instanceof Error ? error.message : "Unable to create shared link.",
+      )
+    } finally {
+      setCreatingShareLink(false)
+    }
+  }
+
+  const handleRevokeShareLink = async (link: CashFlowShareLink) => {
+    if (!window.confirm("Revoke this shared link? It will stop working immediately.")) {
+      return
+    }
+    setShareError(null)
+    setRevokingShareLinkId(link.id)
+    try {
+      await apiCall(`/api/v1/cash-flow/share-links/${link.id}`, {
+        method: "DELETE",
+      })
+      await queryClient.invalidateQueries({ queryKey: ["cash-flow-share-links"] })
+    } catch (error) {
+      setShareError(
+        error instanceof Error ? error.message : "Unable to revoke shared link.",
+      )
+    } finally {
+      setRevokingShareLinkId(null)
+    }
+  }
+
+  const handleHideShareLink = async (link: CashFlowShareLink) => {
+    setShareError(null)
+    setHidingShareLinkId(link.id)
+    try {
+      await apiCall(`/api/v1/cash-flow/share-links/${link.id}/hide`, {
+        method: "POST",
+      })
+      await queryClient.invalidateQueries({ queryKey: ["cash-flow-share-links"] })
+    } catch (error) {
+      setShareError(
+        error instanceof Error ? error.message : "Unable to hide shared link.",
+      )
+    } finally {
+      setHidingShareLinkId(null)
+    }
   }
 
   const closeInvoiceEditor = () => {
@@ -3580,6 +3743,13 @@ function CashFlowContent() {
             <FileSpreadsheet size={18} />
             Report
           </button>
+          <button
+            className={`${secondaryButtonClass} min-h-12 w-full md:flex-1`}
+            type="button"
+            onClick={openShareModal}
+          >
+            Share link
+          </button>
         </div>
       </section>
 
@@ -3760,6 +3930,175 @@ function CashFlowContent() {
           </table>
         </div>
       </section>
+
+      {isShareOpen ? (
+        <div className="fixed inset-0 z-40 grid place-items-center bg-black/40 p-4">
+          <article className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-2xl border border-[#e5e0dc] bg-white shadow-2xl">
+            <header className="flex items-center justify-between border-b border-[#e5e0dc] px-6 py-4">
+              <div>
+                <p className={labelClass}>Read-only access</p>
+                <h2 className="text-xl font-extrabold text-[#55311c]">Share cashflow</h2>
+              </div>
+              <button
+                className="grid h-9 w-9 place-items-center rounded-lg border border-[#d9d0ca] text-black"
+                type="button"
+                onClick={closeShareModal}
+                disabled={
+                  creatingShareLink ||
+                  Boolean(revokingShareLinkId) ||
+                  Boolean(hidingShareLinkId)
+                }
+              >
+                <X size={17} />
+              </button>
+            </header>
+
+            <div className="grid gap-6 p-6 lg:grid-cols-[320px_minmax(0,1fr)]">
+              <form className="grid gap-4" onSubmit={handleCreateShareLink}>
+                <label className="grid gap-2">
+                  <span className={labelClass}>Start date</span>
+                  <input
+                    className={inputClass}
+                    type="date"
+                    value={shareDateFrom}
+                    onChange={(event) => setShareDateFrom(event.target.value)}
+                    required
+                  />
+                </label>
+                <label className="grid gap-2">
+                  <span className={labelClass}>End date</span>
+                  <input
+                    className={inputClass}
+                    type="date"
+                    value={shareDateTo}
+                    onChange={(event) => setShareDateTo(event.target.value)}
+                    required
+                  />
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {([
+                    ["24h", "24h"],
+                    ["7d", "7d"],
+                    ["30d", "30d"],
+                  ] as const).map(([preset, label]) => (
+                    <button
+                      key={preset}
+                      className={`h-11 rounded-lg border text-sm font-extrabold transition ${
+                        shareExpiryPreset === preset
+                          ? "border-[#8c7569] bg-[#f5f1ee] text-[#55311c]"
+                          : "border-[#d9d0ca] bg-white text-[#55311c] hover:bg-[#f5f1ee]"
+                      }`}
+                      type="button"
+                      onClick={() => selectShareExpirationPreset(preset)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <label className="grid gap-2">
+                  <span className={labelClass}>Expires at</span>
+                  <input
+                    className={inputClass}
+                    type="datetime-local"
+                    value={shareCustomExpiry}
+                    onChange={(event) => {
+                      setShareExpiryPreset("custom")
+                      setShareCustomExpiry(event.target.value)
+                    }}
+                    required
+                  />
+                </label>
+                {shareError ? <p className="text-sm font-bold text-[#b42318]">{shareError}</p> : null}
+                {shareNotice ? <p className="text-sm font-extrabold text-[#00866f]">{shareNotice}</p> : null}
+                <button
+                  className={`${primaryButtonClass} w-full !bg-[#9c8578] hover:!bg-[#55311c]`}
+                  type="submit"
+                  disabled={creatingShareLink}
+                >
+                  <Link2 size={17} />
+                  {creatingShareLink ? "Creating..." : "Generate link"}
+                </button>
+              </form>
+              <section className="grid content-start gap-3">
+                <h3 className="text-lg font-extrabold text-[#55311c]">Manage links</h3>
+                {shareLinksQuery.isLoading ? <p className="text-sm font-semibold text-black/60">Loading shared links...</p> : null}
+                {shareLinksQuery.error ? <p className="text-sm font-bold text-[#b42318]">Unable to load shared links.</p> : null}
+                {shareLinksQuery.data?.data.length ? (
+                  <div className="grid gap-2">
+                    <div className="grid grid-cols-[minmax(0,1.35fr)_minmax(130px,1fr)_auto] gap-3 px-4 text-[11px] font-extrabold uppercase text-[rgba(85,49,28,0.72)]">
+                      <span>Period</span>
+                      <span>Expires</span>
+                      <span>Link</span>
+                    </div>
+                    {shareLinksQuery.data.data.map((link) => {
+                      const shareUrl = link.url
+                      return (
+                      <DropdownMenu key={link.id}>
+                        <DropdownMenuTrigger asChild>
+                          <article
+                            role="button"
+                            tabIndex={0}
+                            className={`grid cursor-pointer grid-cols-[minmax(0,1.35fr)_minmax(130px,1fr)_auto] items-center gap-3 rounded-xl border px-4 py-3 text-left outline-none transition focus-visible:ring-2 focus-visible:ring-[#8c7569] ${
+                              link.status === "expired"
+                                ? "border-[#f3c3ad] bg-[#fff3ee] hover:bg-[#fee8df]"
+                                : link.status === "active"
+                                  ? "border-[#98ebc8] bg-[#e9faf2] hover:bg-[#ddf7eb]"
+                                  : "border-[#d9d0ca] bg-[#faf8f6] hover:bg-[#f0ebe7]"
+                            }`}
+                          >
+                            <p className="truncate text-sm font-semibold text-[#55311c]">{link.date_from} to {link.date_to}</p>
+                            <p className="text-sm font-semibold text-[#55311c]">{new Date(link.expires_at).toLocaleString("en-GB")}</p>
+                            {shareUrl ? (
+                              <button
+                                className="grid h-8 w-8 place-items-center rounded-md text-[#1e332b] transition hover:bg-white/60"
+                                type="button"
+                                onPointerDown={(event) => event.stopPropagation()}
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  void copyShareUrl(shareUrl)
+                                }}
+                                aria-label={`Copy shared link ${link.id}`}
+                                title="Copy link"
+                              >
+                                <Copy size={18} />
+                              </button>
+                            ) : (
+                              <span className="text-xs font-bold uppercase text-black/45">
+                                Hidden
+                              </span>
+                            )}
+                          </article>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          {link.status === "revoked" ? (
+                            <DropdownMenuItem
+                              disabled={hidingShareLinkId === link.id}
+                              onSelect={() => void handleHideShareLink(link)}
+                            >
+                              {hidingShareLinkId === link.id ? "Hiding..." : "Hide"}
+                            </DropdownMenuItem>
+                          ) : (
+                            <DropdownMenuItem
+                              disabled={revokingShareLinkId === link.id}
+                              variant="destructive"
+                              onSelect={() => void handleRevokeShareLink(link)}
+                            >
+                              {revokingShareLinkId === link.id
+                                ? "Revoking..."
+                                : "Revoke"}
+                            </DropdownMenuItem>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                      )
+                    })}
+                  </div>
+                ) : shareLinksQuery.isSuccess ? <p className="text-sm font-semibold text-black/60">No shared links yet.</p> : null}
+              </section>
+            </div>
+          </article>
+        </div>
+      ) : null}
 
       {isCreateOpen ? (
         <div className="fixed inset-0 z-30 grid place-items-center bg-black/40 p-4">
@@ -11611,15 +11950,15 @@ function ContractorRecordCreateDialog({
     ApiListResponse<ContractorAccessBuilding>
   >({
     queryKey: ["contractor-buildings", "record-create"],
-    queryFn: () => apiCall("/api/v1/contractor-access/buildings"),
-    enabled: open,
+    queryFn: () =>
+      apiCall("/api/v1/contractor-access/buildings", {
+        condominio_id: user?.condominio_id,
+      }),
+    enabled: open && Boolean(user?.condominio_id),
   })
 
   const buildings = useMemo(
-    () =>
-      ((buildingsData?.data || []) as ContractorAccessBuilding[]).sort((a, b) =>
-        a.name.localeCompare(b.name),
-      ),
+    () => (buildingsData?.data || []) as ContractorAccessBuilding[],
     [buildingsData],
   )
 

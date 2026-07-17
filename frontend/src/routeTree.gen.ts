@@ -25,6 +25,7 @@ import { Route as LayoutRouteImport } from './routes/_layout'
 import { Route as LayoutIndexRouteImport } from './routes/_layout/index'
 import { Route as LayoutSettingsRouteImport } from './routes/_layout/settings'
 import { Route as LayoutAdminRouteImport } from './routes/_layout/admin'
+import { Route as CashFlowShareTokenRouteImport } from './routes/cash-flow/share/$token'
 
 const TasksAccessRoute = TasksAccessRouteImport.update({
   id: '/tasks-access',
@@ -105,6 +106,11 @@ const LayoutAdminRoute = LayoutAdminRouteImport.update({
   path: '/admin',
   getParentRoute: () => LayoutRoute,
 } as any)
+const CashFlowShareTokenRoute = CashFlowShareTokenRouteImport.update({
+  id: '/cash-flow/share/$token',
+  path: '/cash-flow/share/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof LayoutIndexRoute
@@ -122,6 +128,7 @@ export interface FileRoutesByFullPath {
   '/tasks-access': typeof TasksAccessRoute
   '/admin': typeof LayoutAdminRoute
   '/settings': typeof LayoutSettingsRoute
+  '/cash-flow/share/$token': typeof CashFlowShareTokenRoute
 }
 export interface FileRoutesByTo {
   '/bins-access': typeof BinsAccessRoute
@@ -139,6 +146,7 @@ export interface FileRoutesByTo {
   '/admin': typeof LayoutAdminRoute
   '/settings': typeof LayoutSettingsRoute
   '/': typeof LayoutIndexRoute
+  '/cash-flow/share/$token': typeof CashFlowShareTokenRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -158,6 +166,7 @@ export interface FileRoutesById {
   '/_layout/admin': typeof LayoutAdminRoute
   '/_layout/settings': typeof LayoutSettingsRoute
   '/_layout/': typeof LayoutIndexRoute
+  '/cash-flow/share/$token': typeof CashFlowShareTokenRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -177,6 +186,7 @@ export interface FileRouteTypes {
     | '/tasks-access'
     | '/admin'
     | '/settings'
+    | '/cash-flow/share/$token'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/bins-access'
@@ -194,6 +204,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/settings'
     | '/'
+    | '/cash-flow/share/$token'
   id:
     | '__root__'
     | '/_layout'
@@ -212,6 +223,7 @@ export interface FileRouteTypes {
     | '/_layout/admin'
     | '/_layout/settings'
     | '/_layout/'
+    | '/cash-flow/share/$token'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -228,6 +240,7 @@ export interface RootRouteChildren {
   ResetPasswordRoute: typeof ResetPasswordRoute
   SignupRoute: typeof SignupRoute
   TasksAccessRoute: typeof TasksAccessRoute
+  CashFlowShareTokenRoute: typeof CashFlowShareTokenRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -344,6 +357,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutAdminRouteImport
       parentRoute: typeof LayoutRoute
     }
+    '/cash-flow/share/$token': {
+      id: '/cash-flow/share/$token'
+      path: '/cash-flow/share/$token'
+      fullPath: '/cash-flow/share/$token'
+      preLoaderRoute: typeof CashFlowShareTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -376,6 +396,7 @@ const rootRouteChildren: RootRouteChildren = {
   ResetPasswordRoute: ResetPasswordRoute,
   SignupRoute: SignupRoute,
   TasksAccessRoute: TasksAccessRoute,
+  CashFlowShareTokenRoute: CashFlowShareTokenRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

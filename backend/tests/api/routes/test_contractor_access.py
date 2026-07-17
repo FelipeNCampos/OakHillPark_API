@@ -190,6 +190,45 @@ def test_contractor_access_buildings_hides_auxiliary_buildings(
     ]
 
 
+def test_contractor_access_buildings_returns_the_contractors_location_list_in_order(
+    client: TestClient,
+    db: Session,
+) -> None:
+    condominio = _create_test_condominio(db)
+    buildings = {
+        name: _create_test_building(db, condominio.id, name=name)
+        for name in (
+            "Northwood",
+            "Estate OHP",
+            "Oak Lodge",
+            "Falcon",
+            "Merlin",
+            "Martlett",
+        )
+    }
+    _create_test_building(db, condominio.id, name="Office")
+
+    response = client.get(
+        f"{settings.API_V1_STR}/contractor-access/buildings",
+        params={"condominio_id": str(condominio.id)},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    expected_names = [
+        "Falcon",
+        "Martlett",
+        "Merlin",
+        "Oak Lodge",
+        "Northwood",
+        "Estate OHP",
+    ]
+    assert [item["name"] for item in body["data"]] == expected_names
+    assert [item["id"] for item in body["data"]] == [
+        str(buildings[name].id) for name in expected_names
+    ]
+
+
 def test_contractor_check_out_uses_visit_id_with_repeated_phone(
     client: TestClient,
     db: Session,

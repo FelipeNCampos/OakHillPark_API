@@ -1,5 +1,5 @@
 import uuid
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from io import BytesIO
 from unittest.mock import patch
@@ -441,3 +441,129 @@ def test_cash_flow_report_money_cells_use_sign_colors() -> None:
     assert negative_cell.style.textColor == colors.HexColor("#cf0e0e")
     assert positive_cell.style.textColor == colors.HexColor("#217a4b")
     assert neutral_cell.style.textColor == colors.black
+
+
+def test_cash_flow_share_link_exposes_only_its_live_date_range(
+    client: TestClient,
+    db: Session,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    condominio = _create_test_condominio(db)
+    _assign_superuser_to_condominio(db, condominio)
+
+    for record_date, amount, description, has_invoice in (
+        ("2026-03-01", 100, "Before range", False),
+        ("2026-03-10", -25, "Invoice in range", True),
+        ("2026-03-31", 50, "Last day in range", False),
+        ("2026-04-01", 75, "After range", False),
+    ):
+        response = client.post(
+            f"{settings.API_V1_STR}/cash-flow/",
+            headers=superuser_token_headers,
+            json={
+                "has_invoice": has_invoice,
+                "invoice_media_name": "invoice.png" if has_invoice else None,
+                "invoice_media_data": (
+                    "data:image/png;base64,aGVsbG8=" if has_invoice else None
+                ),
+                "record_date": record_date,
+                "amount": amount,
+                "description": description,
+            },
+        )
+        assert response.status_code == 201
+
+    create_link = client.post(
+        f"{settings.API_V1_STR}/cash-flow/share-links/",
+        headers=superuser_token_headers,
+        json={
+            "date_from": "2026-03-10",
+            "date_to": "2026-03-31",
+            "expires_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+        },
+    )
+
+    assert create_link.status_code == 201
+    payload = create_link.json()
+    assert payload["url"].startswith(f"{settings.FRONTEND_HOST}/cash-flow/share/")
+    assert payload["date_from"] == "2026-03-10"
+    assert payload["date_to"] == "2026-03-31"
+
+    token = payload["url"].rsplit("/", maxsplit=1)[1]
+    public_response = client.get(f"{settings.API_V1_STR}/cash-flow/shared/{token}")
+
+    assert public_response.status_code == 200
+    public_payload = public_response.json()
+    assert public_payload["count"] == 2
+    assert public_payload["credits_total"] == 50
+    assert public_payload["debits_total"] == -25
+    assert public_payload["balance"] == 25
+    assert [record["description"] for record in public_payload["data"]] == [
+        "Invoice in range",
+        "Last day in range",
+    ]
+    assert public_payload["data"][0]["invoice_media_data"] == "data:image/png;base64,aGVsbG8="
+    assert "condominio_id" not in public_payload["data"][0]
+    assert "created_by_user_id" not in public_payload["data"][0]
+
+
+def test_cash_flow_share_link_can_be_listed_and_revoked(
+    client: TestClient,
+    db: Session,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    condominio = _create_test_condominio(db)
+    _assign_superuser_to_condominio(db, condominio)
+    create_link = client.post(
+        f"{settings.API_V1_STR}/cash-flow/share-links/",
+        headers=superuser_token_headers,
+        json={
+            "date_from": "2026-03-10",
+            "date_to": "2026-03-31",
+            "expires_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+        },
+    )
+    assert create_link.status_code == 201
+
+    links_response = client.get(
+        f"{settings.API_V1_STR}/cash-flow/share-links/",
+        headers=superuser_token_headers,
+    )
+
+    assert links_response.status_code == 200
+    listed_link = links_response.json()["data"][0]
+    assert listed_link["id"] == create_link.json()["id"]
+    assert listed_link["url"] == create_link.json()["url"]
+    assert listed_link["status"] == "active"
+
+    revoke_response = client.delete(
+        f"{settings.API_V1_STR}/cash-flow/share-links/{listed_link['id']}",
+        headers=superuser_token_headers,
+    )
+
+    assert revoke_response.status_code == 200
+    assert revoke_response.json()["status"] == "revoked"
+    assert revoke_response.json()["url"] is None
+
+    links_after_revoke = client.get(
+        f"{settings.API_V1_STR}/cash-flow/share-links/",
+        headers=superuser_token_headers,
+    )
+    assert links_after_revoke.status_code == 200
+    assert links_after_revoke.json()["data"][0]["url"] is None
+
+    hide_response = client.post(
+        f"{settings.API_V1_STR}/cash-flow/share-links/{listed_link['id']}/hide",
+        headers=superuser_token_headers,
+    )
+    assert hide_response.status_code == 200
+
+    links_after_hide = client.get(
+        f"{settings.API_V1_STR}/cash-flow/share-links/",
+        headers=superuser_token_headers,
+    )
+    assert links_after_hide.status_code == 200
+    assert links_after_hide.json()["count"] == 0
+
+    token = listed_link["url"].rsplit("/", maxsplit=1)[1]
+    assert client.get(f"{settings.API_V1_STR}/cash-flow/shared/{token}").status_code == 404

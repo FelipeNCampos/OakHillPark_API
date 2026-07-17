@@ -203,3 +203,44 @@ test.describe("Admin page access control", () => {
     await expect(page.getByRole("heading", { name: "Users" })).toBeVisible()
   })
 })
+
+test("Contractor record building options follow the defined location order", async ({
+  page,
+}) => {
+  await page.route("**/api/v1/contractor-access/buildings**", async (route) => {
+    const condominioId = new URL(route.request().url()).searchParams.get(
+      "condominio_id",
+    )
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        data: condominioId
+          ? [
+              { id: "northwood", name: "Northwood" },
+              { id: "estate", name: "Estate OHP" },
+              { id: "oak-lodge", name: "Oak Lodge" },
+              { id: "falcon", name: "Falcon" },
+              { id: "merlin", name: "Merlin" },
+              { id: "martlett", name: "Martlett" },
+            ]
+          : [],
+        count: condominioId ? 6 : 0,
+      }),
+    })
+  })
+
+  await page.goto("/")
+  await page.getByRole("button", { name: "Contractors" }).click()
+  await page.getByRole("button", { name: "+ Add" }).click()
+
+  await expect(page.getByRole("heading", { name: "Create contractor record" })).toBeVisible()
+  await expect(page.locator("#contractor-record-building option")).toHaveText([
+    "Select a building",
+    "Falcon",
+    "Martlett",
+    "Merlin",
+    "Oak Lodge",
+    "Northwood",
+    "Estate OHP",
+  ])
+})

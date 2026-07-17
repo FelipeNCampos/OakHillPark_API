@@ -1,16 +1,20 @@
 import base64
 import binascii
+import hashlib
 import math
 import re
+import secrets
 import uuid
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any
 
+from cryptography.fernet import Fernet, InvalidToken
 from fastapi import APIRouter, HTTPException, Response
 from sqlalchemy import or_
 from sqlmodel import func, select
 
 from app.api.deps import CurrentUser, SessionDep
+from app.core.config import settings
 from app.models import (
     CashFlowRecord,
     CashFlowRecordCreate,
@@ -18,6 +22,12 @@ from app.models import (
     CashFlowRecordsPublic,
     CashFlowRecordUpdate,
     CashFlowReportSendCreate,
+    CashFlowSharedRecordPublic,
+    CashFlowSharedRecordsPublic,
+    CashFlowShareLink,
+    CashFlowShareLinkCreate,
+    CashFlowShareLinkPublic,
+    CashFlowShareLinksPublic,
     Condominio,
     Message,
     User,
@@ -172,6 +182,60 @@ def _to_public(record: CashFlowRecord) -> CashFlowRecordPublic:
     )
 
 
+def _to_shared_public(record: CashFlowRecord) -> CashFlowSharedRecordPublic:
+    return CashFlowSharedRecordPublic(
+        id=record.id,
+        payment_number=record.payment_number,
+        has_invoice=record.has_invoice,
+        invoice_media_name=record.invoice_media_name,
+        invoice_media_data=record.invoice_media_data,
+        record_date=record.record_date,
+        amount=record.amount,
+        supplier=record.supplier,
+        description=record.description,
+    )
+
+
+def _share_token_cipher() -> Fernet:
+    configured_key = settings.CASH_FLOW_SHARE_TOKEN_ENCRYPTION_KEY
+    if configured_key:
+        return Fernet(configured_key.encode())
+    fallback_key = base64.urlsafe_b64encode(
+        hashlib.sha256(settings.SECRET_KEY.encode()).digest()
+    )
+    return Fernet(fallback_key)
+
+
+def _share_link_status(link: CashFlowShareLink, now: datetime) -> str:
+    if link.revoked_at is not None:
+        return "revoked"
+    if link.expires_at <= now:
+        return "expired"
+    return "active"
+
+
+def _share_link_url(link: CashFlowShareLink) -> str:
+    try:
+        token = _share_token_cipher().decrypt(link.token_encrypted.encode()).decode()
+    except (InvalidToken, UnicodeDecodeError) as exc:
+        raise HTTPException(status_code=500, detail="Unable to recover shared link") from exc
+    return f"{settings.FRONTEND_HOST.rstrip('/')}/cash-flow/share/{token}"
+
+
+def _to_share_link_public(link: CashFlowShareLink, now: datetime) -> CashFlowShareLinkPublic:
+    status = _share_link_status(link, now)
+    return CashFlowShareLinkPublic(
+        id=link.id,
+        url=_share_link_url(link) if status != "revoked" else None,
+        date_from=link.date_from,
+        date_to=link.date_to,
+        expires_at=link.expires_at,
+        revoked_at=link.revoked_at,
+        created_at=link.created_at,
+        status=status,
+    )
+
+
 @router.get("/", response_model=CashFlowRecordsPublic)
 def read_cash_flow_records(
     session: SessionDep,
@@ -228,6 +292,161 @@ def read_cash_flow_records(
             condominio_id=condominio_id,
             month_date=date_from or date.today(),
         ),
+    )
+
+
+@router.post("/share-links/", response_model=CashFlowShareLinkPublic, status_code=201)
+def create_cash_flow_share_link(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    payload: CashFlowShareLinkCreate,
+) -> CashFlowShareLinkPublic:
+    if not _is_manager(current_user):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    if payload.date_from > payload.date_to:
+        raise HTTPException(status_code=422, detail="date_from must be before date_to")
+    if payload.expires_at.tzinfo is None:
+        raise HTTPException(status_code=422, detail="expires_at must include a timezone")
+
+    now = datetime.now(timezone.utc)
+    expires_at = payload.expires_at.astimezone(timezone.utc)
+    if expires_at <= now:
+        raise HTTPException(status_code=422, detail="expires_at must be in the future")
+
+    condominio_id = _resolve_user_condominio_id(session, current_user)
+    if not condominio_id:
+        raise HTTPException(status_code=400, detail="No condominio configured")
+
+    token = secrets.token_urlsafe(32)
+    link = CashFlowShareLink(
+        token_hash=hashlib.sha256(token.encode()).hexdigest(),
+        token_encrypted=_share_token_cipher().encrypt(token.encode()).decode(),
+        date_from=payload.date_from,
+        date_to=payload.date_to,
+        expires_at=expires_at,
+        condominio_id=condominio_id,
+        created_by_user_id=current_user.id,
+    )
+    session.add(link)
+    session.commit()
+    session.refresh(link)
+    return _to_share_link_public(link, now)
+
+
+@router.get("/share-links/", response_model=CashFlowShareLinksPublic)
+def read_cash_flow_share_links(
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> CashFlowShareLinksPublic:
+    if not _is_manager(current_user):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    condominio_id = _resolve_user_condominio_id(session, current_user)
+    if not condominio_id:
+        raise HTTPException(status_code=400, detail="No condominio configured")
+
+    now = datetime.now(timezone.utc)
+    links = session.exec(
+        select(CashFlowShareLink)
+        .where(
+            CashFlowShareLink.condominio_id == condominio_id,
+            CashFlowShareLink.hidden_at.is_(None),
+        )
+        .order_by(CashFlowShareLink.created_at.desc())
+    ).all()
+    return CashFlowShareLinksPublic(
+        data=[_to_share_link_public(link, now) for link in links], count=len(links)
+    )
+
+
+@router.delete("/share-links/{share_link_id}", response_model=CashFlowShareLinkPublic)
+def revoke_cash_flow_share_link(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    share_link_id: uuid.UUID,
+) -> CashFlowShareLinkPublic:
+    if not _is_manager(current_user):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    condominio_id = _resolve_user_condominio_id(session, current_user)
+    if not condominio_id:
+        raise HTTPException(status_code=400, detail="No condominio configured")
+
+    link = session.get(CashFlowShareLink, share_link_id)
+    if not link or link.condominio_id != condominio_id:
+        raise HTTPException(status_code=404, detail="Shared cash flow link not found")
+
+    now = datetime.now(timezone.utc)
+    if link.revoked_at is None:
+        link.revoked_at = now
+        session.add(link)
+        session.commit()
+        session.refresh(link)
+    return _to_share_link_public(link, now)
+
+
+@router.post("/share-links/{share_link_id}/hide", response_model=Message)
+def hide_revoked_cash_flow_share_link(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    share_link_id: uuid.UUID,
+) -> Message:
+    if not _is_manager(current_user):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    condominio_id = _resolve_user_condominio_id(session, current_user)
+    if not condominio_id:
+        raise HTTPException(status_code=400, detail="No condominio configured")
+
+    link = session.get(CashFlowShareLink, share_link_id)
+    if not link or link.condominio_id != condominio_id:
+        raise HTTPException(status_code=404, detail="Shared cash flow link not found")
+    if link.revoked_at is None:
+        raise HTTPException(status_code=422, detail="Only revoked shared links can be hidden")
+
+    if link.hidden_at is None:
+        link.hidden_at = datetime.now(timezone.utc)
+        session.add(link)
+        session.commit()
+    return Message(message="Shared cash flow link hidden")
+
+
+@router.get("/shared/{token}", response_model=CashFlowSharedRecordsPublic)
+def read_shared_cash_flow_records(
+    session: SessionDep,
+    token: str,
+) -> CashFlowSharedRecordsPublic:
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    link = session.exec(
+        select(CashFlowShareLink).where(CashFlowShareLink.token_hash == token_hash)
+    ).first()
+    now = datetime.now(timezone.utc)
+    if not link or _share_link_status(link, now) != "active":
+        raise HTTPException(status_code=404, detail="Shared cash flow link not found")
+
+    records = session.exec(
+        select(CashFlowRecord)
+        .where(
+            CashFlowRecord.condominio_id == link.condominio_id,
+            CashFlowRecord.record_date >= link.date_from,
+            CashFlowRecord.record_date <= link.date_to,
+        )
+        .order_by(
+            CashFlowRecord.record_date.asc(),
+            CashFlowRecord.payment_number.asc(),
+            CashFlowRecord.created_at.asc(),
+            CashFlowRecord.id.asc(),
+        )
+    ).all()
+    amounts = [float(record.amount) for record in records]
+    return CashFlowSharedRecordsPublic(
+        data=[_to_shared_public(record) for record in records],
+        count=len(records),
+        date_from=link.date_from,
+        date_to=link.date_to,
+        credits_total=round(sum(amount for amount in amounts if amount > 0), 2),
+        debits_total=round(sum(amount for amount in amounts if amount < 0), 2),
+        balance=round(sum(amounts), 2),
     )
 
 

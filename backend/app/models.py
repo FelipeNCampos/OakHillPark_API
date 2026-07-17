@@ -99,6 +99,9 @@ class Condominio(SQLModel, table=True):
     cash_flow_records: list["CashFlowRecord"] = Relationship(
         back_populates="condominio", cascade_delete=True
     )
+    cash_flow_share_links: list["CashFlowShareLink"] = Relationship(
+        back_populates="condominio", cascade_delete=True
+    )
     cleaner_invoices: list["CleanerInvoice"] = Relationship(
         back_populates="condominio", cascade_delete=True
     )
@@ -529,6 +532,32 @@ class CashFlowRecord(SQLModel, table=True):
         sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
     )
     condominio: Condominio | None = Relationship(back_populates="cash_flow_records")
+
+
+class CashFlowShareLink(SQLModel, table=True):
+    __tablename__ = "cash_flow_share_link"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    token_hash: str = Field(unique=True, index=True, max_length=64)
+    token_encrypted: str = Field(max_length=512)
+    date_from: date = Field(index=True)
+    date_to: date = Field(index=True)
+    expires_at: datetime = Field(sa_type=SQLAlchemyDateTime(timezone=True))
+    revoked_at: datetime | None = Field(
+        default=None, sa_type=SQLAlchemyDateTime(timezone=True)
+    )
+    hidden_at: datetime | None = Field(
+        default=None, sa_type=SQLAlchemyDateTime(timezone=True)
+    )
+    condominio_id: uuid.UUID = Field(
+        foreign_key="condominio.id", nullable=False, ondelete="CASCADE", index=True
+    )
+    created_by_user_id: uuid.UUID = Field(foreign_key="user.id", nullable=False)
+    created_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    condominio: Condominio | None = Relationship(back_populates="cash_flow_share_links")
 
 
 class CleanerInvoice(SQLModel, table=True):
@@ -1280,6 +1309,50 @@ class CashFlowRecordsPublic(SQLModel):
     count: int
     balance: float
     next_payment_number: int
+
+
+class CashFlowShareLinkCreate(SQLModel):
+    date_from: date
+    date_to: date
+    expires_at: datetime
+
+
+class CashFlowShareLinkPublic(SQLModel):
+    id: uuid.UUID
+    url: str | None
+    date_from: date
+    date_to: date
+    expires_at: datetime
+    revoked_at: datetime | None
+    created_at: datetime
+    status: str
+
+
+class CashFlowShareLinksPublic(SQLModel):
+    data: list[CashFlowShareLinkPublic]
+    count: int
+
+
+class CashFlowSharedRecordPublic(SQLModel):
+    id: uuid.UUID
+    payment_number: int
+    has_invoice: bool
+    invoice_media_name: str | None
+    invoice_media_data: str | None
+    record_date: date
+    amount: float
+    supplier: str
+    description: str
+
+
+class CashFlowSharedRecordsPublic(SQLModel):
+    data: list[CashFlowSharedRecordPublic]
+    count: int
+    date_from: date
+    date_to: date
+    credits_total: float
+    debits_total: float
+    balance: float
 
 
 class CashFlowReportSendCreate(SQLModel):

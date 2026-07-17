@@ -12,6 +12,7 @@ from app.models import (
     Building,
     CaretakerMonthlyGoal,
     CashFlowRecord,
+    CashFlowShareLink,
     Condominio,
     ContractorVisit,
     Flat,
@@ -75,6 +76,11 @@ def db() -> Generator[Session, None, None]:
         session.exec(
             delete(CashFlowRecord).where(
                 CashFlowRecord.condominio_id.in_(test_condominio_ids)
+            )
+        )
+        session.exec(
+            delete(CashFlowShareLink).where(
+                CashFlowShareLink.condominio_id.in_(test_condominio_ids)
             )
         )
         session.exec(delete(Readings).where(Readings.building_id.in_(test_building_ids)))

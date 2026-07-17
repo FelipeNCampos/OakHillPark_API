@@ -1,3 +1,5 @@
+import base64
+import binascii
 import secrets
 import warnings
 from typing import Annotated, Any, Literal
@@ -36,6 +38,7 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8
     FRONTEND_HOST: str = "http://localhost:5173"
     ENVIRONMENT: Literal["local", "staging", "production"] = "local"
+    CASH_FLOW_SHARE_TOKEN_ENCRYPTION_KEY: str | None = None
 
     BACKEND_CORS_ORIGINS: Annotated[
         list[AnyUrl] | str, BeforeValidator(parse_cors)
@@ -139,6 +142,23 @@ class Settings(BaseSettings):
         self._check_default_secret(
             "CARETAKER_USER_PASSWORD", self.CARETAKER_USER_PASSWORD
         )
+
+        share_key = self.CASH_FLOW_SHARE_TOKEN_ENCRYPTION_KEY
+        if self.ENVIRONMENT != "local" and not share_key:
+            raise ValueError(
+                "CASH_FLOW_SHARE_TOKEN_ENCRYPTION_KEY must be configured outside local"
+            )
+        if share_key:
+            try:
+                decoded_share_key = base64.urlsafe_b64decode(share_key.encode())
+            except (binascii.Error, ValueError) as exc:
+                raise ValueError(
+                    "CASH_FLOW_SHARE_TOKEN_ENCRYPTION_KEY must be a Fernet key"
+                ) from exc
+            if len(decoded_share_key) != 32:
+                raise ValueError(
+                    "CASH_FLOW_SHARE_TOKEN_ENCRYPTION_KEY must be a Fernet key"
+                )
 
         return self
 

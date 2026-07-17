@@ -176,6 +176,8 @@ def _to_public(record: CashFlowRecord) -> CashFlowRecordPublic:
         amount=record.amount,
         supplier=record.supplier,
         description=record.description,
+        location=record.location,
+        reason=record.reason,
         condominio_id=record.condominio_id,
         created_by_user_id=record.created_by_user_id,
         created_at=record.created_at,
@@ -193,6 +195,8 @@ def _to_shared_public(record: CashFlowRecord) -> CashFlowSharedRecordPublic:
         amount=record.amount,
         supplier=record.supplier,
         description=record.description,
+        location=record.location,
+        reason=record.reason,
     )
 
 
@@ -542,6 +546,8 @@ def create_cash_flow_record(
         amount=_validate_amount(payload.amount),
         supplier=_normalise_text(payload.supplier),
         description=_normalise_text(payload.description),
+        location=_normalise_text(payload.location),
+        reason=_normalise_text(payload.reason),
         condominio_id=condominio_id,
         created_by_user_id=current_user.id,
     )
@@ -584,6 +590,10 @@ def update_cash_flow_record(
         update["supplier"] = _normalise_text(update["supplier"])
     if "description" in update and update["description"] is not None:
         update["description"] = _normalise_text(update["description"])
+    if "location" in update and update["location"] is not None:
+        update["location"] = _normalise_text(update["location"])
+    if "reason" in update and update["reason"] is not None:
+        update["reason"] = _normalise_text(update["reason"])
 
     has_invoice = bool(update.get("has_invoice", record.has_invoice))
     if "invoice_media_data" in update or "has_invoice" in update:

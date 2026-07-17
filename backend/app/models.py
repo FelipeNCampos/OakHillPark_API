@@ -523,6 +523,8 @@ class CashFlowRecord(SQLModel, table=True):
     amount: float = Field(default=0)
     supplier: str = Field(default="", max_length=255)
     description: str = Field(default="", max_length=500)
+    location: str = Field(default="", max_length=255)
+    reason: str = Field(default="", max_length=500)
     condominio_id: uuid.UUID = Field(
         foreign_key="condominio.id", nullable=False, ondelete="CASCADE", index=True
     )
@@ -1277,6 +1279,8 @@ class CashFlowRecordCreate(SQLModel):
     amount: float
     supplier: str = Field(default="", max_length=255)
     description: str = Field(default="", max_length=500)
+    location: str = Field(default="", max_length=255)
+    reason: str = Field(default="", max_length=500)
 
 
 class CashFlowRecordUpdate(SQLModel):
@@ -1287,6 +1291,8 @@ class CashFlowRecordUpdate(SQLModel):
     amount: float | None = None
     supplier: str | None = Field(default=None, max_length=255)
     description: str | None = Field(default=None, max_length=500)
+    location: str | None = Field(default=None, max_length=255)
+    reason: str | None = Field(default=None, max_length=500)
 
 
 class CashFlowRecordPublic(SQLModel):
@@ -1299,6 +1305,8 @@ class CashFlowRecordPublic(SQLModel):
     amount: float
     supplier: str
     description: str
+    location: str
+    reason: str
     condominio_id: uuid.UUID
     created_by_user_id: uuid.UUID
     created_at: datetime
@@ -1343,6 +1351,8 @@ class CashFlowSharedRecordPublic(SQLModel):
     amount: float
     supplier: str
     description: str
+    location: str
+    reason: str
 
 
 class CashFlowSharedRecordsPublic(SQLModel):

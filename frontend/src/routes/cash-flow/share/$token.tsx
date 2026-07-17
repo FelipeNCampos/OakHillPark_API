@@ -15,6 +15,8 @@ interface SharedCashFlowRecord {
   amount: number
   supplier: string
   description: string
+  location: string
+  reason: string
 }
 
 interface SharedCashFlowResponse {
@@ -90,7 +92,7 @@ function SharedCashFlowPage() {
 
         <section className="overflow-hidden rounded-2xl border border-[#e5e0dc] bg-white shadow-md">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-left text-sm">
+            <table className="w-full min-w-[960px] text-left text-sm">
               <thead className="bg-[#faf8f6] text-[11px] uppercase text-[rgba(85,49,28,0.72)]">
                 <tr>
                   <th className="px-4 py-3">Payment</th>
@@ -98,6 +100,8 @@ function SharedCashFlowPage() {
                   <th className="px-4 py-3 text-right">Amount</th>
                   <th className="px-4 py-3">Supplier</th>
                   <th className="px-4 py-3">Description</th>
+                  <th className="px-4 py-3">Location</th>
+                  <th className="px-4 py-3">Reason</th>
                   <th className="px-4 py-3">Invoice</th>
                 </tr>
               </thead>
@@ -112,6 +116,8 @@ function SharedCashFlowPage() {
                       </td>
                       <td className="px-4 py-3">{record.supplier || "-"}</td>
                       <td className="px-4 py-3">{record.description || "-"}</td>
+                      <td className="px-4 py-3">{record.location || "-"}</td>
+                      <td className="px-4 py-3">{record.reason || "-"}</td>
                       <td className="px-4 py-3">
                         {record.invoice_media_data ? (
                           <button
@@ -130,7 +136,7 @@ function SharedCashFlowPage() {
                   ))
                 ) : (
                   <tr>
-                    <td className="px-4 py-8 text-center text-black/60" colSpan={6}>
+                    <td className="px-4 py-8 text-center text-black/60" colSpan={8}>
                       No records for this period.
                     </td>
                   </tr>

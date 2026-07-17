@@ -90,6 +90,54 @@ def test_create_and_read_cash_flow_records(
     assert all("flat" not in record for record in body["data"])
 
 
+def test_cash_flow_records_store_location_and_reason(
+    client: TestClient,
+    db: Session,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    condominio = _create_test_condominio(db)
+    _assign_superuser_to_condominio(db, condominio)
+
+    create_response = client.post(
+        f"{settings.API_V1_STR}/cash-flow/",
+        headers=superuser_token_headers,
+        json={
+            "has_invoice": False,
+            "record_date": "2026-03-10",
+            "amount": -42.5,
+            "supplier": "OakHill Supplies",
+            "description": "Cleaning materials",
+            "location": "Northwood 1A",
+            "reason": "Emergency spill cleanup",
+        },
+    )
+
+    assert create_response.status_code == 201
+    created = create_response.json()
+    assert created["location"] == "Northwood 1A"
+    assert created["reason"] == "Emergency spill cleanup"
+
+    update_response = client.patch(
+        f"{settings.API_V1_STR}/cash-flow/{created['id']}",
+        headers=superuser_token_headers,
+        json={"location": "Estate OHP", "reason": "Routine cleaning"},
+    )
+
+    assert update_response.status_code == 200
+    assert update_response.json()["location"] == "Estate OHP"
+    assert update_response.json()["reason"] == "Routine cleaning"
+
+    read_response = client.get(
+        f"{settings.API_V1_STR}/cash-flow/",
+        headers=superuser_token_headers,
+        params={"date_from": "2026-03-01", "date_to": "2026-03-31"},
+    )
+
+    assert read_response.status_code == 200
+    assert read_response.json()["data"][0]["location"] == "Estate OHP"
+    assert read_response.json()["data"][0]["reason"] == "Routine cleaning"
+
+
 def test_cash_flow_search_matches_supplier(
     client: TestClient,
     db: Session,

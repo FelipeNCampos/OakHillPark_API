@@ -420,6 +420,8 @@ interface CashFlowRecord {
   amount: number
   supplier: string
   description: string
+  location: string
+  reason: string
   created_at: string
 }
 
@@ -436,6 +438,8 @@ interface CashFlowFormState {
   value: string
   supplier: string
   description: string
+  location: string
+  reason: string
   invoiceMediaName: string
   invoiceMediaData: string | null
 }
@@ -460,6 +464,8 @@ interface CashFlowTextEditorState {
   value: string
   supplier: string
   description: string
+  location: string
+  reason: string
   error: string | null
 }
 
@@ -1967,6 +1973,8 @@ const getEmptyCashFlowForm = (): CashFlowFormState => ({
   value: "",
   supplier: "",
   description: "",
+  location: "",
+  reason: "",
   invoiceMediaName: "",
   invoiceMediaData: null,
 })
@@ -3031,7 +3039,7 @@ function CashFlowContent() {
     })
   }, [openingBalanceValue, records])
 
-  const tableColumnCount = 8
+  const tableColumnCount = 10
 
   const formatCashFlowDate = (value: string) => {
     const [year, month, day] = value.split("-")
@@ -3321,6 +3329,8 @@ function CashFlowContent() {
       value: String(record.amount),
       supplier: record.supplier || "",
       description: record.description || "",
+      location: record.location || "",
+      reason: record.reason || "",
       error: null,
     })
   }
@@ -3483,6 +3493,8 @@ function CashFlowContent() {
           amount: parsedValue,
           supplier: form.supplier.trim(),
           description: form.description.trim(),
+          location: form.location.trim(),
+          reason: form.reason.trim(),
         },
       })
       closeCreateRecord()
@@ -3593,6 +3605,8 @@ function CashFlowContent() {
           amount: parsedValue,
           supplier: textEditor.supplier.trim(),
           description: textEditor.description.trim(),
+          location: textEditor.location.trim(),
+          reason: textEditor.reason.trim(),
         },
       })
       setTextEditor(null)
@@ -3767,7 +3781,7 @@ function CashFlowContent() {
 
       <section className={`${cardClass} overflow-hidden`}>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[860px] text-left">
+          <table className="w-full min-w-[1080px] text-left">
             <thead className="bg-[#faf8f6] text-[11px] uppercase text-[rgba(85,49,28,0.72)]">
               <tr>
                 <th className="px-4 py-3 font-extrabold">Payment Number</th>
@@ -3776,6 +3790,8 @@ function CashFlowContent() {
                 <th className="px-4 py-3 text-right font-extrabold">Amount</th>
                 <th className="px-4 py-3 font-extrabold">Supplier</th>
                 <th className="px-4 py-3 font-extrabold">Description</th>
+                <th className="px-4 py-3 font-extrabold">Location</th>
+                <th className="px-4 py-3 font-extrabold">Reason</th>
                 <th className="px-4 py-3 text-right font-extrabold">Balance</th>
                 <th className="px-4 py-3 font-extrabold">Action</th>
               </tr>
@@ -3876,6 +3892,16 @@ function CashFlowContent() {
                           </span>
                         </button>
                       </td>
+                      <td className="px-4 py-3 text-sm font-semibold text-black/70">
+                        <span className="block max-w-48 truncate">
+                          {record.location || "-"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm font-semibold text-black/70">
+                        <span className="block max-w-56 truncate">
+                          {record.reason || "-"}
+                        </span>
+                      </td>
                       <td
                         className={`px-4 py-3 text-right text-sm font-extrabold ${
                           Number(record.balance) >= 0
@@ -3900,7 +3926,7 @@ function CashFlowContent() {
                     </tr>
                   ))}
                   <tr className="bg-[#faf8f6]/70">
-                    <td className="px-4 py-3" colSpan={5} />
+                    <td className="px-4 py-3" colSpan={7} />
                     <td className="bg-[#faf8f6] px-4 py-3 text-sm font-extrabold uppercase tracking-[0.08em] text-[#55311c]">
                       Total:
                     </td>
@@ -4184,6 +4210,37 @@ function CashFlowContent() {
                       setForm((current) => ({
                         ...current,
                         description: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="grid gap-2">
+                  <span className={labelClass}>Location</span>
+                  <input
+                    className={inputClass}
+                    maxLength={255}
+                    value={form.location}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        location: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <label className="grid gap-2">
+                  <span className={labelClass}>Reason</span>
+                  <input
+                    className={inputClass}
+                    maxLength={500}
+                    value={form.reason}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        reason: event.target.value,
                       }))
                     }
                   />
@@ -4475,6 +4532,46 @@ function CashFlowContent() {
                         ? {
                             ...current,
                             description: event.target.value,
+                            error: null,
+                          }
+                        : current,
+                    )
+                  }
+                />
+              </label>
+
+              <label className="grid gap-2">
+                <span className={labelClass}>Location</span>
+                <input
+                  className={inputClass}
+                  maxLength={255}
+                  value={textEditor.location}
+                  onChange={(event) =>
+                    setTextEditor((current) =>
+                      current
+                        ? {
+                            ...current,
+                            location: event.target.value,
+                            error: null,
+                          }
+                        : current,
+                    )
+                  }
+                />
+              </label>
+
+              <label className="grid gap-2">
+                <span className={labelClass}>Reason</span>
+                <textarea
+                  className="min-h-20 w-full resize-y rounded-lg border border-[#d9d0ca] bg-white px-3.5 py-3 text-sm font-semibold text-[#55311c] outline-none transition focus:ring-2 focus:ring-[#8c7569]"
+                  maxLength={500}
+                  value={textEditor.reason}
+                  onChange={(event) =>
+                    setTextEditor((current) =>
+                      current
+                        ? {
+                            ...current,
+                            reason: event.target.value,
                             error: null,
                           }
                         : current,

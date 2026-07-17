@@ -244,3 +244,32 @@ test("Contractor record building options follow the defined location order", asy
     "Estate OHP",
   ])
 })
+
+test.describe("Dashboard navigation", () => {
+  test.use({ storageState: { cookies: [], origins: [] } })
+
+  test("does not expose the History section", async ({ page, request }) => {
+  const loginResponse = await request.post(
+    "http://localhost:8000/api/v1/login/access-token",
+    {
+      form: {
+        username: firstSuperuser,
+        password: firstSuperuserPassword,
+      },
+    },
+  )
+  expect(loginResponse.ok()).toBeTruthy()
+  const { access_token: accessToken } = await loginResponse.json()
+  await page.addInitScript(
+    (token) => localStorage.setItem("access_token", token),
+    accessToken,
+  )
+
+    await page.goto("/dashboard")
+    await expect(page.getByRole("heading", { name: /Welcome,/ })).toBeVisible()
+
+    await expect(
+      page.getByRole("button", { name: "History", exact: true }),
+    ).toHaveCount(0)
+  })
+})

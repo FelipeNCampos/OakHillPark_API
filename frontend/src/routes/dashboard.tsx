@@ -36,7 +36,6 @@ import {
   YAxis,
 } from "recharts"
 import { OpenAPI } from "@/client"
-import { ContractorHistoryContent } from "@/components/Admin/ContractorHistoryContent"
 import { TasksBoard } from "@/components/Tasks/TasksBoard"
 import { enforceHttpsUrl, resolveApiBase } from "@/config/api"
 import {
@@ -2518,7 +2517,6 @@ function ClientDashboard() {
     { label: "Reminders", id: "reminds" },
     { label: "Residents", id: "residents" },
     { label: "Contractors", id: "contractors" },
-    { label: "History", id: "history" },
     { label: "Cleaner", id: "cleaner" },
     { label: "Caretaker", id: "caretaker" },
     { label: "Bins", id: "bins" },
@@ -2567,8 +2565,6 @@ function ClientDashboard() {
         return <ResidentsContent />
       case "contractors":
         return <ContractorsContent />
-      case "history":
-        return <ContractorHistoryContent />
       case "tasks":
         return <TasksBoard mode="manager" />
       case "reminds":
@@ -2816,7 +2812,6 @@ function OverviewContent({
     { label: "Reminders", tabId: "reminds" },
     { label: "Residents", tabId: "residents" },
     { label: "Contractors", tabId: "contractors" },
-    { label: "History", tabId: "history" },
     { label: "Cleaner", tabId: "cleaner" },
     { label: "Caretaker", tabId: "caretaker" },
     { label: "Bins", tabId: "bins" },

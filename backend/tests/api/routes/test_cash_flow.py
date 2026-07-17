@@ -9,7 +9,7 @@ from pypdf import PdfReader
 from reportlab.lib import colors
 from sqlmodel import Session, select
 
-from app.core.config import settings
+from app.core.config import cash_flow_share_frontend_host, settings
 from app.models import CashFlowRecord, Condominio, CondominioCreate, User
 from app.services.cash_flow_service import CashFlowService
 
@@ -489,6 +489,25 @@ def test_cash_flow_report_money_cells_use_sign_colors() -> None:
     assert negative_cell.style.textColor == colors.HexColor("#cf0e0e")
     assert positive_cell.style.textColor == colors.HexColor("#217a4b")
     assert neutral_cell.style.textColor == colors.black
+
+
+def test_cash_flow_share_link_frontend_host_uses_the_environment() -> None:
+    assert (
+        cash_flow_share_frontend_host(
+            environment="local",
+            domain="localhost.tiangolo.com",
+            local_frontend_host="http://localhost:5173",
+        )
+        == "http://localhost:5173"
+    )
+    assert (
+        cash_flow_share_frontend_host(
+            environment="production",
+            domain="oakhillpark.cloud",
+            local_frontend_host="http://localhost:5173",
+        )
+        == "https://dashboard.oakhillpark.cloud"
+    )
 
 
 def test_cash_flow_share_link_exposes_only_its_live_date_range(

@@ -223,7 +223,7 @@ def _share_link_url(link: CashFlowShareLink) -> str:
         token = _share_token_cipher().decrypt(link.token_encrypted.encode()).decode()
     except (InvalidToken, UnicodeDecodeError) as exc:
         raise HTTPException(status_code=500, detail="Unable to recover shared link") from exc
-    return f"{settings.FRONTEND_HOST.rstrip('/')}/cash-flow/share/{token}"
+    return f"{settings.cash_flow_share_frontend_host}/cash-flow/share/{token}"
 
 
 def _to_share_link_public(link: CashFlowShareLink, now: datetime) -> CashFlowShareLinkPublic:

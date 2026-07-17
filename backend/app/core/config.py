@@ -25,6 +25,14 @@ def parse_cors(v: Any) -> list[str] | str:
     raise ValueError(v)
 
 
+def cash_flow_share_frontend_host(
+    *, environment: str, domain: str, local_frontend_host: str
+) -> str:
+    if environment == "local":
+        return local_frontend_host.rstrip("/")
+    return f"https://dashboard.{domain.rstrip('/')}"
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         # Use top level .env file (one level above ./backend/)
@@ -36,6 +44,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str = secrets.token_urlsafe(32)
     # 60 minutes * 24 hours * 8 days = 8 days
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8
+    DOMAIN: str = "localhost.tiangolo.com"
     FRONTEND_HOST: str = "http://localhost:5173"
     ENVIRONMENT: Literal["local", "staging", "production"] = "local"
     CASH_FLOW_SHARE_TOKEN_ENCRYPTION_KEY: str | None = None
@@ -57,6 +66,14 @@ class Settings(BaseSettings):
                 for port in (3000, 4173, 5173, 5174, 5175, 5176)
             )
         return list(dict.fromkeys(origins))
+
+    @property
+    def cash_flow_share_frontend_host(self) -> str:
+        return cash_flow_share_frontend_host(
+            environment=self.ENVIRONMENT,
+            domain=self.DOMAIN,
+            local_frontend_host=self.FRONTEND_HOST,
+        )
 
     PROJECT_NAME: str
     SENTRY_DSN: HttpUrl | None = None

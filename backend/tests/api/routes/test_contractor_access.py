@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -581,3 +581,300 @@ def test_contractor_history_execute_due_sends_sms_to_martlett_owner_1_flat_6(
     ]
     assert len(matching) == 1
     assert matching[0]["next_notification_sent_at"] is not None
+
+
+def test_contractor_maintenance_links_phone_to_future_check_in_and_out(
+    client: TestClient,
+    db: Session,
+) -> None:
+    condominio = _create_test_condominio(db)
+    building = _create_test_building(db, condominio.id, name="Merlin")
+    manager_headers = _create_manager_headers(client, db, condominio.id)
+
+    category_response = client.post(
+        f"{settings.API_V1_STR}/contractor-access/maintenance/categories",
+        headers=manager_headers,
+        json={"name": "Safety"},
+    )
+    assert category_response.status_code == 201
+
+    maintenance_response = client.post(
+        f"{settings.API_V1_STR}/contractor-access/maintenance",
+        headers=manager_headers,
+        json={
+            "category_id": category_response.json()["id"],
+            "tag": "Annual gas",
+            "report": "Gas safety inspection",
+            "frequency_days": 365,
+            "notes": "Bring the current certificate",
+            "mobile": "07123456789",
+        },
+    )
+    assert maintenance_response.status_code == 201
+    maintenance = maintenance_response.json()
+    assert maintenance["is_overdue"] is False
+    assert maintenance["last_completed_at"] is None
+    assert maintenance["status"] == "pending"
+
+    check_in_response = client.post(
+        f"{settings.API_V1_STR}/contractor-access/check-in",
+        json={
+            "condominio_id": str(condominio.id),
+            "name": "Jamie Cole",
+            "company": "Boiler Team",
+            "building_id": str(building.id),
+            "job_description": "Gas safety inspection",
+            "mobile": "07123456789",
+        },
+    )
+    assert check_in_response.status_code == 201
+
+    history_response = client.get(
+        f"{settings.API_V1_STR}/contractor-access/maintenance/history",
+        headers=manager_headers,
+    )
+    assert history_response.status_code == 200
+    assert history_response.json()["count"] == 1
+    record = history_response.json()["data"][0]
+    assert record["maintenance_id"] == maintenance["id"]
+    assert record["contractor_visit_id"] == check_in_response.json()["id"]
+    assert record["in_at"] is not None
+    assert record["out_at"] is None
+
+    check_out_response = client.post(
+        f"{settings.API_V1_STR}/contractor-access/check-out",
+        json={
+            "condominio_id": str(condominio.id),
+            "visit_id": check_in_response.json()["id"],
+        },
+    )
+    assert check_out_response.status_code == 201
+
+    completed_history_response = client.get(
+        f"{settings.API_V1_STR}/contractor-access/maintenance/history",
+        headers=manager_headers,
+    )
+    completed_record = completed_history_response.json()["data"][0]
+    assert completed_record["out_at"] is not None
+
+
+def test_contractor_maintenance_schedule_marks_overdue_after_frequency_days(
+    client: TestClient,
+    db: Session,
+) -> None:
+    condominio = _create_test_condominio(db)
+    building = _create_test_building(db, condominio.id, name="Merlin")
+    manager_headers = _create_manager_headers(client, db, condominio.id)
+
+    category_response = client.post(
+        f"{settings.API_V1_STR}/contractor-access/maintenance/categories",
+        headers=manager_headers,
+        json={"name": "Heating"},
+    )
+    maintenance_response = client.post(
+        f"{settings.API_V1_STR}/contractor-access/maintenance",
+        headers=manager_headers,
+        json={
+            "category_id": category_response.json()["id"],
+            "tag": "Boiler",
+            "report": "Annual service",
+            "frequency_days": 30,
+            "notes": "",
+        },
+    )
+    assert maintenance_response.status_code == 201
+
+    old_in_at = datetime(2025, 1, 1, 9, 0, tzinfo=timezone.utc)
+    old_out_at = datetime(2025, 1, 1, 11, 0, tzinfo=timezone.utc)
+    visit_response = client.post(
+        f"{settings.API_V1_STR}/contractor-access/check-in",
+        json={
+            "condominio_id": str(condominio.id),
+            "name": "Morgan Hill",
+            "company": "Heating Ltd",
+            "building_id": str(building.id),
+            "job_description": "Annual service",
+            "mobile": "07000000000",
+            "in_at": old_in_at.isoformat(),
+        },
+    )
+    assert visit_response.status_code == 201
+
+    check_out_response = client.post(
+        f"{settings.API_V1_STR}/contractor-access/check-out",
+        json={
+            "condominio_id": str(condominio.id),
+            "visit_id": visit_response.json()["id"],
+            "out_at": old_out_at.isoformat(),
+        },
+    )
+    assert check_out_response.status_code == 201
+
+    # Link the first historic maintenance execution manually, then verify that
+    # the schedule reports it as overdue after its 30-day frequency.
+    record_response = client.post(
+        f"{settings.API_V1_STR}/contractor-access/maintenance/records",
+        headers=manager_headers,
+        json={
+            "maintenance_id": maintenance_response.json()["id"],
+            "contractor_visit_id": visit_response.json()["id"],
+        },
+    )
+    assert record_response.status_code == 201
+
+    schedule_response = client.get(
+        f"{settings.API_V1_STR}/contractor-access/maintenance/schedule",
+        headers=manager_headers,
+    )
+    assert schedule_response.status_code == 200
+    assert schedule_response.json()["data"][0]["is_overdue"] is True
+    assert schedule_response.json()["data"][0]["status"] == "pending"
+
+
+def test_contractor_maintenance_schedule_marks_soon_within_seven_days(
+    client: TestClient,
+    db: Session,
+) -> None:
+    condominio = _create_test_condominio(db)
+    building = _create_test_building(db, condominio.id, name="Merlin")
+    manager_headers = _create_manager_headers(client, db, condominio.id)
+
+    category_response = client.post(
+        f"{settings.API_V1_STR}/contractor-access/maintenance/categories",
+        headers=manager_headers,
+        json={"name": "Electrical"},
+    )
+    maintenance_response = client.post(
+        f"{settings.API_V1_STR}/contractor-access/maintenance",
+        headers=manager_headers,
+        json={
+            "category_id": category_response.json()["id"],
+            "tag": "Generator",
+            "report": "Generator service",
+            "frequency_days": 30,
+            "notes": "",
+        },
+    )
+    assert maintenance_response.status_code == 201
+
+    completed_at = datetime.now(timezone.utc) - timedelta(days=24)
+    visit_response = client.post(
+        f"{settings.API_V1_STR}/contractor-access/check-in",
+        json={
+            "condominio_id": str(condominio.id),
+            "name": "Morgan Hill",
+            "company": "Electrical Ltd",
+            "building_id": str(building.id),
+            "job_description": "Generator service",
+            "mobile": "07000000000",
+            "in_at": completed_at.isoformat(),
+        },
+    )
+    assert visit_response.status_code == 201
+
+    check_out_response = client.post(
+        f"{settings.API_V1_STR}/contractor-access/check-out",
+        json={
+            "condominio_id": str(condominio.id),
+            "visit_id": visit_response.json()["id"],
+            "out_at": (completed_at + timedelta(hours=2)).isoformat(),
+        },
+    )
+    assert check_out_response.status_code == 201
+
+    record_response = client.post(
+        f"{settings.API_V1_STR}/contractor-access/maintenance/records",
+        headers=manager_headers,
+        json={
+            "maintenance_id": maintenance_response.json()["id"],
+            "contractor_visit_id": visit_response.json()["id"],
+        },
+    )
+    assert record_response.status_code == 201
+
+    schedule_response = client.get(
+        f"{settings.API_V1_STR}/contractor-access/maintenance/schedule",
+        headers=manager_headers,
+    )
+    assert schedule_response.status_code == 200
+    schedule = schedule_response.json()["data"]
+    assert schedule[0]["is_overdue"] is False
+    assert schedule[0]["status"] == "soon"
+
+
+def test_manager_can_edit_a_contractor_record(
+    client: TestClient,
+    db: Session,
+) -> None:
+    condominio = _create_test_condominio(db)
+    initial_building = _create_test_building(db, condominio.id, name="Merlin")
+    updated_building = _create_test_building(db, condominio.id, name="Northwood")
+    manager_headers = _create_manager_headers(client, db, condominio.id)
+
+    create_response = client.post(
+        f"{settings.API_V1_STR}/contractor-access/check-in",
+        json={
+            "condominio_id": str(condominio.id),
+            "name": "Taylor Stone",
+            "company": "Initial Services",
+            "building_id": str(initial_building.id),
+            "job_description": "Initial inspection",
+            "mobile": "07123456789",
+        },
+    )
+    assert create_response.status_code == 201
+
+    updated_in_at = datetime(2026, 7, 20, 9, 0, tzinfo=timezone.utc)
+    updated_out_at = datetime(2026, 7, 20, 11, 0, tzinfo=timezone.utc)
+    update_response = client.patch(
+        f"{settings.API_V1_STR}/contractor-access/{create_response.json()['id']}",
+        headers=manager_headers,
+        json={
+            "name": "Taylor Stone Updated",
+            "company": "Updated Services",
+            "building_id": str(updated_building.id),
+            "job_description": "Updated inspection",
+            "mobile": "07999999999",
+            "in_at": updated_in_at.isoformat(),
+            "out_at": updated_out_at.isoformat(),
+        },
+    )
+
+    assert update_response.status_code == 200
+    updated = update_response.json()
+    assert updated["name"] == "Taylor Stone Updated"
+    assert updated["company"] == "Updated Services"
+    assert updated["building_name"] == "Northwood"
+    assert updated["job_description"] == "Updated inspection"
+    assert updated["mobile"] == "07999999999"
+    assert datetime.fromisoformat(updated["in_at"]).astimezone(timezone.utc) == updated_in_at
+    assert datetime.fromisoformat(updated["out_at"]).astimezone(timezone.utc) == updated_out_at
+
+
+def test_manager_can_delete_a_contractor_record(
+    client: TestClient,
+    db: Session,
+) -> None:
+    condominio = _create_test_condominio(db)
+    building = _create_test_building(db, condominio.id, name="Merlin")
+    manager_headers = _create_manager_headers(client, db, condominio.id)
+    create_response = client.post(
+        f"{settings.API_V1_STR}/contractor-access/check-in",
+        json={
+            "condominio_id": str(condominio.id),
+            "name": "Delete Me",
+            "company": "Delete Services",
+            "building_id": str(building.id),
+            "job_description": "Removal",
+            "mobile": "07123456789",
+        },
+    )
+    assert create_response.status_code == 201
+
+    delete_response = client.delete(
+        f"{settings.API_V1_STR}/contractor-access/{create_response.json()['id']}",
+        headers=manager_headers,
+    )
+
+    assert delete_response.status_code == 200
+    assert delete_response.json()["message"] == "Contractor record deleted successfully"

@@ -1,5 +1,6 @@
 import uuid
 from datetime import date, datetime, timezone
+from typing import Literal
 
 from pydantic import EmailStr
 from sqlalchemy import DateTime as SQLAlchemyDateTime
@@ -381,6 +382,69 @@ class ContractorHistory(SQLModel, table=True):
     condominio: Condominio | None = Relationship(back_populates="contractor_histories")
     contractor_visit: ContractorVisit | None = Relationship(back_populates="histories")
     category: ContractorHistoryCategory | None = Relationship(back_populates="histories")
+
+
+class ContractorMaintenanceCategory(SQLModel, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    name: str = Field(default="", max_length=100, index=True)
+    created_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    updated_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    condominio_id: uuid.UUID = Field(
+        foreign_key="condominio.id", nullable=False, ondelete="CASCADE"
+    )
+
+
+class ContractorMaintenance(SQLModel, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    tag: str = Field(default="", max_length=100)
+    report: str = Field(default="", max_length=255)
+    frequency_days: int = Field(ge=1)
+    notes: str = Field(default="", max_length=2000)
+    mobile: str | None = Field(default=None, max_length=30)
+    created_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    updated_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    condominio_id: uuid.UUID = Field(
+        foreign_key="condominio.id", nullable=False, ondelete="CASCADE"
+    )
+    category_id: uuid.UUID = Field(
+        foreign_key="contractormaintenancecategory.id", nullable=False, ondelete="CASCADE"
+    )
+
+
+class ContractorMaintenanceRecord(SQLModel, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    in_at: datetime = Field(
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    out_at: datetime | None = Field(
+        default=None,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    created_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    condominio_id: uuid.UUID = Field(
+        foreign_key="condominio.id", nullable=False, ondelete="CASCADE"
+    )
+    maintenance_id: uuid.UUID = Field(
+        foreign_key="contractormaintenance.id", nullable=False, ondelete="CASCADE"
+    )
+    contractor_visit_id: uuid.UUID = Field(
+        foreign_key="contractorvisit.id", nullable=False, ondelete="CASCADE"
+    )
 
 
 class Task(SQLModel, table=True):
@@ -1102,6 +1166,16 @@ class ContractorVisitCheckOutCreate(SQLModel):
     out_at: datetime | None = None
 
 
+class ContractorVisitUpdate(SQLModel):
+    name: str | None = Field(default=None, max_length=255)
+    company: str | None = Field(default=None, max_length=255)
+    building_id: uuid.UUID | None = None
+    job_description: str | None = Field(default=None, max_length=255)
+    mobile: str | None = Field(default=None, max_length=30)
+    in_at: datetime | None = None
+    out_at: datetime | None = None
+
+
 class ContractorAccessBuildingPublic(SQLModel):
     id: uuid.UUID
     name: str
@@ -1219,6 +1293,75 @@ class ContractorHistoryPublic(SQLModel):
 
 class ContractorHistoriesPublic(SQLModel):
     data: list[ContractorHistoryPublic]
+    count: int
+
+
+class ContractorMaintenanceCategoryCreate(SQLModel):
+    name: str = Field(min_length=1, max_length=100)
+
+
+class ContractorMaintenanceCategoryPublic(SQLModel):
+    id: uuid.UUID
+    name: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class ContractorMaintenanceCategoriesPublic(SQLModel):
+    data: list[ContractorMaintenanceCategoryPublic]
+    count: int
+
+
+class ContractorMaintenanceCreate(SQLModel):
+    category_id: uuid.UUID
+    tag: str = Field(min_length=1, max_length=100)
+    report: str = Field(min_length=1, max_length=255)
+    frequency_days: int = Field(ge=1)
+    notes: str = Field(default="", max_length=2000)
+    mobile: str | None = Field(default=None, max_length=30)
+
+
+class ContractorMaintenancePublic(SQLModel):
+    id: uuid.UUID
+    category_id: uuid.UUID
+    category_name: str
+    tag: str
+    report: str
+    frequency_days: int
+    notes: str
+    mobile: str | None
+    last_completed_at: datetime | None
+    is_overdue: bool
+    status: Literal["pending", "soon", "ok"]
+    created_at: datetime
+    updated_at: datetime
+
+
+class ContractorMaintenancesPublic(SQLModel):
+    data: list[ContractorMaintenancePublic]
+    count: int
+
+
+class ContractorMaintenanceRecordCreate(SQLModel):
+    maintenance_id: uuid.UUID
+    contractor_visit_id: uuid.UUID
+
+
+class ContractorMaintenanceRecordPublic(SQLModel):
+    id: uuid.UUID
+    maintenance_id: uuid.UUID
+    category_name: str
+    tag: str
+    report: str
+    contractor_visit_id: uuid.UUID
+    contractor_name: str
+    contractor_mobile: str
+    in_at: datetime
+    out_at: datetime | None
+
+
+class ContractorMaintenanceRecordsPublic(SQLModel):
+    data: list[ContractorMaintenanceRecordPublic]
     count: int
 
 

@@ -53,6 +53,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import useAuth, { isLoggedIn } from "@/hooks/useAuth"
 import useCustomToast from "@/hooks/useCustomToast"
 
@@ -84,6 +85,38 @@ interface Building {
 interface ContractorAccessBuilding {
   id: EntityId
   name: string
+}
+
+interface ContractorMaintenanceCategory {
+  id: EntityId
+  name: string
+}
+
+interface ContractorMaintenanceSchedule {
+  id: EntityId
+  category_id: EntityId
+  category_name: string
+  tag: string
+  report: string
+  frequency_days: number
+  notes: string
+  mobile?: string | null
+  last_completed_at?: string | null
+  is_overdue: boolean
+  status: "pending" | "soon" | "ok"
+}
+
+interface ContractorMaintenanceHistoryRecord {
+  id: EntityId
+  maintenance_id: EntityId
+  category_name: string
+  tag: string
+  report: string
+  contractor_visit_id: EntityId
+  contractor_name: string
+  contractor_mobile: string
+  in_at: string
+  out_at?: string | null
 }
 
 const QR_SPECIAL_CLEANER_BUILDING_NAMES = new Set(["general", "cleaner"])
@@ -518,6 +551,9 @@ interface CleanerRecordEditState {
   inOriginalIso: string | null
   outRecordId: EntityId | null
   outOriginalIso: string | null
+  buildingId: EntityId | null
+  rowKey: string
+  buildingLabel: string
 }
 
 interface CleanerManualActionState {
@@ -12021,6 +12057,351 @@ function CaretakerRecordCreateDialog({
   )
 }
 
+function ContractorMaintenanceDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  const queryClient = useQueryClient()
+  const { showErrorToast, showSuccessToast } = useCustomToast()
+  const [isAddTypeDialogOpen, setIsAddTypeDialogOpen] = useState(false)
+  const [addMode, setAddMode] = useState<"category" | "maintenance" | null>(null)
+  const [categoryName, setCategoryName] = useState("")
+  const [categoryId, setCategoryId] = useState("")
+  const [tag, setTag] = useState("")
+  const [report, setReport] = useState("")
+  const [frequencyDays, setFrequencyDays] = useState("30")
+  const [notes, setNotes] = useState("")
+  const [mobile, setMobile] = useState("")
+  const [scheduleStatusFilter, setScheduleStatusFilter] = useState<
+    "all" | "pending" | "soon" | "ok"
+  >("all")
+  const [scheduleCategoryFilter, setScheduleCategoryFilter] = useState("all")
+
+  const categoriesQuery = useQuery<ApiListResponse<ContractorMaintenanceCategory>>({
+    queryKey: ["contractor-maintenance-categories"],
+    queryFn: () => apiCall("/api/v1/contractor-access/maintenance/categories"),
+    enabled: open,
+  })
+  const scheduleQuery = useQuery<ApiListResponse<ContractorMaintenanceSchedule>>({
+    queryKey: ["contractor-maintenance-schedule"],
+    queryFn: () => apiCall("/api/v1/contractor-access/maintenance/schedule"),
+    enabled: open,
+  })
+  const historyQuery = useQuery<ApiListResponse<ContractorMaintenanceHistoryRecord>>({
+    queryKey: ["contractor-maintenance-history"],
+    queryFn: () => apiCall("/api/v1/contractor-access/maintenance/history", { limit: 100 }),
+    enabled: open,
+  })
+
+  const resetAddForm = () => {
+    setAddMode(null)
+    setCategoryName("")
+    setCategoryId("")
+    setTag("")
+    setReport("")
+    setFrequencyDays("30")
+    setNotes("")
+    setMobile("")
+  }
+
+  const createCategoryMutation = useMutation({
+    mutationFn: (name: string) =>
+      apiCall("/api/v1/contractor-access/maintenance/categories", {
+        method: "POST",
+        body: { name },
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ["contractor-maintenance-categories"],
+      })
+      showSuccessToast("Maintenance category created successfully")
+      setIsAddTypeDialogOpen(false)
+      resetAddForm()
+    },
+    onError: (error: unknown) =>
+      showErrorToast(error instanceof Error ? error.message : "Could not create category"),
+  })
+
+  const createMaintenanceMutation = useMutation({
+    mutationFn: (payload: Record<string, unknown>) =>
+      apiCall("/api/v1/contractor-access/maintenance", {
+        method: "POST",
+        body: payload,
+      }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["contractor-maintenance-schedule"] }),
+        queryClient.invalidateQueries({ queryKey: ["contractor-maintenance-history"] }),
+      ])
+      showSuccessToast("Maintenance created successfully")
+      setIsAddTypeDialogOpen(false)
+      resetAddForm()
+    },
+    onError: (error: unknown) =>
+      showErrorToast(error instanceof Error ? error.message : "Could not create maintenance"),
+  })
+
+  const handleCreate = () => {
+    if (addMode === "category") {
+      const name = categoryName.trim()
+      if (!name) {
+        showErrorToast("Enter the category name")
+        return
+      }
+      createCategoryMutation.mutate(name)
+      return
+    }
+    const frequency = Number(frequencyDays)
+    if (!categoryId || !tag.trim() || !report.trim()) {
+      showErrorToast("Fill category, tag and report")
+      return
+    }
+    if (!Number.isInteger(frequency) || frequency < 1) {
+      showErrorToast("Frequency must be at least one day")
+      return
+    }
+    createMaintenanceMutation.mutate({
+      category_id: categoryId,
+      tag: tag.trim(),
+      report: report.trim(),
+      frequency_days: frequency,
+      notes: notes.trim(),
+      mobile: mobile.trim() || null,
+    })
+  }
+
+  const formatDateTime = (value?: string | null) => {
+    if (!value) return "-"
+    const date = new Date(value)
+    return Number.isNaN(date.getTime())
+      ? "-"
+      : date.toLocaleString("en-GB", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        })
+  }
+
+  const categories = categoriesQuery.data?.data || []
+  const schedules = scheduleQuery.data?.data || []
+  const history = historyQuery.data?.data || []
+  const filteredSchedules = schedules.filter(
+    (item) =>
+      (scheduleStatusFilter === "all" || item.status === scheduleStatusFilter) &&
+      (scheduleCategoryFilter === "all" ||
+        String(item.category_id) === scheduleCategoryFilter),
+  )
+  const isSaving = createCategoryMutation.isPending || createMaintenanceMutation.isPending
+
+  return (
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="max-h-[92vh] overflow-y-auto border-[#e5e0dc] bg-white text-[#55311c] sm:max-w-6xl">
+          <DialogHeader>
+            <div className="flex items-start justify-between gap-4 pr-6">
+              <div>
+                <DialogTitle className="text-[#55311c]">Maintenance</DialogTitle>
+                <DialogDescription className="text-[rgba(0,0,0,0.7)]">
+                  Track scheduled contractor maintenance and completed IN/OUT records.
+                </DialogDescription>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  resetAddForm()
+                  setIsAddTypeDialogOpen(true)
+                }}
+                className="rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all hover:bg-[#55311c]"
+              >
+                + Add
+              </button>
+            </div>
+          </DialogHeader>
+
+          <Tabs defaultValue="schedule" className="mt-2">
+            <TabsList className="bg-[#f0ebe7]">
+              <TabsTrigger
+                value="schedule"
+                className="text-[#55311c] data-[state=active]:!bg-[#8c7569] data-[state=active]:!text-white"
+              >
+                Schedule
+              </TabsTrigger>
+              <TabsTrigger
+                value="history"
+                className="text-[#55311c] data-[state=active]:!bg-[#8c7569] data-[state=active]:!text-white"
+              >
+                History
+              </TabsTrigger>
+            </TabsList>
+            <TabsContent value="schedule" className="mt-4">
+              <div className="mb-4 grid gap-3 sm:grid-cols-2">
+                <label className="grid gap-1 text-sm font-semibold text-[#55311c]">
+                  Status
+                  <select
+                    value={scheduleStatusFilter}
+                    onChange={(event) =>
+                      setScheduleStatusFilter(
+                        event.target.value as "all" | "pending" | "soon" | "ok",
+                      )
+                    }
+                    className="rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm font-normal text-[#55311c]"
+                  >
+                    <option value="all">All statuses</option>
+                    <option value="pending">Pending</option>
+                    <option value="soon">Soon</option>
+                    <option value="ok">OK</option>
+                  </select>
+                </label>
+                <label className="grid gap-1 text-sm font-semibold text-[#55311c]">
+                  Category
+                  <select
+                    value={scheduleCategoryFilter}
+                    onChange={(event) =>
+                      setScheduleCategoryFilter(event.target.value)
+                    }
+                    className="rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm font-normal text-[#55311c]"
+                  >
+                    <option value="all">All categories</option>
+                    {categories.map((category) => (
+                      <option key={category.id} value={String(category.id)}>
+                        {category.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <div className="overflow-x-auto rounded-lg border border-[#e5e0dc]">
+                <table className="min-w-full text-left text-sm">
+                  <thead className="bg-[#f5f1ee] text-xs uppercase tracking-wide text-[#55311c]">
+                    <tr>
+                      <th className="px-4 py-3">Category</th>
+                      <th className="px-4 py-3">Tag</th>
+                      <th className="px-4 py-3">Report</th>
+                      <th className="px-4 py-3">Frequency</th>
+                      <th className="px-4 py-3">Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {scheduleQuery.isLoading ? (
+                      <tr><td className="px-4 py-5 text-center" colSpan={5}>Loading maintenance schedule...</td></tr>
+                    ) : filteredSchedules.length === 0 ? (
+                      <tr><td className="px-4 py-5 text-center" colSpan={5}>No maintenance matches the selected filters.</td></tr>
+                    ) : filteredSchedules.map((item) => (
+                      <tr
+                        key={item.id}
+                        className={
+                          item.status === "pending"
+                            ? "border-t border-red-200 bg-red-100 text-red-950"
+                            : item.status === "soon"
+                              ? "border-t border-amber-200 bg-amber-100 text-amber-950"
+                              : "border-t border-emerald-200 bg-emerald-100 text-emerald-950"
+                        }
+                      >
+                        <td className="px-4 py-3 font-semibold">{item.category_name}</td>
+                        <td className="px-4 py-3">{item.tag}</td>
+                        <td className="px-4 py-3">{item.report}</td>
+                        <td className="px-4 py-3">{item.frequency_days} day(s)</td>
+                        <td className="px-4 py-3">{item.notes || "-"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="mt-2 text-xs text-[rgba(0,0,0,0.65)]">
+                Green is on schedule. Yellow is due within 7 days. Red is pending or overdue.
+              </p>
+            </TabsContent>
+            <TabsContent value="history" className="mt-4">
+              <div className="overflow-x-auto rounded-lg border border-[#e5e0dc]">
+                <table className="min-w-full text-left text-sm">
+                  <thead className="bg-[#f5f1ee] text-xs uppercase tracking-wide text-[#55311c]">
+                    <tr>
+                      <th className="px-4 py-3">Category</th>
+                      <th className="px-4 py-3">Tag</th>
+                      <th className="px-4 py-3">Contractor</th>
+                      <th className="px-4 py-3">Time IN</th>
+                      <th className="px-4 py-3">Time OUT</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {historyQuery.isLoading ? (
+                      <tr><td className="px-4 py-5 text-center" colSpan={5}>Loading maintenance history...</td></tr>
+                    ) : history.length === 0 ? (
+                      <tr><td className="px-4 py-5 text-center" colSpan={5}>No maintenance records yet.</td></tr>
+                    ) : history.map((item) => (
+                      <tr key={item.id} className="border-t border-[#e5e0dc]">
+                        <td className="px-4 py-3">{item.category_name}</td>
+                        <td className="px-4 py-3">{item.tag}</td>
+                        <td className="px-4 py-3">{item.contractor_name}</td>
+                        <td className="px-4 py-3">{formatDateTime(item.in_at)}</td>
+                        <td className="px-4 py-3">{formatDateTime(item.out_at)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </TabsContent>
+          </Tabs>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isAddTypeDialogOpen}
+        onOpenChange={(nextOpen) => {
+          setIsAddTypeDialogOpen(nextOpen)
+          if (!nextOpen) resetAddForm()
+        }}
+      >
+        <DialogContent className="border-[#e5e0dc] bg-white text-[#55311c] sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>{addMode === "category" ? "New category" : addMode === "maintenance" ? "New maintenance" : "Add maintenance item"}</DialogTitle>
+            <DialogDescription>
+              {addMode ? "Fill in the requested details." : "Choose what you want to add."}
+            </DialogDescription>
+          </DialogHeader>
+          {!addMode ? (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <button type="button" onClick={() => setAddMode("category")} className="rounded-lg border border-[#8c7569] p-5 text-left font-semibold transition hover:bg-[#f0ebe7]">Category</button>
+              <button type="button" onClick={() => setAddMode("maintenance")} className="rounded-lg bg-[#8c7569] p-5 text-left font-semibold text-white transition hover:bg-[#55311c]">Maintenance</button>
+            </div>
+          ) : addMode === "category" ? (
+            <div>
+              <label htmlFor="maintenance-category-name" className="mb-1 block text-sm font-semibold">Name</label>
+              <input id="maintenance-category-name" value={categoryName} onChange={(event) => setCategoryName(event.target.value)} className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2" />
+            </div>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <label htmlFor="maintenance-category" className="mb-1 block text-sm font-semibold">Category name</label>
+                <select id="maintenance-category" value={categoryId} onChange={(event) => setCategoryId(event.target.value)} className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2">
+                  <option value="">Select a category</option>
+                  {categories.map((category) => <option key={category.id} value={String(category.id)}>{category.name}</option>)}
+                </select>
+              </div>
+              <div><label htmlFor="maintenance-tag" className="mb-1 block text-sm font-semibold">Tag</label><input id="maintenance-tag" value={tag} onChange={(event) => setTag(event.target.value)} className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2" /></div>
+              <div className="md:col-span-2"><label htmlFor="maintenance-report" className="mb-1 block text-sm font-semibold">Report</label><input id="maintenance-report" value={report} onChange={(event) => setReport(event.target.value)} className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2" /></div>
+              <div><label htmlFor="maintenance-frequency" className="mb-1 block text-sm font-semibold">Frequency (days)</label><input id="maintenance-frequency" type="number" min="1" value={frequencyDays} onChange={(event) => setFrequencyDays(event.target.value)} className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2" /></div>
+              <div><label htmlFor="maintenance-mobile" className="mb-1 block text-sm font-semibold">Cellphone (optional)</label><input id="maintenance-mobile" value={mobile} onChange={(event) => setMobile(event.target.value)} className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2" /></div>
+              <div className="md:col-span-2"><label htmlFor="maintenance-notes" className="mb-1 block text-sm font-semibold">Notes</label><textarea id="maintenance-notes" value={notes} onChange={(event) => setNotes(event.target.value)} className="min-h-24 w-full rounded-lg border border-[#d9d0ca] px-3 py-2" /></div>
+            </div>
+          )}
+          {addMode && (
+            <DialogFooter>
+              <button type="button" onClick={() => setAddMode(null)} disabled={isSaving} className="rounded border border-[#8c7569] px-4 py-2 font-semibold">Back</button>
+              <button type="button" onClick={handleCreate} disabled={isSaving} className="rounded bg-[#8c7569] px-4 py-2 font-semibold text-white disabled:opacity-60">{isSaving ? "Saving..." : "Save"}</button>
+            </DialogFooter>
+          )}
+        </DialogContent>
+      </Dialog>
+    </>
+  )
+}
+
 function ContractorRecordCreateDialog({
   open,
   onOpenChange,
@@ -12279,6 +12660,156 @@ function ContractorRecordCreateDialog({
   )
 }
 
+function ContractorRecordEditDialog({
+  visit,
+  onOpenChange,
+}: {
+  visit: ContractorVisitAdmin | null
+  onOpenChange: (open: boolean) => void
+}) {
+  const queryClient = useQueryClient()
+  const { showErrorToast, showSuccessToast } = useCustomToast()
+  const { user } = useAuth()
+  const [name, setName] = useState("")
+  const [company, setCompany] = useState("")
+  const [buildingId, setBuildingId] = useState("")
+  const [jobDescription, setJobDescription] = useState("")
+  const [mobile, setMobile] = useState("")
+  const [inAt, setInAt] = useState("")
+  const [outAt, setOutAt] = useState("")
+  const { data: buildingsData } = useQuery<ApiListResponse<ContractorAccessBuilding>>({
+    queryKey: ["contractor-buildings", "record-edit", user?.condominio_id],
+    queryFn: () =>
+      apiCall("/api/v1/contractor-access/buildings", {
+        condominio_id: user?.condominio_id,
+      }),
+    enabled: Boolean(visit && user?.condominio_id),
+  })
+
+  const buildings = buildingsData?.data || []
+
+  useEffect(() => {
+    if (!visit) return
+    setName(visit.name)
+    setCompany(visit.company)
+    setBuildingId(
+      String(
+        buildings.find((building) => building.name === visit.building_name)?.id ||
+          "",
+      ),
+    )
+    setJobDescription(visit.job_description)
+    setMobile(visit.mobile)
+    setInAt(toDateTimeLocalInputValue(visit.in_at))
+    setOutAt(toDateTimeLocalInputValue(visit.out_at))
+  }, [buildings, visit])
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, payload }: { id: EntityId; payload: Record<string, unknown> }) =>
+      apiCall(`/api/v1/contractor-access/${id}`, {
+        method: "PATCH",
+        body: payload,
+      }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["contractor-visits"] }),
+        queryClient.invalidateQueries({ queryKey: ["contractor-maintenance-history"] }),
+        queryClient.invalidateQueries({ queryKey: ["contractor-maintenance-schedule"] }),
+      ])
+      showSuccessToast("Contractor record updated successfully")
+      onOpenChange(false)
+    },
+    onError: (error: unknown) =>
+      showErrorToast(
+        error instanceof Error ? error.message : "Could not update contractor record",
+      ),
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: EntityId) =>
+      apiCall(`/api/v1/contractor-access/${id}`, { method: "DELETE" }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["contractor-visits"] }),
+        queryClient.invalidateQueries({ queryKey: ["contractor-maintenance-history"] }),
+        queryClient.invalidateQueries({ queryKey: ["contractor-maintenance-schedule"] }),
+      ])
+      showSuccessToast("Contractor record deleted successfully")
+      onOpenChange(false)
+    },
+    onError: (error: unknown) =>
+      showErrorToast(
+        error instanceof Error ? error.message : "Could not delete contractor record",
+      ),
+  })
+
+  const handleSave = () => {
+    if (!visit) return
+    if (!name.trim() || !company.trim() || !buildingId || !jobDescription.trim() || !mobile.trim()) {
+      showErrorToast("Fill in all contractor fields")
+      return
+    }
+    const inAtIso = parseDateTimeLocalToIso(inAt)
+    const outAtIso = outAt ? parseDateTimeLocalToIso(outAt) : null
+    if (!inAtIso || (outAt && !outAtIso)) {
+      showErrorToast("Enter valid dates")
+      return
+    }
+    if (outAtIso && new Date(outAtIso).getTime() <= new Date(inAtIso).getTime()) {
+      showErrorToast("Time OUT must be after Time IN")
+      return
+    }
+    updateMutation.mutate({
+      id: visit.id,
+      payload: {
+        name: name.trim(),
+        company: company.trim(),
+        building_id: buildingId,
+        job_description: jobDescription.trim(),
+        mobile: mobile.trim(),
+        in_at: inAtIso,
+        out_at: outAtIso,
+      },
+    })
+  }
+
+  const handleDelete = () => {
+    if (!visit) return
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(`Delete contractor record for ${visit.name}?`)
+    ) {
+      return
+    }
+    deleteMutation.mutate(visit.id)
+  }
+
+  return (
+    <Dialog open={Boolean(visit)} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[92vh] overflow-y-auto border-[#e5e0dc] bg-white text-[#55311c] sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Edit contractor record</DialogTitle>
+          <DialogDescription>Update the selected contractor record.</DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-4 md:grid-cols-2">
+          <div><label htmlFor="edit-contractor-name" className="mb-1 block text-sm font-semibold">Name</label><input id="edit-contractor-name" value={name} onChange={(event) => setName(event.target.value)} className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2" /></div>
+          <div><label htmlFor="edit-contractor-company" className="mb-1 block text-sm font-semibold">Company</label><input id="edit-contractor-company" value={company} onChange={(event) => setCompany(event.target.value)} className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2" /></div>
+          <div><label htmlFor="edit-contractor-building" className="mb-1 block text-sm font-semibold">Building</label><select id="edit-contractor-building" value={buildingId} onChange={(event) => setBuildingId(event.target.value)} className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2"><option value="">Select a building</option>{buildings.map((building) => <option key={building.id} value={String(building.id)}>{building.name}</option>)}</select></div>
+          <div><label htmlFor="edit-contractor-mobile" className="mb-1 block text-sm font-semibold">Mobile</label><input id="edit-contractor-mobile" value={mobile} onChange={(event) => setMobile(event.target.value)} className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2" /></div>
+          <div className="md:col-span-2"><label htmlFor="edit-contractor-job" className="mb-1 block text-sm font-semibold">Job description</label><input id="edit-contractor-job" value={jobDescription} onChange={(event) => setJobDescription(event.target.value)} className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2" /></div>
+          <div><label htmlFor="edit-contractor-in" className="mb-1 block text-sm font-semibold">Date and Time IN</label><input id="edit-contractor-in" type="datetime-local" value={inAt} onChange={(event) => setInAt(event.target.value)} className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2" /></div>
+          <div><label htmlFor="edit-contractor-out" className="mb-1 block text-sm font-semibold">Date and Time OUT</label><input id="edit-contractor-out" type="datetime-local" value={outAt} onChange={(event) => setOutAt(event.target.value)} className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2" /></div>
+        </div>
+        <DialogFooter>
+          <button type="button" onClick={handleDelete} disabled={updateMutation.isPending || deleteMutation.isPending} className="mr-auto rounded border border-red-700 px-4 py-2 font-semibold text-red-700 disabled:opacity-60">{deleteMutation.isPending ? "Deleting..." : "Delete record"}</button>
+          <button type="button" onClick={() => onOpenChange(false)} disabled={updateMutation.isPending || deleteMutation.isPending} className="rounded border border-[#8c7569] px-4 py-2 font-semibold">Cancel</button>
+          <button type="button" onClick={handleSave} disabled={updateMutation.isPending || deleteMutation.isPending} className="rounded bg-[#8c7569] px-4 py-2 font-semibold text-white disabled:opacity-60">{updateMutation.isPending ? "Saving..." : "Save"}</button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function ContractorsContent() {
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
@@ -12288,6 +12819,9 @@ function ContractorsContent() {
   const [dateTo, setDateTo] = useState("")
   const [selectedBuildings, setSelectedBuildings] = useState<string[]>([])
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
+  const [isMaintenanceDialogOpen, setIsMaintenanceDialogOpen] = useState(false)
+  const [editingContractorVisit, setEditingContractorVisit] =
+    useState<ContractorVisitAdmin | null>(null)
   const [isMediaDialogOpen, setIsMediaDialogOpen] = useState(false)
   const [isInvoiceDialogOpen, setIsInvoiceDialogOpen] = useState(false)
   const [manualCheckoutVisit, setManualCheckoutVisit] =
@@ -12563,6 +13097,13 @@ function ContractorsContent() {
             >
               Invoice
             </button>
+            <button
+              type="button"
+              onClick={() => setIsMaintenanceDialogOpen(true)}
+              className="rounded-lg border border-[#8c7569] bg-white px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+            >
+              Maintenance
+            </button>
           </div>
         </div>
       </div>
@@ -12680,6 +13221,16 @@ function ContractorsContent() {
         open={isCreateDialogOpen}
         onOpenChange={setIsCreateDialogOpen}
       />
+      <ContractorMaintenanceDialog
+        open={isMaintenanceDialogOpen}
+        onOpenChange={setIsMaintenanceDialogOpen}
+      />
+      <ContractorRecordEditDialog
+        visit={editingContractorVisit}
+        onOpenChange={(open) => {
+          if (!open) setEditingContractorVisit(null)
+        }}
+      />
 
       <Dialog
         open={Boolean(manualCheckoutVisit)}
@@ -12772,16 +13323,13 @@ function ContractorsContent() {
                 <th className="border border-[#736055] px-3 py-2 text-left text-sm font-semibold text-white">
                   Media
                 </th>
-                <th className="border border-[#736055] px-3 py-2 text-center text-sm font-semibold text-white">
-                  Action
-                </th>
               </tr>
             </thead>
             <tbody>
               {isLoading && (
                 <tr>
                   <td
-                    colSpan={10}
+                    colSpan={9}
                     className="border border-[#e5e0dc] bg-white px-3 py-4 text-center text-sm text-[rgba(0,0,0,0.7)]"
                   >
                     Loading contractor records...
@@ -12791,7 +13339,7 @@ function ContractorsContent() {
               {!isLoading && filteredVisits.length === 0 && (
                 <tr>
                   <td
-                    colSpan={10}
+                    colSpan={9}
                     className="border border-[#e5e0dc] bg-white px-3 py-4 text-center text-sm text-[rgba(0,0,0,0.7)]"
                   >
                     No contractor records found.
@@ -12809,7 +13357,11 @@ function ContractorsContent() {
                   const hasMedia = mediaSlots.length > 0
 
                   return (
-                    <tr key={visit.id} className="bg-white hover:bg-[#f8f5f3]">
+                    <tr
+                      key={visit.id}
+                      onClick={() => setEditingContractorVisit(visit)}
+                      className="cursor-pointer bg-white hover:bg-[#f8f5f3]"
+                    >
                       <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
                         {formatDate(visit.in_at)}
                       </td>
@@ -12823,7 +13375,10 @@ function ContractorsContent() {
                           ) : (
                             <button
                               type="button"
-                              onClick={() => handleOpenManualCheckout(visit)}
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                handleOpenManualCheckout(visit)
+                              }}
                               className="rounded border border-[#8c7569] px-2 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
                             >
                               Add Time OUT
@@ -12847,6 +13402,16 @@ function ContractorsContent() {
                         {visit.mobile}
                       </td>
                       <td className="border border-[#e5e0dc] px-3 py-2 text-sm text-[#55311c]">
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            handleOpenMediaDialog(visit)
+                          }}
+                          className="mb-2 rounded border border-[#8c7569] px-3 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+                        >
+                          {hasMedia ? "Edit media" : "Add media"}
+                        </button>
                         {hasMedia ? (
                           <div className="grid max-w-[20rem] grid-cols-1 gap-2 sm:grid-cols-2">
                             {mediaSlots.map((slot) => (
@@ -12866,6 +13431,7 @@ function ContractorsContent() {
                                 )}
                                 <a
                                   href={slot.data ?? undefined}
+                                  onClick={(event) => event.stopPropagation()}
                                   download={
                                     slot.name ||
                                     `contractor-media-${slot.slotNumber}`
@@ -12878,20 +13444,7 @@ function ContractorsContent() {
                               </div>
                             ))}
                           </div>
-                        ) : (
-                          <span className="text-xs text-[rgba(0,0,0,0.55)]">
-                            No media
-                          </span>
-                        )}
-                      </td>
-                      <td className="border border-[#e5e0dc] px-3 py-2 text-center text-sm">
-                        <button
-                          type="button"
-                          onClick={() => handleOpenMediaDialog(visit)}
-                          className="rounded border border-[#8c7569] px-3 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
-                        >
-                          {hasMedia ? "Edit media" : "Add media"}
-                        </button>
+                        ) : null}
                       </td>
                     </tr>
                   )
@@ -16696,6 +17249,7 @@ function CleanerSummary() {
     useState<CleanerManualActionState | null>(null)
   const [editedCleanerInTimeValue, setEditedCleanerInTimeValue] = useState("")
   const [editedCleanerOutTimeValue, setEditedCleanerOutTimeValue] = useState("")
+  const [editedCleanerBuildingId, setEditedCleanerBuildingId] = useState("")
   const [cleanerManualTimeValue, setCleanerManualTimeValue] = useState("")
   const [isSavingCleanerRecordEdit, setIsSavingCleanerRecordEdit] =
     useState(false)
@@ -17056,6 +17610,9 @@ function CleanerSummary() {
     inIsoValue: string | null,
     outRecordId: EntityId | null,
     outIsoValue: string | null,
+    buildingId: EntityId | null,
+    rowKey: string,
+    buildingLabel: string,
   ) => {
     if (!inRecordId && !outRecordId) return
     setEditingCleanerRecord({
@@ -17063,9 +17620,13 @@ function CleanerSummary() {
       inOriginalIso: inIsoValue,
       outRecordId,
       outOriginalIso: outIsoValue,
+      buildingId,
+      rowKey,
+      buildingLabel,
     })
     setEditedCleanerInTimeValue(toDateTimeLocalInputValue(inIsoValue))
     setEditedCleanerOutTimeValue(toDateTimeLocalInputValue(outIsoValue))
+    setEditedCleanerBuildingId(buildingId ? String(buildingId) : "")
   }
 
   const handleSaveCleanerRecordEdit = async () => {
@@ -17073,6 +17634,11 @@ function CleanerSummary() {
 
     try {
       setIsSavingCleanerRecordEdit(true)
+
+      if (!editedCleanerBuildingId) {
+        showErrorToast("Building is required")
+        return
+      }
 
       const updates: Promise<unknown>[] = []
       let nextInIso = editingCleanerRecord.inOriginalIso
@@ -17097,7 +17663,7 @@ function CleanerSummary() {
         updates.push(
           apiCall(`/api/v1/acess/${editingCleanerRecord.inRecordId}`, {
             method: "PATCH",
-            body: { data: parsedInIso },
+            body: { data: parsedInIso, building_id: editedCleanerBuildingId },
           }),
         )
       }
@@ -17121,7 +17687,7 @@ function CleanerSummary() {
         updates.push(
           apiCall(`/api/v1/acess/${editingCleanerRecord.outRecordId}`, {
             method: "PATCH",
-            body: { data: parsedOutIso },
+            body: { data: parsedOutIso, building_id: editedCleanerBuildingId },
           }),
         )
       }
@@ -17194,6 +17760,7 @@ function CleanerSummary() {
       await queryClient.invalidateQueries({
         queryKey: ["acess", "cleaner"],
       })
+      setEditingCleanerRecord(null)
       showSuccessToast("Cleaner record deleted successfully")
     } catch (error) {
       const message =
@@ -17202,6 +17769,19 @@ function CleanerSummary() {
     } finally {
       setDeletingCleanerRowKey(null)
     }
+  }
+
+  const handleDeleteCleanerRecordEdit = () => {
+    if (!editingCleanerRecord) return
+    void handleDeleteCleanerHistoryRow({
+      rowKey: editingCleanerRecord.rowKey,
+      inRecordId: editingCleanerRecord.inRecordId,
+      outRecordId: editingCleanerRecord.outRecordId,
+      buildingLabel: editingCleanerRecord.buildingLabel,
+      dateValue:
+        editingCleanerRecord.inOriginalIso ||
+        editingCleanerRecord.outOriginalIso,
+    })
   }
 
   const resetCleanerManualAction = () => {
@@ -17552,9 +18132,6 @@ function CleanerSummary() {
               <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700">
                 Used
               </th>
-              <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700">
-                Actions
-              </th>
             </tr>
           </thead>
           <tbody>
@@ -17562,7 +18139,7 @@ function CleanerSummary() {
               <tr>
                 <td
                   className="border border-gray-400 px-3 py-3 text-center text-sm text-gray-600"
-                  colSpan={6}
+                  colSpan={5}
                 >
                   Loading...
                 </td>
@@ -17572,7 +18149,7 @@ function CleanerSummary() {
               <tr>
                 <td
                   className="border border-gray-400 px-3 py-3 text-center text-sm text-gray-600"
-                  colSpan={6}
+                  colSpan={5}
                 >
                   No records found.
                 </td>
@@ -17583,20 +18160,30 @@ function CleanerSummary() {
               const dateLabel = formatDate(
                 session.inRecord?.data || session.outRecord?.data,
               )
-              const hasAnyRecord = Boolean(
-                session.inRecord?.id || session.outRecord?.id,
-              )
               const canCheckOut = Boolean(
                 session.inRecord?.id && !session.outRecord?.id,
               )
               const canCheckIn = Boolean(
                 !session.inRecord?.id && session.outRecord?.id,
               )
+              const openCleanerRecordEdit = () =>
+                handleOpenCleanerRecordEdit(
+                  session.inRecord?.id || null,
+                  session.inRecord?.data || null,
+                  session.outRecord?.id || null,
+                  session.outRecord?.data || null,
+                  session.inRecord?.building_id ||
+                    session.outRecord?.building_id ||
+                    null,
+                  rowKey,
+                  session.buildingLabel,
+                )
 
               return (
                 <tr
                   key={rowKey}
-                  className="bg-white hover:bg-gray-50"
+                  onClick={openCleanerRecordEdit}
+                  className="cursor-pointer bg-white hover:bg-gray-50"
                 >
                   <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
                     {dateLabel}
@@ -17612,9 +18199,10 @@ function CleanerSummary() {
                       {canCheckIn && (
                         <button
                           type="button"
-                          onClick={() =>
+                          onClick={(event) => {
+                            event.stopPropagation()
                             handleOpenCleanerManualAction(session, "checkin")
-                          }
+                          }}
                           className="rounded border border-[#8c7569] px-2 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           Check in
@@ -17630,9 +18218,10 @@ function CleanerSummary() {
                       {canCheckOut && (
                         <button
                           type="button"
-                          onClick={() =>
+                          onClick={(event) => {
+                            event.stopPropagation()
                             handleOpenCleanerManualAction(session, "checkout")
-                          }
+                          }}
                           className="rounded border border-[#8c7569] px-2 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           Check out
@@ -17645,63 +18234,6 @@ function CleanerSummary() {
                       session.inRecord?.data,
                       session.outRecord?.data,
                     )}
-                  </td>
-                  <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <button
-                          type="button"
-                          aria-label="Open actions menu"
-                          disabled={!hasAnyRecord || deletingCleanerRowKey === rowKey}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded border border-[#8c7569] bg-white text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          <svg
-                            className="h-4 w-4"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                          >
-                            <title>Actions</title>
-                            <path d="M4 7h16" />
-                            <path d="M4 12h16" />
-                            <path d="M4 17h16" />
-                          </svg>
-                        </button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          disabled={!hasAnyRecord || deletingCleanerRowKey === rowKey}
-                          onClick={() =>
-                            handleOpenCleanerRecordEdit(
-                              session.inRecord?.id || null,
-                              session.inRecord?.data || null,
-                              session.outRecord?.id || null,
-                              session.outRecord?.data || null,
-                            )
-                          }
-                        >
-                          Edit
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          disabled={!hasAnyRecord || deletingCleanerRowKey === rowKey}
-                          variant="destructive"
-                          onClick={() =>
-                            handleDeleteCleanerHistoryRow({
-                              rowKey,
-                              inRecordId: session.inRecord?.id || null,
-                              outRecordId: session.outRecord?.id || null,
-                              buildingLabel: session.buildingLabel,
-                              dateValue:
-                                session.inRecord?.data || session.outRecord?.data || null,
-                            })
-                          }
-                        >
-                          {deletingCleanerRowKey === rowKey ? "Deleting..." : "Delete"}
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
                   </td>
                 </tr>
               )
@@ -17757,6 +18289,29 @@ function CleanerSummary() {
             </p>
 
             <div className="mt-4 grid gap-4">
+              <div>
+                <label
+                  className="block text-sm font-semibold text-[#55311c]"
+                  htmlFor="cleaner-edit-building"
+                >
+                  Building
+                </label>
+                <select
+                  id="cleaner-edit-building"
+                  value={editedCleanerBuildingId}
+                  onChange={(event) =>
+                    setEditedCleanerBuildingId(event.target.value)
+                  }
+                  className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
+                >
+                  <option value="">Select a building</option>
+                  {buildings.map((building) => (
+                    <option key={building.id} value={String(building.id)}>
+                      {building.nome}
+                    </option>
+                  ))}
+                </select>
+              </div>
               {editingCleanerRecord.inRecordId &&
                 editingCleanerRecord.inOriginalIso && (
                   <div>
@@ -17802,15 +18357,35 @@ function CleanerSummary() {
             <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end">
               <button
                 type="button"
+                onClick={handleDeleteCleanerRecordEdit}
+                disabled={
+                  isSavingCleanerRecordEdit ||
+                  deletingCleanerRowKey === editingCleanerRecord.rowKey
+                }
+                className="w-full rounded-lg border border-red-700 px-4 py-2 text-sm font-semibold text-red-700 transition-all duration-200 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 sm:mr-auto sm:w-auto"
+              >
+                {deletingCleanerRowKey === editingCleanerRecord.rowKey
+                  ? "Deleting..."
+                  : "Delete record"}
+              </button>
+              <button
+                type="button"
                 onClick={() => setEditingCleanerRecord(null)}
-                className="w-full rounded-lg border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] sm:w-auto"
+                disabled={
+                  isSavingCleanerRecordEdit ||
+                  deletingCleanerRowKey === editingCleanerRecord.rowKey
+                }
+                className="w-full rounded-lg border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={handleSaveCleanerRecordEdit}
-                disabled={isSavingCleanerRecordEdit}
+                disabled={
+                  isSavingCleanerRecordEdit ||
+                  deletingCleanerRowKey === editingCleanerRecord.rowKey
+                }
                 className="w-full rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
               >
                 {isSavingCleanerRecordEdit ? "Saving..." : "Save"}

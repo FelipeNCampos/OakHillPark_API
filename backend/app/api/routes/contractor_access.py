@@ -4,7 +4,7 @@ import logging
 import re
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import or_
@@ -12,21 +12,37 @@ from sqlmodel import col, func, select
 
 from app.api.deps import CurrentUser, SessionDep
 from app.core.config import settings
-from app.core.db import ensure_contractor_history_schema, ensure_contractor_visit_schema
+from app.core.db import (
+    ensure_contractor_history_schema,
+    ensure_contractor_maintenance_schema,
+    ensure_contractor_visit_schema,
+)
 from app.models import (
     Building,
     Condominio,
-    ContractorHistoryExecutionSummary,
+    ContractorAccessBuildingPublic,
+    ContractorAccessBuildingsPublic,
     ContractorHistoriesPublic,
     ContractorHistory,
     ContractorHistoryCategoriesPublic,
     ContractorHistoryCategory,
     ContractorHistoryCategoryCreate,
     ContractorHistoryCategoryPublic,
+    ContractorHistoryExecutionSummary,
     ContractorHistoryPublic,
     ContractorHistoryUpsert,
-    ContractorAccessBuildingPublic,
-    ContractorAccessBuildingsPublic,
+    ContractorMaintenance,
+    ContractorMaintenanceCategoriesPublic,
+    ContractorMaintenanceCategory,
+    ContractorMaintenanceCategoryCreate,
+    ContractorMaintenanceCategoryPublic,
+    ContractorMaintenanceCreate,
+    ContractorMaintenancePublic,
+    ContractorMaintenanceRecord,
+    ContractorMaintenanceRecordCreate,
+    ContractorMaintenanceRecordPublic,
+    ContractorMaintenanceRecordsPublic,
+    ContractorMaintenancesPublic,
     ContractorOpenVisitPublic,
     ContractorOpenVisitsPublic,
     ContractorVisit,
@@ -36,6 +52,7 @@ from app.models import (
     ContractorVisitMediaUpdate,
     ContractorVisitPublic,
     ContractorVisitsPublic,
+    ContractorVisitUpdate,
     Flat,
     Morador,
     User,
@@ -557,6 +574,162 @@ def _update_manual_contractor_visit_from_history(
     return visit
 
 
+def _require_contractor_maintenance_category(
+    session: SessionDep, condominio_id: uuid.UUID, category_id: uuid.UUID
+) -> ContractorMaintenanceCategory:
+    item = session.get(ContractorMaintenanceCategory, category_id)
+    if not item or item.condominio_id != condominio_id:
+        raise HTTPException(
+            status_code=404, detail="Contractor maintenance category not found"
+        )
+    return item
+
+
+def _require_contractor_maintenance(
+    session: SessionDep, condominio_id: uuid.UUID, maintenance_id: uuid.UUID
+) -> ContractorMaintenance:
+    item = session.get(ContractorMaintenance, maintenance_id)
+    if not item or item.condominio_id != condominio_id:
+        raise HTTPException(status_code=404, detail="Contractor maintenance not found")
+    return item
+
+
+def _is_contractor_maintenance_overdue(
+    last_completed_at: datetime | None, frequency_days: int
+) -> bool:
+    if last_completed_at is None:
+        return False
+    completed_at = (
+        last_completed_at.replace(tzinfo=timezone.utc)
+        if last_completed_at.tzinfo is None
+        else last_completed_at
+    )
+    return completed_at + timedelta(days=frequency_days) < datetime.now(timezone.utc)
+
+
+def _contractor_maintenance_status(
+    last_completed_at: datetime | None, frequency_days: int
+) -> Literal["pending", "soon", "ok"]:
+    if last_completed_at is None:
+        return "pending"
+    completed_at = (
+        last_completed_at.replace(tzinfo=timezone.utc)
+        if last_completed_at.tzinfo is None
+        else last_completed_at
+    )
+    due_at = completed_at + timedelta(days=frequency_days)
+    now = datetime.now(timezone.utc)
+    if due_at < now:
+        return "pending"
+    if due_at <= now + timedelta(days=7):
+        return "soon"
+    return "ok"
+
+
+def _contractor_maintenance_to_public(
+    session: SessionDep,
+    maintenance: ContractorMaintenance,
+    category: ContractorMaintenanceCategory,
+) -> ContractorMaintenancePublic:
+    last_completed_at = session.exec(
+        select(ContractorMaintenanceRecord.out_at)
+        .where(
+            ContractorMaintenanceRecord.maintenance_id == maintenance.id,
+            ContractorMaintenanceRecord.out_at.is_not(None),
+        )
+        .order_by(ContractorMaintenanceRecord.out_at.desc())
+        .limit(1)
+    ).first()
+    return ContractorMaintenancePublic(
+        id=maintenance.id,
+        category_id=category.id,
+        category_name=category.name,
+        tag=maintenance.tag,
+        report=maintenance.report,
+        frequency_days=maintenance.frequency_days,
+        notes=maintenance.notes,
+        mobile=maintenance.mobile,
+        last_completed_at=last_completed_at,
+        is_overdue=_is_contractor_maintenance_overdue(
+            last_completed_at, maintenance.frequency_days
+        ),
+        status=_contractor_maintenance_status(
+            last_completed_at, maintenance.frequency_days
+        ),
+        created_at=maintenance.created_at,
+        updated_at=maintenance.updated_at,
+    )
+
+
+def _contractor_maintenance_record_to_public(
+    record: ContractorMaintenanceRecord,
+    maintenance: ContractorMaintenance,
+    category: ContractorMaintenanceCategory,
+    visit: ContractorVisit,
+) -> ContractorMaintenanceRecordPublic:
+    return ContractorMaintenanceRecordPublic(
+        id=record.id,
+        maintenance_id=maintenance.id,
+        category_name=category.name,
+        tag=maintenance.tag,
+        report=maintenance.report,
+        contractor_visit_id=visit.id,
+        contractor_name=visit.name,
+        contractor_mobile=visit.mobile,
+        in_at=record.in_at,
+        out_at=record.out_at,
+    )
+
+
+def _create_maintenance_records_for_contractor_visit(
+    session: SessionDep, visit: ContractorVisit
+) -> None:
+    normalized_visit_mobile = _normalize_phone_to_e164(visit.mobile)
+    if not normalized_visit_mobile:
+        return
+
+    maintenances = session.exec(
+        select(ContractorMaintenance).where(
+            ContractorMaintenance.condominio_id == visit.condominio_id,
+            ContractorMaintenance.mobile.is_not(None),
+        )
+    ).all()
+    for maintenance in maintenances:
+        if _normalize_phone_to_e164(maintenance.mobile) != normalized_visit_mobile:
+            continue
+        existing = session.exec(
+            select(ContractorMaintenanceRecord).where(
+                ContractorMaintenanceRecord.maintenance_id == maintenance.id,
+                ContractorMaintenanceRecord.contractor_visit_id == visit.id,
+            )
+        ).first()
+        if existing:
+            continue
+        session.add(
+            ContractorMaintenanceRecord(
+                condominio_id=visit.condominio_id,
+                maintenance_id=maintenance.id,
+                contractor_visit_id=visit.id,
+                in_at=visit.in_at,
+                out_at=visit.out_at,
+            )
+        )
+
+
+def _complete_maintenance_records_for_contractor_visit(
+    session: SessionDep, visit: ContractorVisit
+) -> None:
+    records = session.exec(
+        select(ContractorMaintenanceRecord).where(
+            ContractorMaintenanceRecord.contractor_visit_id == visit.id,
+            ContractorMaintenanceRecord.out_at.is_(None),
+        )
+    ).all()
+    for record in records:
+        record.out_at = visit.out_at
+        session.add(record)
+
+
 @router.get("/", response_model=ContractorVisitsPublic)
 def read_contractor_visits(
     session: SessionDep,
@@ -984,6 +1157,224 @@ def execute_due_contractor_history_notifications(
     )
 
 
+@router.get(
+    "/maintenance/categories", response_model=ContractorMaintenanceCategoriesPublic
+)
+def read_contractor_maintenance_categories(
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> ContractorMaintenanceCategoriesPublic:
+    ensure_contractor_visit_schema(session)
+    ensure_contractor_maintenance_schema(session)
+    condominio_id = _require_manager_condominio(session, current_user)
+    rows = session.exec(
+        select(ContractorMaintenanceCategory)
+        .where(ContractorMaintenanceCategory.condominio_id == condominio_id)
+        .order_by(ContractorMaintenanceCategory.name.asc())
+    ).all()
+    return ContractorMaintenanceCategoriesPublic(
+        data=[
+            ContractorMaintenanceCategoryPublic(
+                id=item.id,
+                name=item.name,
+                created_at=item.created_at,
+                updated_at=item.updated_at,
+            )
+            for item in rows
+        ],
+        count=len(rows),
+    )
+
+
+@router.post(
+    "/maintenance/categories",
+    response_model=ContractorMaintenanceCategoryPublic,
+    status_code=201,
+)
+def create_contractor_maintenance_category(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    payload: ContractorMaintenanceCategoryCreate,
+) -> ContractorMaintenanceCategoryPublic:
+    ensure_contractor_visit_schema(session)
+    ensure_contractor_maintenance_schema(session)
+    condominio_id = _require_manager_condominio(session, current_user)
+    name = _normalise_text(payload.name)
+    if not name:
+        raise HTTPException(status_code=422, detail="Category name is required")
+
+    existing = session.exec(
+        select(ContractorMaintenanceCategory).where(
+            ContractorMaintenanceCategory.condominio_id == condominio_id
+        )
+    ).all()
+    if any(_normalise_building_name(item.name) == _normalise_building_name(name) for item in existing):
+        raise HTTPException(status_code=400, detail="Maintenance category already exists")
+
+    category = ContractorMaintenanceCategory(name=name, condominio_id=condominio_id)
+    session.add(category)
+    session.commit()
+    session.refresh(category)
+    return ContractorMaintenanceCategoryPublic(
+        id=category.id,
+        name=category.name,
+        created_at=category.created_at,
+        updated_at=category.updated_at,
+    )
+
+
+@router.post("/maintenance", response_model=ContractorMaintenancePublic, status_code=201)
+def create_contractor_maintenance(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    payload: ContractorMaintenanceCreate,
+) -> ContractorMaintenancePublic:
+    ensure_contractor_visit_schema(session)
+    ensure_contractor_maintenance_schema(session)
+    condominio_id = _require_manager_condominio(session, current_user)
+    category = _require_contractor_maintenance_category(
+        session, condominio_id, payload.category_id
+    )
+    tag = _normalise_text(payload.tag)
+    report = _normalise_text(payload.report)
+    if not tag or not report:
+        raise HTTPException(status_code=422, detail="Tag and report are required")
+
+    maintenance = ContractorMaintenance(
+        category_id=category.id,
+        condominio_id=condominio_id,
+        tag=tag,
+        report=report,
+        frequency_days=payload.frequency_days,
+        notes=_normalise_text(payload.notes) or "",
+        mobile=_normalise_text(payload.mobile),
+    )
+    session.add(maintenance)
+    session.commit()
+    session.refresh(maintenance)
+    return _contractor_maintenance_to_public(session, maintenance, category)
+
+
+@router.get("/maintenance/schedule", response_model=ContractorMaintenancesPublic)
+def read_contractor_maintenance_schedule(
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> ContractorMaintenancesPublic:
+    ensure_contractor_visit_schema(session)
+    ensure_contractor_maintenance_schema(session)
+    condominio_id = _require_manager_condominio(session, current_user)
+    rows = session.exec(
+        select(ContractorMaintenance, ContractorMaintenanceCategory)
+        .join(
+            ContractorMaintenanceCategory,
+            ContractorMaintenanceCategory.id == ContractorMaintenance.category_id,
+        )
+        .where(ContractorMaintenance.condominio_id == condominio_id)
+        .order_by(ContractorMaintenance.created_at.desc())
+    ).all()
+    return ContractorMaintenancesPublic(
+        data=[
+            _contractor_maintenance_to_public(session, maintenance, category)
+            for maintenance, category in rows
+        ],
+        count=len(rows),
+    )
+
+
+@router.get("/maintenance/history", response_model=ContractorMaintenanceRecordsPublic)
+def read_contractor_maintenance_history(
+    session: SessionDep,
+    current_user: CurrentUser,
+    limit: int = 100,
+) -> ContractorMaintenanceRecordsPublic:
+    ensure_contractor_visit_schema(session)
+    ensure_contractor_maintenance_schema(session)
+    condominio_id = _require_manager_condominio(session, current_user)
+    rows = session.exec(
+        select(
+            ContractorMaintenanceRecord,
+            ContractorMaintenance,
+            ContractorMaintenanceCategory,
+            ContractorVisit,
+        )
+        .join(
+            ContractorMaintenance,
+            ContractorMaintenance.id == ContractorMaintenanceRecord.maintenance_id,
+        )
+        .join(
+            ContractorMaintenanceCategory,
+            ContractorMaintenanceCategory.id == ContractorMaintenance.category_id,
+        )
+        .join(
+            ContractorVisit,
+            ContractorVisit.id == ContractorMaintenanceRecord.contractor_visit_id,
+        )
+        .where(ContractorMaintenanceRecord.condominio_id == condominio_id)
+        .order_by(ContractorMaintenanceRecord.in_at.desc())
+        .limit(min(max(limit, 1), 500))
+    ).all()
+    return ContractorMaintenanceRecordsPublic(
+        data=[
+            _contractor_maintenance_record_to_public(
+                record, maintenance, category, visit
+            )
+            for record, maintenance, category, visit in rows
+        ],
+        count=len(rows),
+    )
+
+
+@router.post(
+    "/maintenance/records",
+    response_model=ContractorMaintenanceRecordPublic,
+    status_code=201,
+)
+def create_contractor_maintenance_record(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    payload: ContractorMaintenanceRecordCreate,
+) -> ContractorMaintenanceRecordPublic:
+    ensure_contractor_visit_schema(session)
+    ensure_contractor_maintenance_schema(session)
+    condominio_id = _require_manager_condominio(session, current_user)
+    maintenance = _require_contractor_maintenance(
+        session, condominio_id, payload.maintenance_id
+    )
+    visit = _require_contractor_visit_for_condominio(
+        session, condominio_id, payload.contractor_visit_id
+    )
+    existing = session.exec(
+        select(ContractorMaintenanceRecord).where(
+            ContractorMaintenanceRecord.maintenance_id == maintenance.id,
+            ContractorMaintenanceRecord.contractor_visit_id == visit.id,
+        )
+    ).first()
+    if existing:
+        raise HTTPException(
+            status_code=400,
+            detail="This contractor visit is already linked to the maintenance",
+        )
+    category = _require_contractor_maintenance_category(
+        session, condominio_id, maintenance.category_id
+    )
+    record = ContractorMaintenanceRecord(
+        condominio_id=condominio_id,
+        maintenance_id=maintenance.id,
+        contractor_visit_id=visit.id,
+        in_at=visit.in_at,
+        out_at=visit.out_at,
+    )
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+    return _contractor_maintenance_record_to_public(
+        record, maintenance, category, visit
+    )
+
+
 @router.get("/buildings", response_model=ContractorAccessBuildingsPublic)
 def read_contractor_access_buildings(
     session: SessionDep,
@@ -1069,6 +1460,7 @@ def create_contractor_visit(
     payload: ContractorVisitCheckInCreate,
 ) -> Any:
     ensure_contractor_visit_schema(session)
+    ensure_contractor_maintenance_schema(session)
     _require_condominio(session, payload.condominio_id)
     building = _require_building(session, payload.condominio_id, payload.building_id)
     check_in_at = payload.in_at or datetime.now(timezone.utc)
@@ -1083,6 +1475,7 @@ def create_contractor_visit(
         condominio_id=payload.condominio_id,
     )
     session.add(item)
+    _create_maintenance_records_for_contractor_visit(session, item)
     session.commit()
     session.refresh(item)
 
@@ -1096,6 +1489,7 @@ def close_contractor_visit(
     payload: ContractorVisitCheckOutCreate,
 ) -> Any:
     ensure_contractor_visit_schema(session)
+    ensure_contractor_maintenance_schema(session)
     _require_condominio(session, payload.condominio_id)
 
     item = session.get(ContractorVisit, payload.visit_id)
@@ -1114,10 +1508,87 @@ def close_contractor_visit(
 
     item.out_at = check_out_at
     session.add(item)
+    _complete_maintenance_records_for_contractor_visit(session, item)
     session.commit()
     session.refresh(item)
 
     return _contractor_visit_to_public(item)
+
+
+@router.patch("/{visit_id}", response_model=ContractorVisitAdminPublic)
+def update_contractor_visit(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    visit_id: uuid.UUID,
+    payload: ContractorVisitUpdate,
+) -> ContractorVisitAdminPublic:
+    ensure_contractor_visit_schema(session)
+    ensure_contractor_maintenance_schema(session)
+    condominio_id = _require_manager_condominio(session, current_user)
+    item = _require_contractor_visit_for_condominio(session, condominio_id, visit_id)
+
+    fields_to_update = payload.model_fields_set
+    if not fields_to_update:
+        raise HTTPException(status_code=422, detail="No fields to update")
+
+    for field_name in ("name", "company", "job_description", "mobile"):
+        if field_name not in fields_to_update:
+            continue
+        value = _normalise_text(getattr(payload, field_name))
+        if not value:
+            raise HTTPException(status_code=422, detail=f"{field_name} is required")
+        setattr(item, field_name, value)
+
+    if "building_id" in fields_to_update:
+        if payload.building_id is None:
+            raise HTTPException(status_code=422, detail="building_id is required")
+        item.block = _require_building(
+            session, condominio_id, payload.building_id
+        ).nome
+
+    next_in_at = payload.in_at if "in_at" in fields_to_update else item.in_at
+    next_out_at = payload.out_at if "out_at" in fields_to_update else item.out_at
+    if next_in_at is None:
+        raise HTTPException(status_code=422, detail="in_at is required")
+    if next_out_at is not None and next_out_at <= next_in_at:
+        raise HTTPException(
+            status_code=422,
+            detail="Contractor check out must be after check in",
+        )
+    item.in_at = next_in_at
+    item.out_at = next_out_at
+    session.add(item)
+
+    maintenance_records = session.exec(
+        select(ContractorMaintenanceRecord).where(
+            ContractorMaintenanceRecord.contractor_visit_id == item.id
+        )
+    ).all()
+    for record in maintenance_records:
+        record.in_at = item.in_at
+        record.out_at = item.out_at
+        session.add(record)
+
+    session.commit()
+    session.refresh(item)
+    return _contractor_visit_to_admin_public(item)
+
+
+@router.delete("/{visit_id}")
+def delete_contractor_visit(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    visit_id: uuid.UUID,
+) -> dict[str, str]:
+    ensure_contractor_visit_schema(session)
+    ensure_contractor_maintenance_schema(session)
+    condominio_id = _require_manager_condominio(session, current_user)
+    item = _require_contractor_visit_for_condominio(session, condominio_id, visit_id)
+    session.delete(item)
+    session.commit()
+    return {"message": "Contractor record deleted successfully"}
 
 
 @router.patch("/{visit_id}/media", response_model=ContractorVisitAdminPublic)

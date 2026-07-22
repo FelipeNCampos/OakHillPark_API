@@ -448,6 +448,114 @@ def ensure_contractor_history_schema(session: Session) -> None:
     session.commit()
 
 
+def ensure_contractor_maintenance_schema(session: Session) -> None:
+    bind = session.get_bind()
+    inspector = inspect(bind)
+
+    if not inspector.has_table("contractormaintenancecategory"):
+        session.execute(
+            text(
+                """
+                CREATE TABLE contractormaintenancecategory (
+                    id UUID PRIMARY KEY,
+                    name VARCHAR(100) NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL,
+                    updated_at TIMESTAMPTZ NOT NULL,
+                    condominio_id UUID NOT NULL REFERENCES condominio (id) ON DELETE CASCADE
+                )
+                """
+            )
+        )
+        session.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_contractormaintenancecategory_condominio_id "
+                "ON contractormaintenancecategory (condominio_id)"
+            )
+        )
+        session.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_contractormaintenancecategory_name "
+                "ON contractormaintenancecategory (name)"
+            )
+        )
+        session.commit()
+
+    if not inspector.has_table("contractormaintenance"):
+        session.execute(
+            text(
+                """
+                CREATE TABLE contractormaintenance (
+                    id UUID PRIMARY KEY,
+                    tag VARCHAR(100) NOT NULL,
+                    report VARCHAR(255) NOT NULL,
+                    frequency_days INTEGER NOT NULL,
+                    notes VARCHAR(2000) NOT NULL DEFAULT '',
+                    mobile VARCHAR(30),
+                    created_at TIMESTAMPTZ NOT NULL,
+                    updated_at TIMESTAMPTZ NOT NULL,
+                    condominio_id UUID NOT NULL REFERENCES condominio (id) ON DELETE CASCADE,
+                    category_id UUID NOT NULL REFERENCES contractormaintenancecategory (id) ON DELETE CASCADE
+                )
+                """
+            )
+        )
+        session.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_contractormaintenance_condominio_id "
+                "ON contractormaintenance (condominio_id)"
+            )
+        )
+        session.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_contractormaintenance_category_id "
+                "ON contractormaintenance (category_id)"
+            )
+        )
+        session.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_contractormaintenance_mobile "
+                "ON contractormaintenance (mobile)"
+            )
+        )
+        session.commit()
+
+    if not inspector.has_table("contractormaintenancerecord"):
+        session.execute(
+            text(
+                """
+                CREATE TABLE contractormaintenancerecord (
+                    id UUID PRIMARY KEY,
+                    in_at TIMESTAMPTZ NOT NULL,
+                    out_at TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ NOT NULL,
+                    condominio_id UUID NOT NULL REFERENCES condominio (id) ON DELETE CASCADE,
+                    maintenance_id UUID NOT NULL REFERENCES contractormaintenance (id) ON DELETE CASCADE,
+                    contractor_visit_id UUID NOT NULL REFERENCES contractorvisit (id) ON DELETE CASCADE
+                )
+                """
+            )
+        )
+        session.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_contractormaintenancerecord_maintenance_id "
+                "ON contractormaintenancerecord (maintenance_id)"
+            )
+        )
+        session.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_contractormaintenancerecord_maintenance_visit "
+                "ON contractormaintenancerecord (maintenance_id, contractor_visit_id)"
+            )
+        )
+        session.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_contractormaintenancerecord_in_at "
+                "ON contractormaintenancerecord (in_at)"
+            )
+        )
+        session.commit()
+
+
 def ensure_caretaker_monthly_goal_schema(session: Session) -> None:
     bind = session.get_bind()
     inspector = inspect(bind)
@@ -577,6 +685,7 @@ def init_db(session: Session) -> None:
     ensure_notification_history_schema(session)
     ensure_contractor_visit_schema(session)
     ensure_contractor_history_schema(session)
+    ensure_contractor_maintenance_schema(session)
     ensure_caretaker_monthly_goal_schema(session)
     ensure_cash_flow_record_schema(session)
 

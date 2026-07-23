@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
@@ -10,9 +10,13 @@ from app.models import (
     BuildingCreate,
     Condominio,
     CondominioCreate,
+    Flat,
+    FlatCreate,
+    FlatReading,
+    Morador,
+    MoradorCreate,
     Readings,
     ReadingsCreate,
-    ReadingsUpdate,
 )
 
 
@@ -22,7 +26,7 @@ def _create_test_condominio_and_building(db: Session) -> tuple[Condominio, Build
     condominio = Condominio.model_validate(condominio_in)
     db.add(condominio)
     db.flush()
-    
+
     building_in = BuildingCreate(
         nome="Test Building",
         condominio_id=condominio.id
@@ -53,8 +57,8 @@ def test_read_readings(
 ) -> None:
     """Test reading all readings."""
     _, building = _create_test_condominio_and_building(db)
-    reading = _create_test_reading(db, building.id)
-    
+    _create_test_reading(db, building.id)
+
     r = client.get(
         f"{settings.API_V1_STR}/readings/",
         headers=superuser_token_headers,
@@ -71,11 +75,11 @@ def test_read_readings_with_pagination(
 ) -> None:
     """Test reading readings with pagination."""
     _, building = _create_test_condominio_and_building(db)
-    
+
     # Create multiple readings
-    for i in range(15):
+    for _i in range(15):
         _create_test_reading(db, building.id)
-    
+
     # Test default limit
     r = client.get(
         f"{settings.API_V1_STR}/readings/?skip=0&limit=10",
@@ -110,7 +114,7 @@ def test_read_reading_by_id(
     """Test reading a specific reading by ID."""
     _, building = _create_test_condominio_and_building(db)
     reading = _create_test_reading(db, building.id)
-    
+
     r = client.get(
         f"{settings.API_V1_STR}/readings/{reading.id}",
         headers=superuser_token_headers,
@@ -141,7 +145,7 @@ def test_create_reading(
 ) -> None:
     """Test creating a new reading."""
     _, building = _create_test_condominio_and_building(db)
-    
+
     data = {
         "tipo": 2,
         "valor": 250,
@@ -157,7 +161,7 @@ def test_create_reading(
     assert created_reading["tipo"] == data["tipo"]
     assert created_reading["valor"] == data["valor"]
     assert created_reading["building_id"] == data["building_id"]
-    
+
     # Verify it was saved to database
     db_reading = db.exec(
         select(Readings).where(Readings.id == uuid.UUID(created_reading["id"]))
@@ -172,7 +176,7 @@ def test_create_reading_without_permission(
 ) -> None:
     """Test that normal users cannot create readings."""
     _, building = _create_test_condominio_and_building(db)
-    
+
     data = {
         "tipo": 3,
         "valor": 300,
@@ -186,13 +190,175 @@ def test_create_reading_without_permission(
     assert r.status_code == 403
 
 
+def test_public_readings_form_returns_the_qr_building_and_its_configured_flats(
+    client: TestClient, db: Session
+) -> None:
+    _, building = _create_test_condominio_and_building(db)
+    building.reading_types = 5
+    db.add(building)
+
+    configured_flat = Flat.model_validate(
+        FlatCreate(
+            numero=4,
+            label="4A",
+            status=True,
+            building_id=building.id,
+            reading_types=6,
+        )
+    )
+    ignored_flat = Flat.model_validate(
+        FlatCreate(
+            numero=5,
+            status=True,
+            building_id=building.id,
+            reading_types=0,
+        )
+    )
+    db.add(configured_flat)
+    db.add(ignored_flat)
+    db.commit()
+
+    response = client.get(f"{settings.API_V1_STR}/readings/public/{building.id}")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "building": {
+            "id": str(building.id),
+            "nome": "Test Building",
+            "reading_types": 5,
+        },
+        "flats": [
+            {
+                "id": str(configured_flat.id),
+                "numero": 4,
+                "label": "4A",
+                "reading_types": 6,
+            }
+        ],
+    }
+
+
+def test_public_readings_form_creates_only_the_submitted_values_for_its_building(
+    client: TestClient, db: Session
+) -> None:
+    _, building = _create_test_condominio_and_building(db)
+    building.reading_types = 3
+    flat = Flat.model_validate(
+        FlatCreate(
+            numero=8,
+            status=True,
+            building_id=building.id,
+            reading_types=6,
+        )
+    )
+    db.add(building)
+    db.add(flat)
+    db.commit()
+
+    response = client.post(
+        f"{settings.API_V1_STR}/readings/public/{building.id}",
+        json={
+            "building_readings": [{"tipo": 1, "valor": 101}],
+            "flat_readings": [{"flat_id": str(flat.id), "tipo": 4, "valor": 202}],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"building_readings": 1, "flat_readings": 1}
+    assert db.exec(select(Readings).where(Readings.building_id == building.id)).all()
+    persisted_flat_readings = db.exec(
+        select(FlatReading).where(FlatReading.flat_id == flat.id)
+    ).all()
+    assert len(persisted_flat_readings) == 1
+    assert persisted_flat_readings[0].tipo == 4
+    assert persisted_flat_readings[0].valor == 202
+
+
+def test_public_readings_form_rejects_values_for_another_building_flat(
+    client: TestClient, db: Session
+) -> None:
+    _, building = _create_test_condominio_and_building(db)
+    _, other_building = _create_test_condominio_and_building(db)
+    other_flat = Flat.model_validate(
+        FlatCreate(
+            numero=1,
+            status=True,
+            building_id=other_building.id,
+            reading_types=2,
+        )
+    )
+    db.add(other_flat)
+    db.commit()
+
+    response = client.post(
+        f"{settings.API_V1_STR}/readings/public/{building.id}",
+        json={
+            "building_readings": [],
+            "flat_readings": [{"flat_id": str(other_flat.id), "tipo": 2, "valor": 303}],
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Flat does not belong to this building"}
+    assert not db.exec(select(FlatReading).where(FlatReading.flat_id == other_flat.id)).all()
+
+
+def test_public_readings_form_sends_one_combined_sms_for_each_flat(
+    client: TestClient, db: Session
+) -> None:
+    _, building = _create_test_condominio_and_building(db)
+    building.reading_types = 0
+    flat = Flat.model_validate(
+        FlatCreate(
+            numero=9,
+            status=True,
+            building_id=building.id,
+            reading_types=6,
+        )
+    )
+    db.add(building)
+    db.add(flat)
+    db.flush()
+    tenant = Morador.model_validate(
+        MoradorCreate(
+            cargo=2,
+            nome="Tenant",
+            email=None,
+            mobile="07700990000",
+            receives_flat_reading_sms=True,
+            flat_id=flat.id,
+        )
+    )
+    db.add(tenant)
+    db.commit()
+
+    with patch(
+        "app.api.routes.flat_readings.send_sms_notification", return_value="SM123"
+    ) as sms_mock:
+        response = client.post(
+            f"{settings.API_V1_STR}/readings/public/{building.id}",
+            json={
+                "building_readings": [],
+                "flat_readings": [
+                    {"flat_id": str(flat.id), "tipo": 2, "valor": 111},
+                    {"flat_id": str(flat.id), "tipo": 4, "valor": 222},
+                ],
+            },
+        )
+
+    assert response.status_code == 200
+    sms_mock.assert_called_once()
+    assert "Normal: 111" in sms_mock.call_args.kwargs["body"]
+    assert "Gas: 222" in sms_mock.call_args.kwargs["body"]
+
+
 def test_update_reading(
     client: TestClient, superuser_token_headers: dict[str, str], db: Session
 ) -> None:
     """Test updating a reading."""
     _, building = _create_test_condominio_and_building(db)
     reading = _create_test_reading(db, building.id)
-    
+
     update_data = {
         "tipo": 2,
         "valor": 500,
@@ -215,7 +381,7 @@ def test_update_reading_partial(
     """Test partial update of a reading."""
     _, building = _create_test_condominio_and_building(db)
     reading = _create_test_reading(db, building.id)
-    
+
     update_data = {"valor": 777}
     r = client.patch(
         f"{settings.API_V1_STR}/readings/{reading.id}",
@@ -234,7 +400,7 @@ def test_update_nonexistent_reading(
     """Test updating a reading that doesn't exist."""
     _, building = _create_test_condominio_and_building(db)
     nonexistent_id = uuid.uuid4()
-    
+
     update_data = {
         "tipo": 1,
         "valor": 999,
@@ -256,7 +422,7 @@ def test_delete_reading(
     _, building = _create_test_condominio_and_building(db)
     reading = _create_test_reading(db, building.id)
     reading_id = reading.id
-    
+
     r = client.delete(
         f"{settings.API_V1_STR}/readings/{reading_id}",
         headers=superuser_token_headers,

@@ -13,6 +13,7 @@ import { Route as TasksAccessRouteImport } from './routes/tasks-access'
 import { Route as SignupRouteImport } from './routes/signup'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as RecoverPasswordRouteImport } from './routes/recover-password'
+import { Route as ReadingsFormRouteImport } from './routes/readings-form'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as ContractorAccessRouteImport } from './routes/contractor-access'
@@ -45,6 +46,11 @@ const ResetPasswordRoute = ResetPasswordRouteImport.update({
 const RecoverPasswordRoute = RecoverPasswordRouteImport.update({
   id: '/recover-password',
   path: '/recover-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ReadingsFormRoute = ReadingsFormRouteImport.update({
+  id: '/readings-form',
+  path: '/readings-form',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LoginRoute = LoginRouteImport.update({
@@ -122,6 +128,7 @@ export interface FileRoutesByFullPath {
   '/contractor-access': typeof ContractorAccessRoute
   '/dashboard': typeof DashboardRoute
   '/login': typeof LoginRoute
+  '/readings-form': typeof ReadingsFormRoute
   '/recover-password': typeof RecoverPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
@@ -139,6 +146,7 @@ export interface FileRoutesByTo {
   '/contractor-access': typeof ContractorAccessRoute
   '/dashboard': typeof DashboardRoute
   '/login': typeof LoginRoute
+  '/readings-form': typeof ReadingsFormRoute
   '/recover-password': typeof RecoverPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
@@ -159,6 +167,7 @@ export interface FileRoutesById {
   '/contractor-access': typeof ContractorAccessRoute
   '/dashboard': typeof DashboardRoute
   '/login': typeof LoginRoute
+  '/readings-form': typeof ReadingsFormRoute
   '/recover-password': typeof RecoverPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
@@ -180,6 +189,7 @@ export interface FileRouteTypes {
     | '/contractor-access'
     | '/dashboard'
     | '/login'
+    | '/readings-form'
     | '/recover-password'
     | '/reset-password'
     | '/signup'
@@ -197,6 +207,7 @@ export interface FileRouteTypes {
     | '/contractor-access'
     | '/dashboard'
     | '/login'
+    | '/readings-form'
     | '/recover-password'
     | '/reset-password'
     | '/signup'
@@ -216,6 +227,7 @@ export interface FileRouteTypes {
     | '/contractor-access'
     | '/dashboard'
     | '/login'
+    | '/readings-form'
     | '/recover-password'
     | '/reset-password'
     | '/signup'
@@ -236,6 +248,7 @@ export interface RootRouteChildren {
   ContractorAccessRoute: typeof ContractorAccessRoute
   DashboardRoute: typeof DashboardRoute
   LoginRoute: typeof LoginRoute
+  ReadingsFormRoute: typeof ReadingsFormRoute
   RecoverPasswordRoute: typeof RecoverPasswordRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   SignupRoute: typeof SignupRoute
@@ -271,6 +284,13 @@ declare module '@tanstack/react-router' {
       path: '/recover-password'
       fullPath: '/recover-password'
       preLoaderRoute: typeof RecoverPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/readings-form': {
+      id: '/readings-form'
+      path: '/readings-form'
+      fullPath: '/readings-form'
+      preLoaderRoute: typeof ReadingsFormRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/login': {
@@ -392,6 +412,7 @@ const rootRouteChildren: RootRouteChildren = {
   ContractorAccessRoute: ContractorAccessRoute,
   DashboardRoute: DashboardRoute,
   LoginRoute: LoginRoute,
+  ReadingsFormRoute: ReadingsFormRoute,
   RecoverPasswordRoute: RecoverPasswordRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   SignupRoute: SignupRoute,

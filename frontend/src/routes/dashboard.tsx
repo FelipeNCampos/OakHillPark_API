@@ -186,8 +186,7 @@ const compareReadingBuildingNames = (a: string, b: string) => {
 const compareReadingBuildings = (
   a: Pick<Building, "nome">,
   b: Pick<Building, "nome">,
-) =>
-  compareReadingBuildingNames(a.nome, b.nome)
+) => compareReadingBuildingNames(a.nome, b.nome)
 
 const isNorthwoodFlatOne = ({
   buildingName,
@@ -204,6 +203,15 @@ const isNorthwoodFlatOne = ({
 
 const isCleanerQrBuilding = (building: Building) =>
   QR_SPECIAL_CLEANER_BUILDING_NAMES.has(building.nome.trim().toLowerCase())
+
+const READINGS_QR_HIDDEN_BUILDING_NAMES = new Set([
+  "caretaker",
+  "cleaner",
+  "estate ohp",
+])
+
+const isReadingsQrBuilding = (building: Building) =>
+  !READINGS_QR_HIDDEN_BUILDING_NAMES.has(building.nome.trim().toLowerCase())
 
 const isTwilioBuildingVisible = (
   buildingName: string,
@@ -242,9 +250,7 @@ const getCaretakerBinsDisplayBuildingLabel = (buildingName?: string | null) => {
 const getCaretakerBinsQrDownloadSlug = (label: string) =>
   label.trim().toLowerCase().replace(/\W+/g, "-").replace(/^-|-$/g, "")
 
-type BinsDashboardGroupId =
-  | "falcon-martlett-merlin-oaklodge"
-  | "northwood"
+type BinsDashboardGroupId = "falcon-martlett-merlin-oaklodge" | "northwood"
 
 const BINS_DASHBOARD_GROUP_OPTIONS: Array<{
   id: BinsDashboardGroupId
@@ -284,7 +290,10 @@ const BINS_QR_GROUP_CONFIG: Record<
 }
 
 const normalizeBinsBuildingName = (value: string) =>
-  value.trim().toLowerCase().replace(/[\s_-]+/g, "")
+  value
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "")
 
 const getBinsDashboardGroupForBuilding = (
   buildingName: string,
@@ -2529,6 +2538,7 @@ function ClientDashboard() {
       name: "QR Codes",
       id: "qrCodes",
       items: [
+        { label: "Readings", id: "qr-readings" },
         { label: QR_TASKS_LABEL, id: "qr-task" },
         { label: "Cleaner", id: "qr-cleaner" },
         { label: "Contractor", id: "qr-contractor" },
@@ -2574,6 +2584,8 @@ function ClientDashboard() {
         return <FlatsReadingsContent />
       case "flats-add":
         return <FlatsReadingsContent initialShowForm />
+      case "qr-readings":
+        return <ReadingsQrCodesContent />
       case "qr-task":
         return <TaskQrCodesContent />
       case "qr-cleaner":
@@ -2825,6 +2837,7 @@ function OverviewContent({
     {
       title: "QR Codes",
       items: [
+        { label: "Readings", tabId: "qr-readings" },
         { label: QR_TASKS_LABEL, tabId: "qr-task" },
         { label: "Cleaner", tabId: "qr-cleaner" },
         { label: "Contractor", tabId: "qr-contractor" },
@@ -2950,17 +2963,19 @@ function CashFlowContent() {
   )
   const [sendingReport, setSendingReport] = useState(false)
   const [isShareOpen, setIsShareOpen] = useState(false)
-  const [shareDateFrom, setShareDateFrom] = useState(() =>
-    getMonthDateRange(getCurrentMonthInputValue()).dateFrom,
+  const [shareDateFrom, setShareDateFrom] = useState(
+    () => getMonthDateRange(getCurrentMonthInputValue()).dateFrom,
   )
-  const [shareDateTo, setShareDateTo] = useState(() =>
-    getMonthDateRange(getCurrentMonthInputValue()).dateTo,
+  const [shareDateTo, setShareDateTo] = useState(
+    () => getMonthDateRange(getCurrentMonthInputValue()).dateTo,
   )
   const [shareExpiryPreset, setShareExpiryPreset] = useState<
     "24h" | "7d" | "30d" | "custom"
   >("7d")
   const [shareCustomExpiry, setShareCustomExpiry] = useState(() =>
-    toDateTimeLocalInputValue(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()),
+    toDateTimeLocalInputValue(
+      new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+    ),
   )
   const [shareError, setShareError] = useState<string | null>(null)
   const [shareNotice, setShareNotice] = useState<string | null>(null)
@@ -2968,15 +2983,18 @@ function CashFlowContent() {
   const [revokingShareLinkId, setRevokingShareLinkId] = useState<string | null>(
     null,
   )
-  const [hidingShareLinkId, setHidingShareLinkId] = useState<string | null>(null)
+  const [hidingShareLinkId, setHidingShareLinkId] = useState<string | null>(
+    null,
+  )
   const [, setReportFile] = useState<{
     fileName: string
     periodLabel: string
   } | null>(null)
   const [invoiceEditor, setInvoiceEditor] =
     useState<CashFlowInvoiceEditorState | null>(null)
-  const [textEditor, setTextEditor] =
-    useState<CashFlowTextEditorState | null>(null)
+  const [textEditor, setTextEditor] = useState<CashFlowTextEditorState | null>(
+    null,
+  )
   const [createInvoicePreview, setCreateInvoicePreview] =
     useState<CashFlowPreviewState | null>(null)
   const [saving, setSaving] = useState(false)
@@ -3157,7 +3175,11 @@ function CashFlowContent() {
     setShareDateTo(range.dateTo)
     if (shareExpiryPreset !== "custom") {
       const hours =
-        shareExpiryPreset === "24h" ? 24 : shareExpiryPreset === "7d" ? 168 : 720
+        shareExpiryPreset === "24h"
+          ? 24
+          : shareExpiryPreset === "7d"
+            ? 168
+            : 720
       setShareCustomExpiry(
         toDateTimeLocalInputValue(
           new Date(Date.now() + hours * 60 * 60 * 1000).toISOString(),
@@ -3190,7 +3212,10 @@ function CashFlowContent() {
   const copyShareUrl = async (url: string) => {
     try {
       await navigator.clipboard.writeText(url)
-      setFeedback({ type: "success", message: "Shared link copied to clipboard." })
+      setFeedback({
+        type: "success",
+        message: "Shared link copied to clipboard.",
+      })
       setShareNotice("Share link copied.")
     } catch {
       setShareError("Unable to copy the link. Please copy it from the field.")
@@ -3223,10 +3248,14 @@ function CashFlowContent() {
         },
       })
       setShareNotice("Share link created.")
-      await queryClient.invalidateQueries({ queryKey: ["cash-flow-share-links"] })
+      await queryClient.invalidateQueries({
+        queryKey: ["cash-flow-share-links"],
+      })
     } catch (error) {
       setShareError(
-        error instanceof Error ? error.message : "Unable to create shared link.",
+        error instanceof Error
+          ? error.message
+          : "Unable to create shared link.",
       )
     } finally {
       setCreatingShareLink(false)
@@ -3234,7 +3263,11 @@ function CashFlowContent() {
   }
 
   const handleRevokeShareLink = async (link: CashFlowShareLink) => {
-    if (!window.confirm("Revoke this shared link? It will stop working immediately.")) {
+    if (
+      !window.confirm(
+        "Revoke this shared link? It will stop working immediately.",
+      )
+    ) {
       return
     }
     setShareError(null)
@@ -3243,10 +3276,14 @@ function CashFlowContent() {
       await apiCall(`/api/v1/cash-flow/share-links/${link.id}`, {
         method: "DELETE",
       })
-      await queryClient.invalidateQueries({ queryKey: ["cash-flow-share-links"] })
+      await queryClient.invalidateQueries({
+        queryKey: ["cash-flow-share-links"],
+      })
     } catch (error) {
       setShareError(
-        error instanceof Error ? error.message : "Unable to revoke shared link.",
+        error instanceof Error
+          ? error.message
+          : "Unable to revoke shared link.",
       )
     } finally {
       setRevokingShareLinkId(null)
@@ -3260,7 +3297,9 @@ function CashFlowContent() {
       await apiCall(`/api/v1/cash-flow/share-links/${link.id}/hide`, {
         method: "POST",
       })
-      await queryClient.invalidateQueries({ queryKey: ["cash-flow-share-links"] })
+      await queryClient.invalidateQueries({
+        queryKey: ["cash-flow-share-links"],
+      })
     } catch (error) {
       setShareError(
         error instanceof Error ? error.message : "Unable to hide shared link.",
@@ -3295,7 +3334,9 @@ function CashFlowContent() {
       )
     } catch (error) {
       setFormError(
-        error instanceof Error ? error.message : "Unable to load invoice media.",
+        error instanceof Error
+          ? error.message
+          : "Unable to load invoice media.",
       )
     }
   }
@@ -3343,7 +3384,10 @@ function CashFlowContent() {
       record,
       preview:
         record.invoice_media_data && record.invoice_media_name
-          ? resolvePreviewState(record.invoice_media_data, record.invoice_media_name)
+          ? resolvePreviewState(
+              record.invoice_media_data,
+              record.invoice_media_name,
+            )
           : record.invoice_media_data
             ? resolvePreviewState(record.invoice_media_data, "invoice-media")
             : null,
@@ -3453,7 +3497,9 @@ function CashFlowContent() {
       return nextReportFile
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "Unable to load report preview."
+        error instanceof Error
+          ? error.message
+          : "Unable to load report preview."
       setReportPreviewError(message)
       setReportFile(null)
       setReportPreviewUrl((current) => {
@@ -3491,7 +3537,9 @@ function CashFlowContent() {
     reportForm.startMonth,
   ])
 
-  const handleCreateRecord = async (event: React.FormEvent<HTMLFormElement>) => {
+  const handleCreateRecord = async (
+    event: React.FormEvent<HTMLFormElement>,
+  ) => {
     event.preventDefault()
     setFormError(null)
     setFeedback(null)
@@ -3518,7 +3566,9 @@ function CashFlowContent() {
         method: "POST",
         body: {
           has_invoice: Boolean(form.invoiceMediaData),
-          invoice_media_name: form.invoiceMediaData ? form.invoiceMediaName : null,
+          invoice_media_name: form.invoiceMediaData
+            ? form.invoiceMediaName
+            : null,
           invoice_media_data: form.invoiceMediaData,
           record_date: form.date,
           amount: parsedValue,
@@ -3994,7 +4044,9 @@ function CashFlowContent() {
             <header className="flex items-center justify-between border-b border-[#e5e0dc] px-6 py-4">
               <div>
                 <p className={labelClass}>Read-only access</p>
-                <h2 className="text-xl font-extrabold text-[#55311c]">Share cashflow</h2>
+                <h2 className="text-xl font-extrabold text-[#55311c]">
+                  Share cashflow
+                </h2>
               </div>
               <button
                 className="grid h-9 w-9 place-items-center rounded-lg border border-[#d9d0ca] text-black"
@@ -4033,11 +4085,13 @@ function CashFlowContent() {
                   />
                 </label>
                 <div className="grid grid-cols-3 gap-2">
-                  {([
-                    ["24h", "24h"],
-                    ["7d", "7d"],
-                    ["30d", "30d"],
-                  ] as const).map(([preset, label]) => (
+                  {(
+                    [
+                      ["24h", "24h"],
+                      ["7d", "7d"],
+                      ["30d", "30d"],
+                    ] as const
+                  ).map(([preset, label]) => (
                     <button
                       key={preset}
                       className={`h-11 rounded-lg border text-sm font-extrabold transition ${
@@ -4065,8 +4119,16 @@ function CashFlowContent() {
                     required
                   />
                 </label>
-                {shareError ? <p className="text-sm font-bold text-[#b42318]">{shareError}</p> : null}
-                {shareNotice ? <p className="text-sm font-extrabold text-[#00866f]">{shareNotice}</p> : null}
+                {shareError ? (
+                  <p className="text-sm font-bold text-[#b42318]">
+                    {shareError}
+                  </p>
+                ) : null}
+                {shareNotice ? (
+                  <p className="text-sm font-extrabold text-[#00866f]">
+                    {shareNotice}
+                  </p>
+                ) : null}
                 <button
                   className={`${primaryButtonClass} w-full !bg-[#9c8578] hover:!bg-[#55311c]`}
                   type="submit"
@@ -4077,9 +4139,19 @@ function CashFlowContent() {
                 </button>
               </form>
               <section className="grid content-start gap-3">
-                <h3 className="text-lg font-extrabold text-[#55311c]">Manage links</h3>
-                {shareLinksQuery.isLoading ? <p className="text-sm font-semibold text-black/60">Loading shared links...</p> : null}
-                {shareLinksQuery.error ? <p className="text-sm font-bold text-[#b42318]">Unable to load shared links.</p> : null}
+                <h3 className="text-lg font-extrabold text-[#55311c]">
+                  Manage links
+                </h3>
+                {shareLinksQuery.isLoading ? (
+                  <p className="text-sm font-semibold text-black/60">
+                    Loading shared links...
+                  </p>
+                ) : null}
+                {shareLinksQuery.error ? (
+                  <p className="text-sm font-bold text-[#b42318]">
+                    Unable to load shared links.
+                  </p>
+                ) : null}
                 {shareLinksQuery.data?.data.length ? (
                   <div className="grid gap-2">
                     <div className="grid grid-cols-[minmax(0,1.35fr)_minmax(130px,1fr)_auto] gap-3 px-4 text-[11px] font-extrabold uppercase text-[rgba(85,49,28,0.72)]">
@@ -4090,67 +4162,83 @@ function CashFlowContent() {
                     {shareLinksQuery.data.data.map((link) => {
                       const shareUrl = link.url
                       return (
-                      <DropdownMenu key={link.id}>
-                        <DropdownMenuTrigger asChild>
-                          <article
-                            role="button"
-                            tabIndex={0}
-                            className={`grid cursor-pointer grid-cols-[minmax(0,1.35fr)_minmax(130px,1fr)_auto] items-center gap-3 rounded-xl border px-4 py-3 text-left outline-none transition focus-visible:ring-2 focus-visible:ring-[#8c7569] ${
-                              link.status === "expired"
-                                ? "border-[#f3c3ad] bg-[#fff3ee] hover:bg-[#fee8df]"
-                                : link.status === "active"
-                                  ? "border-[#98ebc8] bg-[#e9faf2] hover:bg-[#ddf7eb]"
-                                  : "border-[#d9d0ca] bg-[#faf8f6] hover:bg-[#f0ebe7]"
-                            }`}
-                          >
-                            <p className="truncate text-sm font-semibold text-[#55311c]">{link.date_from} to {link.date_to}</p>
-                            <p className="text-sm font-semibold text-[#55311c]">{new Date(link.expires_at).toLocaleString("en-GB")}</p>
-                            {shareUrl ? (
-                              <button
-                                className="grid h-8 w-8 place-items-center rounded-md text-[#1e332b] transition hover:bg-white/60"
-                                type="button"
-                                onPointerDown={(event) => event.stopPropagation()}
-                                onClick={(event) => {
-                                  event.stopPropagation()
-                                  void copyShareUrl(shareUrl)
-                                }}
-                                aria-label={`Copy shared link ${link.id}`}
-                                title="Copy link"
+                        <DropdownMenu key={link.id}>
+                          <DropdownMenuTrigger asChild>
+                            <article
+                              role="button"
+                              tabIndex={0}
+                              className={`grid cursor-pointer grid-cols-[minmax(0,1.35fr)_minmax(130px,1fr)_auto] items-center gap-3 rounded-xl border px-4 py-3 text-left outline-none transition focus-visible:ring-2 focus-visible:ring-[#8c7569] ${
+                                link.status === "expired"
+                                  ? "border-[#f3c3ad] bg-[#fff3ee] hover:bg-[#fee8df]"
+                                  : link.status === "active"
+                                    ? "border-[#98ebc8] bg-[#e9faf2] hover:bg-[#ddf7eb]"
+                                    : "border-[#d9d0ca] bg-[#faf8f6] hover:bg-[#f0ebe7]"
+                              }`}
+                            >
+                              <p className="truncate text-sm font-semibold text-[#55311c]">
+                                {link.date_from} to {link.date_to}
+                              </p>
+                              <p className="text-sm font-semibold text-[#55311c]">
+                                {new Date(link.expires_at).toLocaleString(
+                                  "en-GB",
+                                )}
+                              </p>
+                              {shareUrl ? (
+                                <button
+                                  className="grid h-8 w-8 place-items-center rounded-md text-[#1e332b] transition hover:bg-white/60"
+                                  type="button"
+                                  onPointerDown={(event) =>
+                                    event.stopPropagation()
+                                  }
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    void copyShareUrl(shareUrl)
+                                  }}
+                                  aria-label={`Copy shared link ${link.id}`}
+                                  title="Copy link"
+                                >
+                                  <Copy size={18} />
+                                </button>
+                              ) : (
+                                <span className="text-xs font-bold uppercase text-black/45">
+                                  Hidden
+                                </span>
+                              )}
+                            </article>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            {link.status === "revoked" ? (
+                              <DropdownMenuItem
+                                disabled={hidingShareLinkId === link.id}
+                                onSelect={() => void handleHideShareLink(link)}
                               >
-                                <Copy size={18} />
-                              </button>
+                                {hidingShareLinkId === link.id
+                                  ? "Hiding..."
+                                  : "Hide"}
+                              </DropdownMenuItem>
                             ) : (
-                              <span className="text-xs font-bold uppercase text-black/45">
-                                Hidden
-                              </span>
+                              <DropdownMenuItem
+                                disabled={revokingShareLinkId === link.id}
+                                variant="destructive"
+                                onSelect={() =>
+                                  void handleRevokeShareLink(link)
+                                }
+                              >
+                                {revokingShareLinkId === link.id
+                                  ? "Revoking..."
+                                  : "Revoke"}
+                              </DropdownMenuItem>
                             )}
-                          </article>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          {link.status === "revoked" ? (
-                            <DropdownMenuItem
-                              disabled={hidingShareLinkId === link.id}
-                              onSelect={() => void handleHideShareLink(link)}
-                            >
-                              {hidingShareLinkId === link.id ? "Hiding..." : "Hide"}
-                            </DropdownMenuItem>
-                          ) : (
-                            <DropdownMenuItem
-                              disabled={revokingShareLinkId === link.id}
-                              variant="destructive"
-                              onSelect={() => void handleRevokeShareLink(link)}
-                            >
-                              {revokingShareLinkId === link.id
-                                ? "Revoking..."
-                                : "Revoke"}
-                            </DropdownMenuItem>
-                          )}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       )
                     })}
                   </div>
-                ) : shareLinksQuery.isSuccess ? <p className="text-sm font-semibold text-black/60">No shared links yet.</p> : null}
+                ) : shareLinksQuery.isSuccess ? (
+                  <p className="text-sm font-semibold text-black/60">
+                    No shared links yet.
+                  </p>
+                ) : null}
               </section>
             </div>
           </article>
@@ -4433,7 +4521,8 @@ function CashFlowContent() {
                 </label>
 
                 <div className="rounded-xl bg-[#faf8f6] p-4 text-sm font-semibold text-black/60">
-                  Report period: {reportForm.startMonth} to {reportForm.endMonth}
+                  Report period: {reportForm.startMonth} to{" "}
+                  {reportForm.endMonth}
                   {deferredSearch ? ` | Filter: ${deferredSearch}` : ""}
                 </div>
 
@@ -5642,9 +5731,6 @@ function BuildingReadingsTable({
                 </th>
               </>
             )}
-            <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700">
-              Actions
-            </th>
           </tr>
         </thead>
         <tbody>
@@ -5652,7 +5738,8 @@ function BuildingReadingsTable({
           {processedData.slice(0, -1).map((row, index) => (
             <tr
               key={`${row.date}-${row.lowId ?? ""}-${row.normalId ?? ""}-${row.gasId ?? ""}`}
-              className={`${
+              onClick={() => handleOpenEdit(row)}
+              className={`cursor-pointer ${
                 index % 2 === 0 ? "bg-white" : "bg-gray-50"
               } hover:bg-gray-100 transition-colors duration-150`}
             >
@@ -5719,20 +5806,20 @@ function BuildingReadingsTable({
                   </td>
                 </>
               )}
-              <td className="border border-gray-400 px-3 py-2 text-sm text-gray-800">
-                <button
-                  type="button"
-                  onClick={() => handleOpenEdit(row)}
-                  className="rounded-lg bg-[#8c7569] px-3 py-1 text-xs font-semibold text-white transition-all duration-200 hover:bg-[#55311c]"
-                >
-                  Edit
-                </button>
-              </td>
             </tr>
           ))}
 
           {/* "All" row with initial values - moved to bottom */}
-          <tr className="bg-white hover:bg-gray-50">
+          <tr
+            onClick={
+              processedData.length > 0
+                ? () => handleOpenEdit(processedData[processedData.length - 1])
+                : undefined
+            }
+            className={`bg-white ${
+              processedData.length > 0 ? "cursor-pointer hover:bg-gray-50" : ""
+            }`}
+          >
             <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-800 font-semibold">
               All
             </td>
@@ -5794,21 +5881,6 @@ function BuildingReadingsTable({
                 </td>
               </>
             )}
-            <td className="border border-gray-400 px-3 py-2 text-sm text-gray-800">
-              {processedData.length > 0 ? (
-                <button
-                  type="button"
-                  onClick={() =>
-                    handleOpenEdit(processedData[processedData.length - 1])
-                  }
-                  className="rounded-lg bg-[#8c7569] px-3 py-1 text-xs font-semibold text-white transition-all duration-200 hover:bg-[#55311c]"
-                >
-                  Edit
-                </button>
-              ) : (
-                "-"
-              )}
-            </td>
           </tr>
         </tbody>
       </table>
@@ -5910,7 +5982,6 @@ function BuildingReadingsTable({
                   />
                 </div>
               )}
-
             </div>
 
             <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end">
@@ -6798,135 +6869,129 @@ function AddFlatReadingsForm({
                 </h3>
 
                 <div className="space-y-4">
-                  {[...building.flats]
-                    .sort(compareReadingFlats)
-                    .map((flat) => {
-                      const hasLow =
-                        (flat.reading_types & FLAT_READING_TYPE_LOW) !== 0
-                      const hasNormal =
-                        (flat.reading_types & FLAT_READING_TYPE_NORMAL) !== 0
-                      const hasGas =
-                        (flat.reading_types & FLAT_READING_TYPE_GAS) !== 0
-                      const hasGarage =
-                        (flat.reading_types & FLAT_READING_TYPE_GARAGE) !== 0
+                  {[...building.flats].sort(compareReadingFlats).map((flat) => {
+                    const hasLow =
+                      (flat.reading_types & FLAT_READING_TYPE_LOW) !== 0
+                    const hasNormal =
+                      (flat.reading_types & FLAT_READING_TYPE_NORMAL) !== 0
+                    const hasGas =
+                      (flat.reading_types & FLAT_READING_TYPE_GAS) !== 0
+                    const hasGarage =
+                      (flat.reading_types & FLAT_READING_TYPE_GARAGE) !== 0
 
-                      return (
-                        <div
-                          key={flat.id}
-                          className="rounded-lg border-2 border-[#ddd] p-4"
-                        >
-                          <h4 className="mb-3 font-['Nunito',sans-serif] text-lg font-semibold text-[#55311c]">
-                            {formatFlatLabel(flat.numero, flat.label)}
-                          </h4>
+                    return (
+                      <div
+                        key={flat.id}
+                        className="rounded-lg border-2 border-[#ddd] p-4"
+                      >
+                        <h4 className="mb-3 font-['Nunito',sans-serif] text-lg font-semibold text-[#55311c]">
+                          {formatFlatLabel(flat.numero, flat.label)}
+                        </h4>
 
-                          <div className="grid gap-4 md:grid-cols-3">
-                            {hasLow && (
-                              <div>
-                                <label
-                                  className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
-                                  htmlFor={`flat-${flat.id}-low`}
-                                >
-                                  Low
-                                </label>
-                                <input
-                                  type="number"
-                                  id={`flat-${flat.id}-low`}
-                                  value={formData[String(flat.id)]?.low || ""}
-                                  onChange={(e) =>
-                                    handleInputChange(
-                                      flat.id,
-                                      "low",
-                                      e.target.value,
-                                    )
-                                  }
-                                  className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
-                                  placeholder="Valor Low"
-                                />
-                              </div>
-                            )}
+                        <div className="grid gap-4 md:grid-cols-3">
+                          {hasLow && (
+                            <div>
+                              <label
+                                className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                                htmlFor={`flat-${flat.id}-low`}
+                              >
+                                Low
+                              </label>
+                              <input
+                                type="number"
+                                id={`flat-${flat.id}-low`}
+                                value={formData[String(flat.id)]?.low || ""}
+                                onChange={(e) =>
+                                  handleInputChange(
+                                    flat.id,
+                                    "low",
+                                    e.target.value,
+                                  )
+                                }
+                                className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+                                placeholder="Valor Low"
+                              />
+                            </div>
+                          )}
 
-                            {hasNormal && (
-                              <div>
-                                <label
-                                  className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
-                                  htmlFor={`flat-${flat.id}-normal`}
-                                >
-                                  Normal
-                                </label>
-                                <input
-                                  type="number"
-                                  id={`flat-${flat.id}-normal`}
-                                  value={
-                                    formData[String(flat.id)]?.normal || ""
-                                  }
-                                  onChange={(e) =>
-                                    handleInputChange(
-                                      flat.id,
-                                      "normal",
-                                      e.target.value,
-                                    )
-                                  }
-                                  className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
-                                  placeholder="Valor Normal"
-                                />
-                              </div>
-                            )}
+                          {hasNormal && (
+                            <div>
+                              <label
+                                className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                                htmlFor={`flat-${flat.id}-normal`}
+                              >
+                                Normal
+                              </label>
+                              <input
+                                type="number"
+                                id={`flat-${flat.id}-normal`}
+                                value={formData[String(flat.id)]?.normal || ""}
+                                onChange={(e) =>
+                                  handleInputChange(
+                                    flat.id,
+                                    "normal",
+                                    e.target.value,
+                                  )
+                                }
+                                className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+                                placeholder="Valor Normal"
+                              />
+                            </div>
+                          )}
 
-                            {hasGas && (
-                              <div>
-                                <label
-                                  className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
-                                  htmlFor={`flat-${flat.id}-gas`}
-                                >
-                                  Gas
-                                </label>
-                                <input
-                                  type="number"
-                                  id={`flat-${flat.id}-gas`}
-                                  value={formData[String(flat.id)]?.gas || ""}
-                                  onChange={(e) =>
-                                    handleInputChange(
-                                      flat.id,
-                                      "gas",
-                                      e.target.value,
-                                    )
-                                  }
-                                  className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
-                                  placeholder="Valor Gas"
-                                />
-                              </div>
-                            )}
+                          {hasGas && (
+                            <div>
+                              <label
+                                className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                                htmlFor={`flat-${flat.id}-gas`}
+                              >
+                                Gas
+                              </label>
+                              <input
+                                type="number"
+                                id={`flat-${flat.id}-gas`}
+                                value={formData[String(flat.id)]?.gas || ""}
+                                onChange={(e) =>
+                                  handleInputChange(
+                                    flat.id,
+                                    "gas",
+                                    e.target.value,
+                                  )
+                                }
+                                className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+                                placeholder="Valor Gas"
+                              />
+                            </div>
+                          )}
 
-                            {hasGarage && (
-                              <div>
-                                <label
-                                  className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
-                                  htmlFor={`flat-${flat.id}-garage`}
-                                >
-                                  Garage
-                                </label>
-                                <input
-                                  type="number"
-                                  id={`flat-${flat.id}-garage`}
-                                  value={
-                                    formData[String(flat.id)]?.garage || ""
-                                  }
-                                  onChange={(e) =>
-                                    handleInputChange(
-                                      flat.id,
-                                      "garage",
-                                      e.target.value,
-                                    )
-                                  }
-                                  className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
-                                  placeholder="Valor Garage"
-                                />
-                              </div>
-                            )}
-                          </div>
+                          {hasGarage && (
+                            <div>
+                              <label
+                                className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                                htmlFor={`flat-${flat.id}-garage`}
+                              >
+                                Garage
+                              </label>
+                              <input
+                                type="number"
+                                id={`flat-${flat.id}-garage`}
+                                value={formData[String(flat.id)]?.garage || ""}
+                                onChange={(e) =>
+                                  handleInputChange(
+                                    flat.id,
+                                    "garage",
+                                    e.target.value,
+                                  )
+                                }
+                                className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+                                placeholder="Valor Garage"
+                              />
+                            </div>
+                          )}
                         </div>
-                      )
-                    })}
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
             ))}
@@ -7119,22 +7184,20 @@ function FlatsReadingsContent({
             {flats.length > 0 ? (
               <div className="w-full overflow-x-auto pb-1">
                 <div className="flex min-w-max gap-3">
-                  {[...flats]
-                    .sort(compareReadingFlats)
-                    .map((flat) => (
-                      <button
-                        key={flat.id}
-                        onClick={() => setSelectedFlatId(flat.id)}
-                        className={`rounded-lg px-5 py-2.5 font-['Nunito',sans-serif] font-semibold whitespace-nowrap transition-all duration-200 ${
-                          selectedFlatId === flat.id
-                            ? "bg-[#55311c] text-white shadow-lg"
-                            : "bg-[#e8e4e1] text-[#55311c] hover:bg-[#ddd8d5]"
-                        }`}
-                        type="button"
-                      >
-                        {formatFlatLabel(flat.numero, flat.label)}
-                      </button>
-                    ))}
+                  {[...flats].sort(compareReadingFlats).map((flat) => (
+                    <button
+                      key={flat.id}
+                      onClick={() => setSelectedFlatId(flat.id)}
+                      className={`rounded-lg px-5 py-2.5 font-['Nunito',sans-serif] font-semibold whitespace-nowrap transition-all duration-200 ${
+                        selectedFlatId === flat.id
+                          ? "bg-[#55311c] text-white shadow-lg"
+                          : "bg-[#e8e4e1] text-[#55311c] hover:bg-[#ddd8d5]"
+                      }`}
+                      type="button"
+                    >
+                      {formatFlatLabel(flat.numero, flat.label)}
+                    </button>
+                  ))}
                 </div>
               </div>
             ) : (
@@ -7828,14 +7891,15 @@ function FlatReadingsTable({
                 </th>
               </>
             )}
-            <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700">
-              Actions
-            </th>
           </tr>
         </thead>
         <tbody>
           {processedData.map((row, index) => (
-            <tr key={row.date} className="hover:bg-gray-50">
+            <tr
+              key={row.date}
+              onClick={() => handleOpenEdit(row)}
+              className="cursor-pointer hover:bg-gray-50"
+            >
               <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-700">
                 {index === 0 ? "All" : row.days}
               </td>
@@ -7906,15 +7970,6 @@ function FlatReadingsTable({
                   </td>
                 </>
               )}
-              <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
-                <button
-                  type="button"
-                  onClick={() => handleOpenEdit(row)}
-                  className="rounded-lg bg-[#8c7569] px-3 py-1 text-xs font-semibold text-white transition-all duration-200 hover:bg-[#55311c]"
-                >
-                  Edit
-                </button>
-              </td>
             </tr>
           ))}
         </tbody>
@@ -8514,7 +8569,9 @@ function RemindsContent() {
       task_title: reminder.task_title || "",
       task_description: reminder.task_description || "",
       task_priority: String(reminder.task_priority || 2),
-      task_building_id: reminder.task_building_id ? String(reminder.task_building_id) : "",
+      task_building_id: reminder.task_building_id
+        ? String(reminder.task_building_id)
+        : "",
     })
     setShowModal(true)
   }
@@ -8579,8 +8636,9 @@ function RemindsContent() {
                         Task priority: {reminder.task_priority || 2}
                         {reminder.task_building_id
                           ? ` - Building: ${
-                              reminderBuildingMap.get(reminder.task_building_id) ||
-                              "Selected building"
+                              reminderBuildingMap.get(
+                                reminder.task_building_id,
+                              ) || "Selected building"
                             }`
                           : " - Building: Common areas"}
                       </p>
@@ -9140,13 +9198,16 @@ function TwilioContent() {
   const Residents = ResidentsData || []
   const historyRows = historyData?.data || []
   const visibleBuildings = useMemo(
-    () => buildings.filter((building) => isTwilioBuildingVisible(building.nome, sendChannel)),
+    () =>
+      buildings.filter((building) =>
+        isTwilioBuildingVisible(building.nome, sendChannel),
+      ),
     [buildings, sendChannel],
   )
   const residentsForActiveChannel = useMemo(
     () =>
-      Residents.filter(
-        (morador) => isTwilioBuildingVisible(morador.building_nome, sendChannel),
+      Residents.filter((morador) =>
+        isTwilioBuildingVisible(morador.building_nome, sendChannel),
       ),
     [Residents, sendChannel],
   )
@@ -10020,7 +10081,9 @@ function BinsQrCodesContent({
     return window.location.origin
   }, [])
 
-  const [qrMap, setQrMap] = useState<Record<string, { dataUrl: string; link: string }>>({})
+  const [qrMap, setQrMap] = useState<
+    Record<string, { dataUrl: string; link: string }>
+  >({})
   const [isGenerating, setIsGenerating] = useState(false)
 
   useEffect(() => {
@@ -10043,7 +10106,10 @@ function BinsQrCodesContent({
             ? "/caretaker-access"
             : "/bins-access"
           const link = `${baseUrl}${route}?${params.toString()}`
-          const dataUrl = await QRCode.toDataURL(link, { width: 240, margin: 1 })
+          const dataUrl = await QRCode.toDataURL(link, {
+            width: 240,
+            margin: 1,
+          })
 
           return [item.key, { dataUrl, link }] as const
         }),
@@ -10094,7 +10160,9 @@ function BinsQrCodesContent({
       {qrItems.length > 0 && (
         <div
           className={`grid gap-6 ${
-            isCaretakerBinsMode ? "md:grid-cols-2 xl:grid-cols-3" : "md:grid-cols-2"
+            isCaretakerBinsMode
+              ? "md:grid-cols-2 xl:grid-cols-3"
+              : "md:grid-cols-2"
           }`}
         >
           {qrItems.map((item) => {
@@ -10169,8 +10237,9 @@ function BinsQrCodesContent({
 function BinsContent() {
   const { showErrorToast, showSuccessToast } = useCustomToast()
   const queryClient = useQueryClient()
-  const [selectedGroup, setSelectedGroup] =
-    useState<BinsDashboardGroupId>("falcon-martlett-merlin-oaklodge")
+  const [selectedGroup, setSelectedGroup] = useState<BinsDashboardGroupId>(
+    "falcon-martlett-merlin-oaklodge",
+  )
   const [page, setPage] = useState(0)
   const [typeFilter, setTypeFilter] = useState<"" | "general" | "recycle">("")
   const [statusFilter, setStatusFilter] = useState<"" | "miss" | "late">("")
@@ -10203,9 +10272,11 @@ function BinsContent() {
     [dateFrom, dateTo, typeFilter, statusFilter],
   )
 
-  const { data: filteredData, isLoading, error } = useQuery<
-    ApiListResponse<BinMissCollectionRecord>
-  >({
+  const {
+    data: filteredData,
+    isLoading,
+    error,
+  } = useQuery<ApiListResponse<BinMissCollectionRecord>>({
     queryKey: ["bins", "all-for-table", filterParams],
     queryFn: () =>
       apiCall("/api/v1/bins/", {
@@ -10362,7 +10433,11 @@ function BinsContent() {
         return
       }
 
-      const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" })
+      const doc = new jsPDF({
+        orientation: "portrait",
+        unit: "pt",
+        format: "a4",
+      })
       const pageWidth = doc.internal.pageSize.getWidth()
       const pageHeight = doc.internal.pageSize.getHeight()
       const margin = 40
@@ -10370,8 +10445,9 @@ function BinsContent() {
       const chartWidth = (contentWidth - 16) / 2
       const chartHeight = 190
       const selectedGroupLabel =
-        BINS_DASHBOARD_GROUP_OPTIONS.find((option) => option.id === selectedGroup)
-          ?.label || "Bins"
+        BINS_DASHBOARD_GROUP_OPTIONS.find(
+          (option) => option.id === selectedGroup,
+        )?.label || "Bins"
       const periodLabel = buildDateRangeLabel(dateFrom, dateTo)
       const typeLabel =
         typeFilter === "general"
@@ -10385,7 +10461,10 @@ function BinsContent() {
           : statusFilter === "late"
             ? "Collects"
             : "All"
-      const statusTotal = statusPieData.reduce((sum, item) => sum + item.value, 0)
+      const statusTotal = statusPieData.reduce(
+        (sum, item) => sum + item.value,
+        0,
+      )
       const typeTotal = typePieData.reduce((sum, item) => sum + item.value, 0)
       const statusChartImage = createBinsPieChartImage({
         title: "Collect x Miss",
@@ -10432,7 +10511,11 @@ function BinsContent() {
       cursorY += 14
       doc.text(`Status filter: ${statusLabel}`, margin, cursorY)
       cursorY += 14
-      doc.text(`Generated: ${new Date().toLocaleString("en-GB")}`, margin, cursorY)
+      doc.text(
+        `Generated: ${new Date().toLocaleString("en-GB")}`,
+        margin,
+        cursorY,
+      )
       cursorY += 24
 
       ensureSpace(130)
@@ -10769,11 +10852,10 @@ function BinsContent() {
                       0,
                     )
                     const percentage =
-                      total > 0 ? ((Number(value) / total) * 100).toFixed(1) : "0.0"
-                    return [
-                      `${value}\n${percentage}%`,
-                      String(name),
-                    ]
+                      total > 0
+                        ? ((Number(value) / total) * 100).toFixed(1)
+                        : "0.0"
+                    return [`${value}\n${percentage}%`, String(name)]
                   }}
                   contentStyle={{
                     borderRadius: "10px",
@@ -10815,11 +10897,10 @@ function BinsContent() {
                       0,
                     )
                     const percentage =
-                      total > 0 ? ((Number(value) / total) * 100).toFixed(1) : "0.0"
-                    return [
-                      `${value}\n${percentage}%`,
-                      String(name),
-                    ]
+                      total > 0
+                        ? ((Number(value) / total) * 100).toFixed(1)
+                        : "0.0"
+                    return [`${value}\n${percentage}%`, String(name)]
                   }}
                   contentStyle={{
                     borderRadius: "10px",
@@ -10997,9 +11078,7 @@ function BinsContent() {
             </span>
             <button
               type="button"
-              onClick={() =>
-                setPage(Math.min(totalPages - 1, currentPage + 1))
-              }
+              onClick={() => setPage(Math.min(totalPages - 1, currentPage + 1))}
               disabled={currentPage >= totalPages - 1}
               className="rounded bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 hover:bg-[#55311c]"
             >
@@ -11071,9 +11150,7 @@ function BinsContent() {
                   value={editedBinType}
                   onChange={(event) => {
                     setEditedBinType(
-                      event.target.value === "recycle"
-                        ? "recycle"
-                        : "general",
+                      event.target.value === "recycle" ? "recycle" : "general",
                     )
                     setIsConfirmingBinDelete(false)
                   }}
@@ -11247,61 +11324,204 @@ function CleanerQrCodesContent() {
 
       <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
         {visibleBuildings.map((building) => {
-            const qrItem = qrMap[String(building.id)]
-            return (
-              <div
-                key={building.id}
-                className="flex h-full flex-col justify-between rounded-lg bg-white p-6 shadow-md"
-              >
-                <div>
-                  <h3 className="text-lg font-semibold text-[#55311c]">
-                    {getCleanerQrBuildingLabel(building)}
-                  </h3>
-                </div>
+          const qrItem = qrMap[String(building.id)]
+          return (
+            <div
+              key={building.id}
+              className="flex h-full flex-col justify-between rounded-lg bg-white p-6 shadow-md"
+            >
+              <div>
+                <h3 className="text-lg font-semibold text-[#55311c]">
+                  {getCleanerQrBuildingLabel(building)}
+                </h3>
+              </div>
 
-                <div className="mt-4 flex flex-col items-center justify-center gap-4">
-                  {qrItem?.dataUrl ? (
-                    <img
-                      src={qrItem.dataUrl}
-                      alt={`QR Code ${getCleanerQrBuildingLabel(building)}`}
-                      className="h-48 w-48 rounded-lg border border-[#e5e0dc] bg-white p-2"
-                    />
-                  ) : (
-                    <div className="flex h-48 w-48 items-center justify-center rounded-lg border border-dashed border-[#e5e0dc] text-xs text-[rgba(0,0,0,0.6)]">
-                      QR Code unavailable
-                    </div>
-                  )}
-
-                  <div className="flex w-full flex-col gap-2">
-                    <a
-                      href={qrItem?.dataUrl || "#"}
-                      download="qr-cleaner-in-out.png"
-                      className={`w-full rounded-lg px-4 py-2 text-center text-sm font-semibold transition-all duration-200 ${
-                        qrItem?.dataUrl
-                          ? "bg-[#8c7569] text-white hover:bg-[#55311c]"
-                          : "cursor-not-allowed bg-[#e5e0dc] text-[#8c7569]"
-                      }`}
-                      onClick={(event) => {
-                        if (!qrItem?.dataUrl) event.preventDefault()
-                      }}
-                    >
-                      Download QR Code
-                    </a>
-                    {qrItem?.link && (
-                      <a
-                        href={qrItem.link}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="block rounded-lg border border-[#8c7569] px-4 py-2 text-center text-sm font-semibold text-[#55311c] transition-all duration-300 hover:bg-[#f3eeea]"
-                      >
-                        Open link
-                      </a>
-                    )}
+              <div className="mt-4 flex flex-col items-center justify-center gap-4">
+                {qrItem?.dataUrl ? (
+                  <img
+                    src={qrItem.dataUrl}
+                    alt={`QR Code ${getCleanerQrBuildingLabel(building)}`}
+                    className="h-48 w-48 rounded-lg border border-[#e5e0dc] bg-white p-2"
+                  />
+                ) : (
+                  <div className="flex h-48 w-48 items-center justify-center rounded-lg border border-dashed border-[#e5e0dc] text-xs text-[rgba(0,0,0,0.6)]">
+                    QR Code unavailable
                   </div>
+                )}
+
+                <div className="flex w-full flex-col gap-2">
+                  <a
+                    href={qrItem?.dataUrl || "#"}
+                    download="qr-cleaner-in-out.png"
+                    className={`w-full rounded-lg px-4 py-2 text-center text-sm font-semibold transition-all duration-200 ${
+                      qrItem?.dataUrl
+                        ? "bg-[#8c7569] text-white hover:bg-[#55311c]"
+                        : "cursor-not-allowed bg-[#e5e0dc] text-[#8c7569]"
+                    }`}
+                    onClick={(event) => {
+                      if (!qrItem?.dataUrl) event.preventDefault()
+                    }}
+                  >
+                    Download QR Code
+                  </a>
+                  {qrItem?.link && (
+                    <a
+                      href={qrItem.link}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block rounded-lg border border-[#8c7569] px-4 py-2 text-center text-sm font-semibold text-[#55311c] transition-all duration-300 hover:bg-[#f3eeea]"
+                    >
+                      Open link
+                    </a>
+                  )}
                 </div>
               </div>
-            )
-          })}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function ReadingsQrCodesContent() {
+  const { data: buildingsData, isLoading } = useQuery({
+    queryKey: ["buildings", "qr-readings"],
+    queryFn: () => apiCall("/api/v1/buildings/condominio"),
+  })
+  const buildings = useMemo(
+    () =>
+      [...((buildingsData?.data || []) as Building[])]
+        .filter(isReadingsQrBuilding)
+        .sort((a, b) => a.nome.localeCompare(b.nome)),
+    [buildingsData?.data],
+  )
+  const baseUrl = useMemo(
+    () => (typeof window === "undefined" ? "" : window.location.origin),
+    [],
+  )
+  const [qrMap, setQrMap] = useState<
+    Record<string, { dataUrl: string; link: string }>
+  >({})
+  const [isGenerating, setIsGenerating] = useState(false)
+
+  useEffect(() => {
+    let isActive = true
+
+    const generateQRCodes = async () => {
+      if (!baseUrl || buildings.length === 0) {
+        setQrMap({})
+        return
+      }
+      setIsGenerating(true)
+      const entries = await Promise.all(
+        buildings.map(async (building) => {
+          const params = new URLSearchParams({
+            buildingId: String(building.id),
+          })
+          const link = `${baseUrl}/readings-form?${params.toString()}`
+          const dataUrl = await QRCode.toDataURL(link, {
+            width: 240,
+            margin: 1,
+          })
+          return [String(building.id), { dataUrl, link }] as const
+        }),
+      )
+      if (!isActive) return
+      setQrMap(Object.fromEntries(entries))
+      setIsGenerating(false)
+    }
+
+    generateQRCodes().catch(() => {
+      if (!isActive) return
+      setQrMap({})
+      setIsGenerating(false)
+    })
+    return () => {
+      isActive = false
+    }
+  }, [baseUrl, buildings])
+
+  return (
+    <div className="mx-auto max-w-7xl">
+      <div className="mb-6 rounded-lg bg-white p-6 shadow-md">
+        <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
+          QR Codes - Readings
+        </h2>
+        <p className="mt-2 text-[rgba(0,0,0,0.7)]">
+          One QR code per building to record building and flat readings.
+        </p>
+      </div>
+
+      {(isLoading || isGenerating) && (
+        <div className="rounded-lg bg-white p-6 text-center text-sm text-[#55311c] shadow-md">
+          Generating QR Codes...
+        </div>
+      )}
+      {!isLoading && buildings.length === 0 && (
+        <div className="rounded-lg bg-white p-6 text-center text-sm text-[#55311c] shadow-md">
+          No buildings found.
+        </div>
+      )}
+
+      <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+        {buildings.map((building) => {
+          const qrItem = qrMap[String(building.id)]
+          const slug = building.nome
+            .trim()
+            .toLowerCase()
+            .replace(/\W+/g, "-")
+            .replace(/^-|-$/g, "")
+          return (
+            <div
+              key={building.id}
+              className="flex h-full flex-col justify-between rounded-lg bg-white p-6 shadow-md"
+            >
+              <h3 className="text-lg font-semibold text-[#55311c]">
+                {building.nome}
+              </h3>
+              <div className="mt-4 flex flex-col items-center justify-center gap-4">
+                {qrItem?.dataUrl ? (
+                  <img
+                    src={qrItem.dataUrl}
+                    alt={`QR Code Readings ${building.nome}`}
+                    className="h-48 w-48 rounded-lg border border-[#e5e0dc] bg-white p-2"
+                  />
+                ) : (
+                  <div className="flex h-48 w-48 items-center justify-center rounded-lg border border-dashed border-[#e5e0dc] text-xs text-[rgba(0,0,0,0.6)]">
+                    QR Code unavailable
+                  </div>
+                )}
+                <div className="flex w-full flex-col gap-2">
+                  <a
+                    href={qrItem?.dataUrl || "#"}
+                    download={`qr-readings-${slug || "building"}.png`}
+                    className={`w-full rounded-lg px-4 py-2 text-center text-sm font-semibold transition-all duration-200 ${
+                      qrItem?.dataUrl
+                        ? "bg-[#8c7569] text-white hover:bg-[#55311c]"
+                        : "cursor-not-allowed bg-[#e5e0dc] text-[#8c7569]"
+                    }`}
+                    onClick={(event) => {
+                      if (!qrItem?.dataUrl) event.preventDefault()
+                    }}
+                  >
+                    Download QR Code
+                  </a>
+                  {qrItem?.link && (
+                    <a
+                      href={qrItem.link}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block rounded-lg border border-[#8c7569] px-4 py-2 text-center text-sm font-semibold text-[#55311c] transition-all duration-300 hover:bg-[#f3eeea]"
+                    >
+                      Open link
+                    </a>
+                  )}
+                </div>
+              </div>
+            </div>
+          )
+        })}
       </div>
     </div>
   )
@@ -11378,16 +11598,26 @@ function HoursInvoiceLauncherDialog({
 
   const generateInvoicePdf = async ({
     showToast = true,
-  }: { showToast?: boolean } = {}) => {
+  }: {
+    showToast?: boolean
+  } = {}) => {
     const parsedHours = Number(invoiceHours)
-    if (!invoiceHours.trim() || !Number.isFinite(parsedHours) || parsedHours <= 0) {
+    if (
+      !invoiceHours.trim() ||
+      !Number.isFinite(parsedHours) ||
+      parsedHours <= 0
+    ) {
       if (showToast) showErrorToast("Total hours must be a valid number")
       return null
     }
 
     setIsGeneratingInvoicePdf(true)
     try {
-      const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" })
+      const doc = new jsPDF({
+        orientation: "portrait",
+        unit: "pt",
+        format: "a4",
+      })
       const pageWidth = doc.internal.pageSize.getWidth()
       const pageHeight = doc.internal.pageSize.getHeight()
       const margin = 44
@@ -11409,7 +11639,10 @@ function HoursInvoiceLauncherDialog({
         [workerLabel, workerName || workerLabel],
         ["Month", monthLabel],
         ["Total hours", formatInvoiceHours(parsedHours)],
-        ["Amount", hasAmount ? formatCurrencyGbp(-Math.abs(parsedAmount)) : "-"],
+        [
+          "Amount",
+          hasAmount ? formatCurrencyGbp(-Math.abs(parsedAmount)) : "-",
+        ],
         ["Attached media", invoiceMediaName || "None"],
       ]
 
@@ -11457,7 +11690,8 @@ function HoursInvoiceLauncherDialog({
             const image = new Image()
             await new Promise<void>((resolve, reject) => {
               image.onload = () => resolve()
-              image.onerror = () => reject(new Error("Could not load invoice media"))
+              image.onerror = () =>
+                reject(new Error("Could not load invoice media"))
               image.src = invoiceMediaData
             })
             const maxWidth = pageWidth - margin * 2
@@ -11474,7 +11708,11 @@ function HoursInvoiceLauncherDialog({
               : "JPEG"
             doc.addImage(invoiceMediaData, imageFormat, x, 84, width, height)
           } catch {
-            doc.text("The attached image could not be added to the PDF.", margin, 96)
+            doc.text(
+              "The attached image could not be added to the PDF.",
+              margin,
+              96,
+            )
           }
         } else if (isPdfDataUrl(invoiceMediaData)) {
           doc.text(
@@ -11554,7 +11792,9 @@ function HoursInvoiceLauncherDialog({
       handleDialogChange(false)
     } catch (error) {
       showErrorToast(
-        error instanceof Error ? error.message : "Could not add invoice to Petty Cash",
+        error instanceof Error
+          ? error.message
+          : "Could not add invoice to Petty Cash",
       )
     } finally {
       setIsLaunchingInvoice(false)
@@ -11564,7 +11804,11 @@ function HoursInvoiceLauncherDialog({
   useEffect(() => {
     if (!open) return
     const parsedHours = Number(invoiceHours)
-    if (!invoiceHours.trim() || !Number.isFinite(parsedHours) || parsedHours <= 0) {
+    if (
+      !invoiceHours.trim() ||
+      !Number.isFinite(parsedHours) ||
+      parsedHours <= 0
+    ) {
       return
     }
 
@@ -11825,7 +12069,9 @@ function CleanerRecordCreateDialog({
     },
     onError: (error) => {
       showErrorToast(
-        error instanceof Error ? error.message : "Failed to create cleaner record",
+        error instanceof Error
+          ? error.message
+          : "Failed to create cleaner record",
       )
     },
   })
@@ -12067,7 +12313,9 @@ function ContractorMaintenanceDialog({
   const queryClient = useQueryClient()
   const { showErrorToast, showSuccessToast } = useCustomToast()
   const [isAddTypeDialogOpen, setIsAddTypeDialogOpen] = useState(false)
-  const [addMode, setAddMode] = useState<"category" | "maintenance" | null>(null)
+  const [addMode, setAddMode] = useState<"category" | "maintenance" | null>(
+    null,
+  )
   const [categoryName, setCategoryName] = useState("")
   const [categoryId, setCategoryId] = useState("")
   const [tag, setTag] = useState("")
@@ -12080,19 +12328,26 @@ function ContractorMaintenanceDialog({
   >("all")
   const [scheduleCategoryFilter, setScheduleCategoryFilter] = useState("all")
 
-  const categoriesQuery = useQuery<ApiListResponse<ContractorMaintenanceCategory>>({
+  const categoriesQuery = useQuery<
+    ApiListResponse<ContractorMaintenanceCategory>
+  >({
     queryKey: ["contractor-maintenance-categories"],
     queryFn: () => apiCall("/api/v1/contractor-access/maintenance/categories"),
     enabled: open,
   })
-  const scheduleQuery = useQuery<ApiListResponse<ContractorMaintenanceSchedule>>({
+  const scheduleQuery = useQuery<
+    ApiListResponse<ContractorMaintenanceSchedule>
+  >({
     queryKey: ["contractor-maintenance-schedule"],
     queryFn: () => apiCall("/api/v1/contractor-access/maintenance/schedule"),
     enabled: open,
   })
-  const historyQuery = useQuery<ApiListResponse<ContractorMaintenanceHistoryRecord>>({
+  const historyQuery = useQuery<
+    ApiListResponse<ContractorMaintenanceHistoryRecord>
+  >({
     queryKey: ["contractor-maintenance-history"],
-    queryFn: () => apiCall("/api/v1/contractor-access/maintenance/history", { limit: 100 }),
+    queryFn: () =>
+      apiCall("/api/v1/contractor-access/maintenance/history", { limit: 100 }),
     enabled: open,
   })
 
@@ -12122,7 +12377,9 @@ function ContractorMaintenanceDialog({
       resetAddForm()
     },
     onError: (error: unknown) =>
-      showErrorToast(error instanceof Error ? error.message : "Could not create category"),
+      showErrorToast(
+        error instanceof Error ? error.message : "Could not create category",
+      ),
   })
 
   const createMaintenanceMutation = useMutation({
@@ -12133,15 +12390,21 @@ function ContractorMaintenanceDialog({
       }),
     onSuccess: async () => {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["contractor-maintenance-schedule"] }),
-        queryClient.invalidateQueries({ queryKey: ["contractor-maintenance-history"] }),
+        queryClient.invalidateQueries({
+          queryKey: ["contractor-maintenance-schedule"],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["contractor-maintenance-history"],
+        }),
       ])
       showSuccessToast("Maintenance created successfully")
       setIsAddTypeDialogOpen(false)
       resetAddForm()
     },
     onError: (error: unknown) =>
-      showErrorToast(error instanceof Error ? error.message : "Could not create maintenance"),
+      showErrorToast(
+        error instanceof Error ? error.message : "Could not create maintenance",
+      ),
   })
 
   const handleCreate = () => {
@@ -12192,11 +12455,13 @@ function ContractorMaintenanceDialog({
   const history = historyQuery.data?.data || []
   const filteredSchedules = schedules.filter(
     (item) =>
-      (scheduleStatusFilter === "all" || item.status === scheduleStatusFilter) &&
+      (scheduleStatusFilter === "all" ||
+        item.status === scheduleStatusFilter) &&
       (scheduleCategoryFilter === "all" ||
         String(item.category_id) === scheduleCategoryFilter),
   )
-  const isSaving = createCategoryMutation.isPending || createMaintenanceMutation.isPending
+  const isSaving =
+    createCategoryMutation.isPending || createMaintenanceMutation.isPending
 
   return (
     <>
@@ -12205,9 +12470,12 @@ function ContractorMaintenanceDialog({
           <DialogHeader>
             <div className="flex items-start justify-between gap-4 pr-6">
               <div>
-                <DialogTitle className="text-[#55311c]">Maintenance</DialogTitle>
+                <DialogTitle className="text-[#55311c]">
+                  Maintenance
+                </DialogTitle>
                 <DialogDescription className="text-[rgba(0,0,0,0.7)]">
-                  Track scheduled contractor maintenance and completed IN/OUT records.
+                  Track scheduled contractor maintenance and completed IN/OUT
+                  records.
                 </DialogDescription>
               </div>
               <button
@@ -12288,32 +12556,47 @@ function ContractorMaintenanceDialog({
                   </thead>
                   <tbody>
                     {scheduleQuery.isLoading ? (
-                      <tr><td className="px-4 py-5 text-center" colSpan={5}>Loading maintenance schedule...</td></tr>
-                    ) : filteredSchedules.length === 0 ? (
-                      <tr><td className="px-4 py-5 text-center" colSpan={5}>No maintenance matches the selected filters.</td></tr>
-                    ) : filteredSchedules.map((item) => (
-                      <tr
-                        key={item.id}
-                        className={
-                          item.status === "pending"
-                            ? "border-t border-red-200 bg-red-100 text-red-950"
-                            : item.status === "soon"
-                              ? "border-t border-amber-200 bg-amber-100 text-amber-950"
-                              : "border-t border-emerald-200 bg-emerald-100 text-emerald-950"
-                        }
-                      >
-                        <td className="px-4 py-3 font-semibold">{item.category_name}</td>
-                        <td className="px-4 py-3">{item.tag}</td>
-                        <td className="px-4 py-3">{item.report}</td>
-                        <td className="px-4 py-3">{item.frequency_days} day(s)</td>
-                        <td className="px-4 py-3">{item.notes || "-"}</td>
+                      <tr>
+                        <td className="px-4 py-5 text-center" colSpan={5}>
+                          Loading maintenance schedule...
+                        </td>
                       </tr>
-                    ))}
+                    ) : filteredSchedules.length === 0 ? (
+                      <tr>
+                        <td className="px-4 py-5 text-center" colSpan={5}>
+                          No maintenance matches the selected filters.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredSchedules.map((item) => (
+                        <tr
+                          key={item.id}
+                          className={
+                            item.status === "pending"
+                              ? "border-t border-red-200 bg-red-100 text-red-950"
+                              : item.status === "soon"
+                                ? "border-t border-amber-200 bg-amber-100 text-amber-950"
+                                : "border-t border-emerald-200 bg-emerald-100 text-emerald-950"
+                          }
+                        >
+                          <td className="px-4 py-3 font-semibold">
+                            {item.category_name}
+                          </td>
+                          <td className="px-4 py-3">{item.tag}</td>
+                          <td className="px-4 py-3">{item.report}</td>
+                          <td className="px-4 py-3">
+                            {item.frequency_days} day(s)
+                          </td>
+                          <td className="px-4 py-3">{item.notes || "-"}</td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
               <p className="mt-2 text-xs text-[rgba(0,0,0,0.65)]">
-                Green is on schedule. Yellow is due within 7 days. Red is pending or overdue.
+                Green is on schedule. Yellow is due within 7 days. Red is
+                pending or overdue.
               </p>
             </TabsContent>
             <TabsContent value="history" className="mt-4">
@@ -12330,18 +12613,32 @@ function ContractorMaintenanceDialog({
                   </thead>
                   <tbody>
                     {historyQuery.isLoading ? (
-                      <tr><td className="px-4 py-5 text-center" colSpan={5}>Loading maintenance history...</td></tr>
-                    ) : history.length === 0 ? (
-                      <tr><td className="px-4 py-5 text-center" colSpan={5}>No maintenance records yet.</td></tr>
-                    ) : history.map((item) => (
-                      <tr key={item.id} className="border-t border-[#e5e0dc]">
-                        <td className="px-4 py-3">{item.category_name}</td>
-                        <td className="px-4 py-3">{item.tag}</td>
-                        <td className="px-4 py-3">{item.contractor_name}</td>
-                        <td className="px-4 py-3">{formatDateTime(item.in_at)}</td>
-                        <td className="px-4 py-3">{formatDateTime(item.out_at)}</td>
+                      <tr>
+                        <td className="px-4 py-5 text-center" colSpan={5}>
+                          Loading maintenance history...
+                        </td>
                       </tr>
-                    ))}
+                    ) : history.length === 0 ? (
+                      <tr>
+                        <td className="px-4 py-5 text-center" colSpan={5}>
+                          No maintenance records yet.
+                        </td>
+                      </tr>
+                    ) : (
+                      history.map((item) => (
+                        <tr key={item.id} className="border-t border-[#e5e0dc]">
+                          <td className="px-4 py-3">{item.category_name}</td>
+                          <td className="px-4 py-3">{item.tag}</td>
+                          <td className="px-4 py-3">{item.contractor_name}</td>
+                          <td className="px-4 py-3">
+                            {formatDateTime(item.in_at)}
+                          </td>
+                          <td className="px-4 py-3">
+                            {formatDateTime(item.out_at)}
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -12359,41 +12656,166 @@ function ContractorMaintenanceDialog({
       >
         <DialogContent className="border-[#e5e0dc] bg-white text-[#55311c] sm:max-w-xl">
           <DialogHeader>
-            <DialogTitle>{addMode === "category" ? "New category" : addMode === "maintenance" ? "New maintenance" : "Add maintenance item"}</DialogTitle>
+            <DialogTitle>
+              {addMode === "category"
+                ? "New category"
+                : addMode === "maintenance"
+                  ? "New maintenance"
+                  : "Add maintenance item"}
+            </DialogTitle>
             <DialogDescription>
-              {addMode ? "Fill in the requested details." : "Choose what you want to add."}
+              {addMode
+                ? "Fill in the requested details."
+                : "Choose what you want to add."}
             </DialogDescription>
           </DialogHeader>
           {!addMode ? (
             <div className="grid gap-3 sm:grid-cols-2">
-              <button type="button" onClick={() => setAddMode("category")} className="rounded-lg border border-[#8c7569] p-5 text-left font-semibold transition hover:bg-[#f0ebe7]">Category</button>
-              <button type="button" onClick={() => setAddMode("maintenance")} className="rounded-lg bg-[#8c7569] p-5 text-left font-semibold text-white transition hover:bg-[#55311c]">Maintenance</button>
+              <button
+                type="button"
+                onClick={() => setAddMode("category")}
+                className="rounded-lg border border-[#8c7569] p-5 text-left font-semibold transition hover:bg-[#f0ebe7]"
+              >
+                Category
+              </button>
+              <button
+                type="button"
+                onClick={() => setAddMode("maintenance")}
+                className="rounded-lg bg-[#8c7569] p-5 text-left font-semibold text-white transition hover:bg-[#55311c]"
+              >
+                Maintenance
+              </button>
             </div>
           ) : addMode === "category" ? (
             <div>
-              <label htmlFor="maintenance-category-name" className="mb-1 block text-sm font-semibold">Name</label>
-              <input id="maintenance-category-name" value={categoryName} onChange={(event) => setCategoryName(event.target.value)} className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2" />
+              <label
+                htmlFor="maintenance-category-name"
+                className="mb-1 block text-sm font-semibold"
+              >
+                Name
+              </label>
+              <input
+                id="maintenance-category-name"
+                value={categoryName}
+                onChange={(event) => setCategoryName(event.target.value)}
+                className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2"
+              />
             </div>
           ) : (
             <div className="grid gap-4 md:grid-cols-2">
               <div>
-                <label htmlFor="maintenance-category" className="mb-1 block text-sm font-semibold">Category name</label>
-                <select id="maintenance-category" value={categoryId} onChange={(event) => setCategoryId(event.target.value)} className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2">
+                <label
+                  htmlFor="maintenance-category"
+                  className="mb-1 block text-sm font-semibold"
+                >
+                  Category name
+                </label>
+                <select
+                  id="maintenance-category"
+                  value={categoryId}
+                  onChange={(event) => setCategoryId(event.target.value)}
+                  className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2"
+                >
                   <option value="">Select a category</option>
-                  {categories.map((category) => <option key={category.id} value={String(category.id)}>{category.name}</option>)}
+                  {categories.map((category) => (
+                    <option key={category.id} value={String(category.id)}>
+                      {category.name}
+                    </option>
+                  ))}
                 </select>
               </div>
-              <div><label htmlFor="maintenance-tag" className="mb-1 block text-sm font-semibold">Tag</label><input id="maintenance-tag" value={tag} onChange={(event) => setTag(event.target.value)} className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2" /></div>
-              <div className="md:col-span-2"><label htmlFor="maintenance-report" className="mb-1 block text-sm font-semibold">Report</label><input id="maintenance-report" value={report} onChange={(event) => setReport(event.target.value)} className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2" /></div>
-              <div><label htmlFor="maintenance-frequency" className="mb-1 block text-sm font-semibold">Frequency (days)</label><input id="maintenance-frequency" type="number" min="1" value={frequencyDays} onChange={(event) => setFrequencyDays(event.target.value)} className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2" /></div>
-              <div><label htmlFor="maintenance-mobile" className="mb-1 block text-sm font-semibold">Cellphone (optional)</label><input id="maintenance-mobile" value={mobile} onChange={(event) => setMobile(event.target.value)} className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2" /></div>
-              <div className="md:col-span-2"><label htmlFor="maintenance-notes" className="mb-1 block text-sm font-semibold">Notes</label><textarea id="maintenance-notes" value={notes} onChange={(event) => setNotes(event.target.value)} className="min-h-24 w-full rounded-lg border border-[#d9d0ca] px-3 py-2" /></div>
+              <div>
+                <label
+                  htmlFor="maintenance-tag"
+                  className="mb-1 block text-sm font-semibold"
+                >
+                  Tag
+                </label>
+                <input
+                  id="maintenance-tag"
+                  value={tag}
+                  onChange={(event) => setTag(event.target.value)}
+                  className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label
+                  htmlFor="maintenance-report"
+                  className="mb-1 block text-sm font-semibold"
+                >
+                  Report
+                </label>
+                <input
+                  id="maintenance-report"
+                  value={report}
+                  onChange={(event) => setReport(event.target.value)}
+                  className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="maintenance-frequency"
+                  className="mb-1 block text-sm font-semibold"
+                >
+                  Frequency (days)
+                </label>
+                <input
+                  id="maintenance-frequency"
+                  type="number"
+                  min="1"
+                  value={frequencyDays}
+                  onChange={(event) => setFrequencyDays(event.target.value)}
+                  className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="maintenance-mobile"
+                  className="mb-1 block text-sm font-semibold"
+                >
+                  Cellphone (optional)
+                </label>
+                <input
+                  id="maintenance-mobile"
+                  value={mobile}
+                  onChange={(event) => setMobile(event.target.value)}
+                  className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label
+                  htmlFor="maintenance-notes"
+                  className="mb-1 block text-sm font-semibold"
+                >
+                  Notes
+                </label>
+                <textarea
+                  id="maintenance-notes"
+                  value={notes}
+                  onChange={(event) => setNotes(event.target.value)}
+                  className="min-h-24 w-full rounded-lg border border-[#d9d0ca] px-3 py-2"
+                />
+              </div>
             </div>
           )}
           {addMode && (
             <DialogFooter>
-              <button type="button" onClick={() => setAddMode(null)} disabled={isSaving} className="rounded border border-[#8c7569] px-4 py-2 font-semibold">Back</button>
-              <button type="button" onClick={handleCreate} disabled={isSaving} className="rounded bg-[#8c7569] px-4 py-2 font-semibold text-white disabled:opacity-60">{isSaving ? "Saving..." : "Save"}</button>
+              <button
+                type="button"
+                onClick={() => setAddMode(null)}
+                disabled={isSaving}
+                className="rounded border border-[#8c7569] px-4 py-2 font-semibold"
+              >
+                Back
+              </button>
+              <button
+                type="button"
+                onClick={handleCreate}
+                disabled={isSaving}
+                className="rounded bg-[#8c7569] px-4 py-2 font-semibold text-white disabled:opacity-60"
+              >
+                {isSaving ? "Saving..." : "Save"}
+              </button>
             </DialogFooter>
           )}
         </DialogContent>
@@ -12519,7 +12941,8 @@ function ContractorRecordCreateDialog({
             Create contractor record
           </DialogTitle>
           <DialogDescription className="text-[rgba(0,0,0,0.7)]">
-            Add a contractor record by defining the contractor data, date in and date out.
+            Add a contractor record by defining the contractor data, date in and
+            date out.
           </DialogDescription>
         </DialogHeader>
 
@@ -12677,7 +13100,9 @@ function ContractorRecordEditDialog({
   const [mobile, setMobile] = useState("")
   const [inAt, setInAt] = useState("")
   const [outAt, setOutAt] = useState("")
-  const { data: buildingsData } = useQuery<ApiListResponse<ContractorAccessBuilding>>({
+  const { data: buildingsData } = useQuery<
+    ApiListResponse<ContractorAccessBuilding>
+  >({
     queryKey: ["contractor-buildings", "record-edit", user?.condominio_id],
     queryFn: () =>
       apiCall("/api/v1/contractor-access/buildings", {
@@ -12694,8 +13119,8 @@ function ContractorRecordEditDialog({
     setCompany(visit.company)
     setBuildingId(
       String(
-        buildings.find((building) => building.name === visit.building_name)?.id ||
-          "",
+        buildings.find((building) => building.name === visit.building_name)
+          ?.id || "",
       ),
     )
     setJobDescription(visit.job_description)
@@ -12705,7 +13130,13 @@ function ContractorRecordEditDialog({
   }, [buildings, visit])
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, payload }: { id: EntityId; payload: Record<string, unknown> }) =>
+    mutationFn: ({
+      id,
+      payload,
+    }: {
+      id: EntityId
+      payload: Record<string, unknown>
+    }) =>
       apiCall(`/api/v1/contractor-access/${id}`, {
         method: "PATCH",
         body: payload,
@@ -12713,15 +13144,21 @@ function ContractorRecordEditDialog({
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["contractor-visits"] }),
-        queryClient.invalidateQueries({ queryKey: ["contractor-maintenance-history"] }),
-        queryClient.invalidateQueries({ queryKey: ["contractor-maintenance-schedule"] }),
+        queryClient.invalidateQueries({
+          queryKey: ["contractor-maintenance-history"],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["contractor-maintenance-schedule"],
+        }),
       ])
       showSuccessToast("Contractor record updated successfully")
       onOpenChange(false)
     },
     onError: (error: unknown) =>
       showErrorToast(
-        error instanceof Error ? error.message : "Could not update contractor record",
+        error instanceof Error
+          ? error.message
+          : "Could not update contractor record",
       ),
   })
 
@@ -12731,21 +13168,33 @@ function ContractorRecordEditDialog({
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["contractor-visits"] }),
-        queryClient.invalidateQueries({ queryKey: ["contractor-maintenance-history"] }),
-        queryClient.invalidateQueries({ queryKey: ["contractor-maintenance-schedule"] }),
+        queryClient.invalidateQueries({
+          queryKey: ["contractor-maintenance-history"],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["contractor-maintenance-schedule"],
+        }),
       ])
       showSuccessToast("Contractor record deleted successfully")
       onOpenChange(false)
     },
     onError: (error: unknown) =>
       showErrorToast(
-        error instanceof Error ? error.message : "Could not delete contractor record",
+        error instanceof Error
+          ? error.message
+          : "Could not delete contractor record",
       ),
   })
 
   const handleSave = () => {
     if (!visit) return
-    if (!name.trim() || !company.trim() || !buildingId || !jobDescription.trim() || !mobile.trim()) {
+    if (
+      !name.trim() ||
+      !company.trim() ||
+      !buildingId ||
+      !jobDescription.trim() ||
+      !mobile.trim()
+    ) {
       showErrorToast("Fill in all contractor fields")
       return
     }
@@ -12755,7 +13204,10 @@ function ContractorRecordEditDialog({
       showErrorToast("Enter valid dates")
       return
     }
-    if (outAtIso && new Date(outAtIso).getTime() <= new Date(inAtIso).getTime()) {
+    if (
+      outAtIso &&
+      new Date(outAtIso).getTime() <= new Date(inAtIso).getTime()
+    ) {
       showErrorToast("Time OUT must be after Time IN")
       return
     }
@@ -12789,21 +13241,144 @@ function ContractorRecordEditDialog({
       <DialogContent className="max-h-[92vh] overflow-y-auto border-[#e5e0dc] bg-white text-[#55311c] sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Edit contractor record</DialogTitle>
-          <DialogDescription>Update the selected contractor record.</DialogDescription>
+          <DialogDescription>
+            Update the selected contractor record.
+          </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 md:grid-cols-2">
-          <div><label htmlFor="edit-contractor-name" className="mb-1 block text-sm font-semibold">Name</label><input id="edit-contractor-name" value={name} onChange={(event) => setName(event.target.value)} className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2" /></div>
-          <div><label htmlFor="edit-contractor-company" className="mb-1 block text-sm font-semibold">Company</label><input id="edit-contractor-company" value={company} onChange={(event) => setCompany(event.target.value)} className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2" /></div>
-          <div><label htmlFor="edit-contractor-building" className="mb-1 block text-sm font-semibold">Building</label><select id="edit-contractor-building" value={buildingId} onChange={(event) => setBuildingId(event.target.value)} className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2"><option value="">Select a building</option>{buildings.map((building) => <option key={building.id} value={String(building.id)}>{building.name}</option>)}</select></div>
-          <div><label htmlFor="edit-contractor-mobile" className="mb-1 block text-sm font-semibold">Mobile</label><input id="edit-contractor-mobile" value={mobile} onChange={(event) => setMobile(event.target.value)} className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2" /></div>
-          <div className="md:col-span-2"><label htmlFor="edit-contractor-job" className="mb-1 block text-sm font-semibold">Job description</label><input id="edit-contractor-job" value={jobDescription} onChange={(event) => setJobDescription(event.target.value)} className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2" /></div>
-          <div><label htmlFor="edit-contractor-in" className="mb-1 block text-sm font-semibold">Date and Time IN</label><input id="edit-contractor-in" type="datetime-local" value={inAt} onChange={(event) => setInAt(event.target.value)} className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2" /></div>
-          <div><label htmlFor="edit-contractor-out" className="mb-1 block text-sm font-semibold">Date and Time OUT</label><input id="edit-contractor-out" type="datetime-local" value={outAt} onChange={(event) => setOutAt(event.target.value)} className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2" /></div>
+          <div>
+            <label
+              htmlFor="edit-contractor-name"
+              className="mb-1 block text-sm font-semibold"
+            >
+              Name
+            </label>
+            <input
+              id="edit-contractor-name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2"
+            />
+          </div>
+          <div>
+            <label
+              htmlFor="edit-contractor-company"
+              className="mb-1 block text-sm font-semibold"
+            >
+              Company
+            </label>
+            <input
+              id="edit-contractor-company"
+              value={company}
+              onChange={(event) => setCompany(event.target.value)}
+              className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2"
+            />
+          </div>
+          <div>
+            <label
+              htmlFor="edit-contractor-building"
+              className="mb-1 block text-sm font-semibold"
+            >
+              Building
+            </label>
+            <select
+              id="edit-contractor-building"
+              value={buildingId}
+              onChange={(event) => setBuildingId(event.target.value)}
+              className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2"
+            >
+              <option value="">Select a building</option>
+              {buildings.map((building) => (
+                <option key={building.id} value={String(building.id)}>
+                  {building.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label
+              htmlFor="edit-contractor-mobile"
+              className="mb-1 block text-sm font-semibold"
+            >
+              Mobile
+            </label>
+            <input
+              id="edit-contractor-mobile"
+              value={mobile}
+              onChange={(event) => setMobile(event.target.value)}
+              className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2"
+            />
+          </div>
+          <div className="md:col-span-2">
+            <label
+              htmlFor="edit-contractor-job"
+              className="mb-1 block text-sm font-semibold"
+            >
+              Job description
+            </label>
+            <input
+              id="edit-contractor-job"
+              value={jobDescription}
+              onChange={(event) => setJobDescription(event.target.value)}
+              className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2"
+            />
+          </div>
+          <div>
+            <label
+              htmlFor="edit-contractor-in"
+              className="mb-1 block text-sm font-semibold"
+            >
+              Date and Time IN
+            </label>
+            <input
+              id="edit-contractor-in"
+              type="datetime-local"
+              value={inAt}
+              onChange={(event) => setInAt(event.target.value)}
+              className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2"
+            />
+          </div>
+          <div>
+            <label
+              htmlFor="edit-contractor-out"
+              className="mb-1 block text-sm font-semibold"
+            >
+              Date and Time OUT
+            </label>
+            <input
+              id="edit-contractor-out"
+              type="datetime-local"
+              value={outAt}
+              onChange={(event) => setOutAt(event.target.value)}
+              className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2"
+            />
+          </div>
         </div>
         <DialogFooter>
-          <button type="button" onClick={handleDelete} disabled={updateMutation.isPending || deleteMutation.isPending} className="mr-auto rounded border border-red-700 px-4 py-2 font-semibold text-red-700 disabled:opacity-60">{deleteMutation.isPending ? "Deleting..." : "Delete record"}</button>
-          <button type="button" onClick={() => onOpenChange(false)} disabled={updateMutation.isPending || deleteMutation.isPending} className="rounded border border-[#8c7569] px-4 py-2 font-semibold">Cancel</button>
-          <button type="button" onClick={handleSave} disabled={updateMutation.isPending || deleteMutation.isPending} className="rounded bg-[#8c7569] px-4 py-2 font-semibold text-white disabled:opacity-60">{updateMutation.isPending ? "Saving..." : "Save"}</button>
+          <button
+            type="button"
+            onClick={handleDelete}
+            disabled={updateMutation.isPending || deleteMutation.isPending}
+            className="mr-auto rounded border border-red-700 px-4 py-2 font-semibold text-red-700 disabled:opacity-60"
+          >
+            {deleteMutation.isPending ? "Deleting..." : "Delete record"}
+          </button>
+          <button
+            type="button"
+            onClick={() => onOpenChange(false)}
+            disabled={updateMutation.isPending || deleteMutation.isPending}
+            className="rounded border border-[#8c7569] px-4 py-2 font-semibold"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={updateMutation.isPending || deleteMutation.isPending}
+            className="rounded bg-[#8c7569] px-4 py-2 font-semibold text-white disabled:opacity-60"
+          >
+            {updateMutation.isPending ? "Saving..." : "Save"}
+          </button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -12828,10 +13403,9 @@ function ContractorsContent() {
     useState<ContractorVisitAdmin | null>(null)
   const [manualCheckoutTimeValue, setManualCheckoutTimeValue] = useState("")
   const [isSavingManualCheckout, setIsSavingManualCheckout] = useState(false)
-  const [, setContractorInvoiceHourEntries] =
-    useState<WorkerInvoiceHourEntry[]>(() =>
-      readInvoiceHoursFromStorage(CONTRACTOR_INVOICE_HOURS_STORAGE_KEY),
-    )
+  const [, setContractorInvoiceHourEntries] = useState<
+    WorkerInvoiceHourEntry[]
+  >(() => readInvoiceHoursFromStorage(CONTRACTOR_INVOICE_HOURS_STORAGE_KEY))
   const [selectedVisit, setSelectedVisit] =
     useState<ContractorVisitAdmin | null>(null)
   const [mediaForm, setMediaForm] = useState<ContractorMediaFormState>(
@@ -12848,7 +13422,7 @@ function ContractorsContent() {
         search: deferredSearch || undefined,
         date_from: dateFrom || undefined,
         date_to: dateTo || undefined,
-    }),
+      }),
     placeholderData: keepPreviousData,
   })
 
@@ -13243,7 +13817,9 @@ function ContractorsContent() {
             </DialogTitle>
             <DialogDescription className="text-[rgba(0,0,0,0.7)]">
               Enter the Time OUT for{" "}
-              {manualCheckoutVisit ? formatDate(manualCheckoutVisit.in_at) : "-"}
+              {manualCheckoutVisit
+                ? formatDate(manualCheckoutVisit.in_at)
+                : "-"}
               . It must be after{" "}
               <span className="font-semibold text-[#55311c]">
                 {manualCheckoutVisit
@@ -13265,7 +13841,9 @@ function ContractorsContent() {
               id="contractor-manual-time-out"
               type="time"
               value={manualCheckoutTimeValue}
-              onChange={(event) => setManualCheckoutTimeValue(event.target.value)}
+              onChange={(event) =>
+                setManualCheckoutTimeValue(event.target.value)
+              }
               className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
             />
           </div>
@@ -13689,7 +14267,7 @@ function ContractorQrCodesContent() {
           User is not linked to a condominio.
         </div>
       )}
-  
+
       {user?.condominio_id && !isGenerating && (
         <div className="mx-auto max-w-md rounded-lg bg-white p-6 shadow-md">
           <div>
@@ -13804,9 +14382,7 @@ function CaretakerQrCodesContent() {
         <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
           QR Code - Caretaker
         </h2>
-        <p className="mt-2 text-[rgba(0,0,0,0.7)]">
-          QR code for Work Time.
-        </p>
+        <p className="mt-2 text-[rgba(0,0,0,0.7)]">QR code for Work Time.</p>
       </div>
 
       {isGenerating && (
@@ -13824,7 +14400,9 @@ function CaretakerQrCodesContent() {
             <h3 className="text-lg font-semibold text-[#55311c]">
               {QR_WORK_TIME_LABEL}
             </h3>
-            <p className="text-sm text-[rgba(0,0,0,0.6)]">Caretaker Work Time</p>
+            <p className="text-sm text-[rgba(0,0,0,0.6)]">
+              Caretaker Work Time
+            </p>
           </div>
 
           <div className="mt-4 flex flex-col items-center justify-center gap-4">
@@ -14033,7 +14611,9 @@ function WorkerSimpleInvoiceDialog({
     if (!nextOpen) resetForm()
   }
 
-  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
     const file = event.target.files?.[0]
     if (!file) return
 
@@ -14075,7 +14655,9 @@ function WorkerSimpleInvoiceDialog({
       handleDialogChange(false)
     } catch (error) {
       showErrorToast(
-        error instanceof Error ? error.message : `Could not save ${workerLabel.toLowerCase()} invoice`,
+        error instanceof Error
+          ? error.message
+          : `Could not save ${workerLabel.toLowerCase()} invoice`,
       )
     } finally {
       setIsSaving(false)
@@ -14145,7 +14727,7 @@ function WorkerSimpleInvoiceDialog({
                 {isImageDataUrl(mediaData) && (
                   <img
                     src={mediaData}
-                alt={`${workerLabel} invoice media preview`}
+                    alt={`${workerLabel} invoice media preview`}
                     className="mt-3 max-h-44 rounded border border-[#d9d0ca] bg-white"
                   />
                 )}
@@ -14199,11 +14781,12 @@ function WorkerSimpleInvoiceHistoryDialog({
 }) {
   const [dateFrom, setDateFrom] = useState("")
   const [dateTo, setDateTo] = useState("")
-  const [previewInvoice, setPreviewInvoice] = useState<WorkerSimpleInvoiceRecord | null>(
-    null,
-  )
+  const [previewInvoice, setPreviewInvoice] =
+    useState<WorkerSimpleInvoiceRecord | null>(null)
 
-  const { data, isLoading } = useQuery<ApiListResponse<WorkerSimpleInvoiceRecord>>({
+  const { data, isLoading } = useQuery<
+    ApiListResponse<WorkerSimpleInvoiceRecord>
+  >({
     queryKey: [queryKey, dateFrom, dateTo],
     queryFn: () => {
       const params: Record<string, string | number> = { skip: 0, limit: 500 }
@@ -14279,7 +14862,9 @@ function WorkerSimpleInvoiceHistoryDialog({
                   <th className="px-4 py-3 font-semibold">Date</th>
                   <th className="px-4 py-3 font-semibold">Media</th>
                   <th className="px-4 py-3 font-semibold">Created</th>
-                  <th className="px-4 py-3 text-right font-semibold">Actions</th>
+                  <th className="px-4 py-3 text-right font-semibold">
+                    Actions
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -14370,12 +14955,16 @@ function WorkerSimpleInvoiceHistoryDialog({
               {isImageDataUrl(previewInvoice.media_data) ? (
                 <img
                   src={previewInvoice.media_data}
-                  alt={previewInvoice.media_name || `${workerLabel} invoice media`}
+                  alt={
+                    previewInvoice.media_name || `${workerLabel} invoice media`
+                  }
                   className="mx-auto max-h-[65vh] rounded border border-[#d9d0ca] bg-white"
                 />
               ) : isPdfDataUrl(previewInvoice.media_data) ? (
                 <iframe
-                  title={previewInvoice.media_name || `${workerLabel} invoice PDF`}
+                  title={
+                    previewInvoice.media_name || `${workerLabel} invoice PDF`
+                  }
                   src={previewInvoice.media_data}
                   className="h-[65vh] w-full rounded border border-[#d9d0ca] bg-white"
                 />
@@ -14460,11 +15049,7 @@ function CleanerContent() {
         </div>
       </div>
 
-      {activeSubTab === "summary" ? (
-        <CleanerSummary />
-      ) : (
-        <CleanerRegister />
-      )}
+      {activeSubTab === "summary" ? <CleanerSummary /> : <CleanerRegister />}
 
       <CleanerRecordCreateDialog
         open={isCreateDialogOpen}
@@ -14839,7 +15424,11 @@ function FireAlarmSchedulePage() {
   )
 
   const createFireAlarmReportDoc = () => {
-    const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" })
+    const doc = new jsPDF({
+      orientation: "landscape",
+      unit: "pt",
+      format: "a4",
+    })
     const pageWidth = doc.internal.pageSize.getWidth()
     let startY = 64
 
@@ -15184,7 +15773,9 @@ function FireAlarmSchedulePage() {
   ) => {
     if (!file) return
     if (file.size > FIRE_ALARM_CERTIFICATE_MAX_MEDIA_BYTES) {
-      showErrorToast("Certificate media is too large. Please use a file up to 10 MB.")
+      showErrorToast(
+        "Certificate media is too large. Please use a file up to 10 MB.",
+      )
       return
     }
     try {
@@ -16044,9 +16635,7 @@ function FireAlarmSchedulePage() {
     <div className="space-y-4">
       <div className="flex flex-col gap-3 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h3 className="text-lg font-bold text-[#55311c]">
-            Fire alarm
-          </h3>
+          <h3 className="text-lg font-bold text-[#55311c]">Fire alarm</h3>
         </div>
         <div className="flex flex-wrap gap-2">
           <button
@@ -16150,7 +16739,9 @@ function FireAlarmSchedulePage() {
                     id="fire-alarm-report-email"
                     type="email"
                     value={reportEmailDraft}
-                    onChange={(event) => setReportEmailDraft(event.target.value)}
+                    onChange={(event) =>
+                      setReportEmailDraft(event.target.value)
+                    }
                     onKeyDown={(event) => {
                       if (event.key !== "Enter") return
                       event.preventDefault()
@@ -16716,7 +17307,9 @@ function BuildingSchedulePage({
     const confirmed =
       typeof window === "undefined"
         ? true
-        : window.confirm(`Delete the ${title.toLowerCase()} record for ${formatDateToGb(date)}?`)
+        : window.confirm(
+            `Delete the ${title.toLowerCase()} record for ${formatDateToGb(date)}?`,
+          )
 
     if (!confirmed) return
 
@@ -17348,7 +17941,9 @@ function CleanerSummary() {
     const start = new Date(inValue).getTime()
     const end = new Date(outValue).getTime()
     if (Number.isNaN(start) || Number.isNaN(end) || end < start) return "-"
-    if (toIsoDateString(new Date(inValue)) !== toIsoDateString(new Date(outValue))) {
+    if (
+      toIsoDateString(new Date(inValue)) !== toIsoDateString(new Date(outValue))
+    ) {
       return "No exit this day"
     }
     const diffMinutes = Math.floor((end - start) / 60000)
@@ -17449,8 +18044,12 @@ function CleanerSummary() {
     const usedHoursFilter = Number(cleanerUsedFilterValue)
 
     return enrichedSessions.filter((session) => {
-      const dateValue = session.inRecord?.data || session.outRecord?.data || null
-      const usedLabel = formatUsed(session.inRecord?.data, session.outRecord?.data)
+      const dateValue =
+        session.inRecord?.data || session.outRecord?.data || null
+      const usedLabel = formatUsed(
+        session.inRecord?.data,
+        session.outRecord?.data,
+      )
       const matchesSearch =
         !normalizedSearch ||
         [
@@ -17510,10 +18109,7 @@ function CleanerSummary() {
 
   const visibleCleanerSessions = useMemo(() => {
     const start = cleanerHistoryPage * cleanerHistoryPageSize
-    return filteredCleanerSessions.slice(
-      start,
-      start + cleanerHistoryPageSize,
-    )
+    return filteredCleanerSessions.slice(start, start + cleanerHistoryPageSize)
   }, [cleanerHistoryPage, filteredCleanerSessions])
 
   useEffect(() => {
@@ -17764,7 +18360,9 @@ function CleanerSummary() {
       showSuccessToast("Cleaner record deleted successfully")
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "Failed to delete cleaner record"
+        error instanceof Error
+          ? error.message
+          : "Failed to delete cleaner record"
       showErrorToast(message)
     } finally {
       setDeletingCleanerRowKey(null)
@@ -18105,7 +18703,9 @@ function CleanerSummary() {
               min="0"
               step="0.25"
               value={cleanerUsedFilterValue}
-              onChange={(event) => setCleanerUsedFilterValue(event.target.value)}
+              onChange={(event) =>
+                setCleanerUsedFilterValue(event.target.value)
+              }
               placeholder="e.g. 2"
               className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm text-[#55311c] focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
             />
@@ -18266,7 +18866,10 @@ function CleanerSummary() {
               type="button"
               onClick={() =>
                 setCleanerHistoryPage(
-                  Math.min(totalCleanerHistoryPages - 1, cleanerHistoryPage + 1),
+                  Math.min(
+                    totalCleanerHistoryPages - 1,
+                    cleanerHistoryPage + 1,
+                  ),
                 )
               }
               disabled={cleanerHistoryPage >= totalCleanerHistoryPages - 1}
@@ -18884,10 +19487,9 @@ function CaretakerSummary({
   const [currentInvoiceHourEntryId, setCurrentInvoiceHourEntryId] = useState<
     string | null
   >(null)
-  const [, setCaretakerInvoiceHourEntries] =
-    useState<WorkerInvoiceHourEntry[]>(() =>
-      readInvoiceHoursFromStorage(CARETAKER_INVOICE_HOURS_STORAGE_KEY),
-    )
+  const [, setCaretakerInvoiceHourEntries] = useState<WorkerInvoiceHourEntry[]>(
+    () => readInvoiceHoursFromStorage(CARETAKER_INVOICE_HOURS_STORAGE_KEY),
+  )
   const [deletingBinsRowKey, setDeletingBinsRowKey] = useState<string | null>(
     null,
   )
@@ -19066,7 +19668,10 @@ function CaretakerSummary({
   const monthlyMetricsByMonthKey = useMemo(
     () =>
       new Map(
-        monthlyMetrics.map((metric) => [metric.month_start.slice(0, 7), metric]),
+        monthlyMetrics.map((metric) => [
+          metric.month_start.slice(0, 7),
+          metric,
+        ]),
       ),
     [monthlyMetrics],
   )
@@ -19166,14 +19771,13 @@ function CaretakerSummary({
       typeof window === "undefined"
         ? true
         : window.confirm(
-            `Delete the monthly goal for ${new Date(`${goal.month_start}T00:00:00Z`).toLocaleDateString(
-              "en-GB",
-              {
-                month: "long",
-                year: "numeric",
-                timeZone: "UTC",
-              },
-            )}?`,
+            `Delete the monthly goal for ${new Date(
+              `${goal.month_start}T00:00:00Z`,
+            ).toLocaleDateString("en-GB", {
+              month: "long",
+              year: "numeric",
+              timeZone: "UTC",
+            })}?`,
           )
 
     if (!confirmed) return
@@ -19510,7 +20114,9 @@ function CaretakerSummary({
     () =>
       Math.max(
         1,
-        Math.ceil(filteredCaretakerHistoryRows.length / caretakerHistoryPageSize),
+        Math.ceil(
+          filteredCaretakerHistoryRows.length / caretakerHistoryPageSize,
+        ),
       ),
     [filteredCaretakerHistoryRows.length],
   )
@@ -19521,10 +20127,7 @@ function CaretakerSummary({
       start,
       start + caretakerHistoryPageSize,
     )
-  }, [
-    caretakerHistoryPage,
-    filteredCaretakerHistoryRows,
-  ])
+  }, [caretakerHistoryPage, filteredCaretakerHistoryRows])
 
   useEffect(() => {
     if (activeTab !== "summary") return
@@ -19698,16 +20301,26 @@ function CaretakerSummary({
 
   const generateCaretakerInvoicePdf = async ({
     showToast = true,
-  }: { showToast?: boolean } = {}) => {
+  }: {
+    showToast?: boolean
+  } = {}) => {
     const parsedHours = Number(invoiceHours)
-    if (!invoiceHours.trim() || !Number.isFinite(parsedHours) || parsedHours <= 0) {
+    if (
+      !invoiceHours.trim() ||
+      !Number.isFinite(parsedHours) ||
+      parsedHours <= 0
+    ) {
       if (showToast) showErrorToast("Total hours must be a valid number")
       return
     }
 
     setIsGeneratingInvoicePdf(true)
     try {
-      const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" })
+      const doc = new jsPDF({
+        orientation: "portrait",
+        unit: "pt",
+        format: "a4",
+      })
       const pageWidth = doc.internal.pageSize.getWidth()
       const pageHeight = doc.internal.pageSize.getHeight()
       const margin = 44
@@ -19726,7 +20339,10 @@ function CaretakerSummary({
         ["Caretaker", activeCaretakerName],
         ["Month", selectedWorkMonthLabel],
         ["Total hours", formatDecimalHours(parsedHours)],
-        ["Amount", hasAmount ? formatCurrencyGbp(-Math.abs(parsedAmount)) : "-"],
+        [
+          "Amount",
+          hasAmount ? formatCurrencyGbp(-Math.abs(parsedAmount)) : "-",
+        ],
         ["Attached media", invoiceMediaName || "None"],
       ]
 
@@ -19774,7 +20390,8 @@ function CaretakerSummary({
             const image = new Image()
             await new Promise<void>((resolve, reject) => {
               image.onload = () => resolve()
-              image.onerror = () => reject(new Error("Could not load invoice media"))
+              image.onerror = () =>
+                reject(new Error("Could not load invoice media"))
               image.src = invoiceMediaData
             })
             const maxWidth = pageWidth - margin * 2
@@ -19791,7 +20408,11 @@ function CaretakerSummary({
               : "JPEG"
             doc.addImage(invoiceMediaData, imageFormat, x, 84, width, height)
           } catch {
-            doc.text("The attached image could not be added to the PDF.", margin, 96)
+            doc.text(
+              "The attached image could not be added to the PDF.",
+              margin,
+              96,
+            )
           }
         } else if (isPdfDataUrl(invoiceMediaData)) {
           doc.text(
@@ -20296,7 +20917,11 @@ function CaretakerSummary({
   useEffect(() => {
     if (!showInvoiceModal) return
     const parsedHours = Number(invoiceHours)
-    if (!invoiceHours.trim() || !Number.isFinite(parsedHours) || parsedHours <= 0) {
+    if (
+      !invoiceHours.trim() ||
+      !Number.isFinite(parsedHours) ||
+      parsedHours <= 0
+    ) {
       return
     }
 
@@ -20341,7 +20966,8 @@ function CaretakerSummary({
                   </span>
                 </div>
                 <p className="mt-2 text-sm text-[rgba(85,49,28,0.72)]">
-                  {formatDecimalHours(remainingWeeklyTargetHours)} left to reach 20h
+                  {formatDecimalHours(remainingWeeklyTargetHours)} left to reach
+                  20h
                 </p>
               </div>
               <div className="lg:border-l lg:border-[#e5e0dc] lg:px-6">
@@ -20377,9 +21003,9 @@ function CaretakerSummary({
                     ? "Loading monthly target..."
                     : monthlyMetricsError
                       ? "Failed to load monthly target."
-                    : selectedWorkMonthEffectiveTargetHours > 0
-                      ? `${formatDecimalHours(selectedWorkMonthRemainingHours)} left to reach ${formatDecimalHours(selectedWorkMonthEffectiveTargetHours)}`
-                      : "No monthly goal defined for this month."}
+                      : selectedWorkMonthEffectiveTargetHours > 0
+                        ? `${formatDecimalHours(selectedWorkMonthRemainingHours)} left to reach ${formatDecimalHours(selectedWorkMonthEffectiveTargetHours)}`
+                        : "No monthly goal defined for this month."}
                 </p>
               </div>
               <div className="flex flex-col gap-2 lg:border-l lg:border-[#e5e0dc] lg:items-end lg:pl-6">
@@ -20444,7 +21070,10 @@ function CaretakerSummary({
             </div>
             <div className="h-48 w-full">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={workTimeChartData} margin={{ left: 10, right: 20 }}>
+                <BarChart
+                  data={workTimeChartData}
+                  margin={{ left: 10, right: 20 }}
+                >
                   <CartesianGrid strokeDasharray="3 3" stroke="#d9d0ca" />
                   <XAxis
                     type="category"
@@ -20939,9 +21568,7 @@ function CaretakerSummary({
                   ),
                 )
               }
-              disabled={
-                caretakerHistoryPage >= totalCaretakerHistoryPages - 1
-              }
+              disabled={caretakerHistoryPage >= totalCaretakerHistoryPages - 1}
               className="rounded border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-50"
             >
               Next
@@ -21158,26 +21785,25 @@ function CaretakerSummary({
                   {!isLoadingMonthlyGoals &&
                     !monthlyGoalsError &&
                     monthlyGoals.length === 0 && (
-                    <tr>
-                      <td
-                        colSpan={3}
-                        className="px-4 py-4 text-center text-sm text-[rgba(0,0,0,0.65)]"
-                      >
-                        No monthly goals defined.
-                      </td>
-                    </tr>
+                      <tr>
+                        <td
+                          colSpan={3}
+                          className="px-4 py-4 text-center text-sm text-[rgba(0,0,0,0.65)]"
+                        >
+                          No monthly goals defined.
+                        </td>
+                      </tr>
                     )}
                   {monthlyGoals.map((goal) => (
                     <tr key={goal.id} className="border-t border-[#eee7e2]">
                       <td className="px-4 py-3 text-sm text-[#55311c]">
-                        {new Date(`${goal.month_start}T00:00:00Z`).toLocaleDateString(
-                          "en-GB",
-                          {
-                            month: "long",
-                            year: "numeric",
-                            timeZone: "UTC",
-                          },
-                        )}
+                        {new Date(
+                          `${goal.month_start}T00:00:00Z`,
+                        ).toLocaleDateString("en-GB", {
+                          month: "long",
+                          year: "numeric",
+                          timeZone: "UTC",
+                        })}
                       </td>
                       <td className="px-4 py-3 text-sm text-[#55311c]">
                         {formatDecimalHours(goal.target_hours)}
@@ -21384,7 +22010,9 @@ function CaretakerSummary({
                 disabled={isGeneratingInvoicePdf || isLaunchingCaretakerInvoice}
                 className="w-full rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
               >
-                {isLaunchingCaretakerInvoice ? "Launching..." : "Launch invoice"}
+                {isLaunchingCaretakerInvoice
+                  ? "Launching..."
+                  : "Launch invoice"}
               </button>
             </div>
           </div>
@@ -21971,7 +22599,9 @@ function ResidentsContent() {
   useEffect(() => {
     if (
       selectedBuilding &&
-      !residentFilterBuildings.some((building) => building.nome === selectedBuilding)
+      !residentFilterBuildings.some(
+        (building) => building.nome === selectedBuilding,
+      )
     ) {
       setSelectedBuilding(null)
     }
@@ -22652,100 +23282,57 @@ function ResidentsContent() {
                               })
                             }
                           >
-                          <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
-                            {morador.building_nome}
-                          </td>
-                          <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
-                            {formatFlatNumber(
-                              morador.flat_numero,
-                              morador.flat_label,
-                            )}
-                          </td>
-                          <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
-                            {renderResidentIdentity(morador)}
-                          </td>
-                          <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
-                            {morador.mobile || "-"}
-                          </td>
-                          <td className="border border-gray-400 px-4 py-3 text-center">
-                            <input
-                              type="checkbox"
-                              checked={morador.receives_flat_reading_sms}
-                              onClick={(event) => event.stopPropagation()}
-                              onChange={(event) =>
-                                handleReadingSmsToggle(
-                                  morador.id,
-                                  event.target.checked,
-                                )
-                              }
-                              disabled={updateReadingSmsMutation.isPending}
-                              className="h-4 w-4 cursor-pointer"
-                            />
-                          </td>
-                          <td className="border border-gray-400 px-4 py-3 text-center">
-                            <input
-                              type="checkbox"
-                              checked={morador.receives_twilio_sms}
-                              onClick={(event) => event.stopPropagation()}
-                              onChange={(event) =>
-                                handleTwilioSmsToggle(
-                                  morador.id,
-                                  event.target.checked,
-                                )
-                              }
-                              disabled={updateTwilioSmsMutation.isPending}
-                              className="h-4 w-4 cursor-pointer"
-                            />
-                          </td>
-                          <td className="border border-gray-400 px-4 py-3 text-center">
-                            <input
-                              type="checkbox"
-                              checked={
-                                (morador.reading_types &
-                                  FLAT_READING_TYPE_NORMAL) !==
-                                0
-                              }
-                              onClick={(event) => event.stopPropagation()}
-                              onChange={() =>
-                                handleCheckboxChange(
-                                  morador.id,
-                                  morador.reading_types,
-                                  FLAT_READING_TYPE_NORMAL,
-                                  allowGarage,
-                                )
-                              }
-                              disabled={updateReadingTypesMutation.isPending}
-                              className="h-4 w-4 cursor-pointer"
-                            />
-                          </td>
-                          <td className="border border-gray-400 px-4 py-3 text-center">
-                            <input
-                              type="checkbox"
-                              checked={
-                                (morador.reading_types &
-                                  FLAT_READING_TYPE_GAS) !==
-                                0
-                              }
-                              onClick={(event) => event.stopPropagation()}
-                              onChange={() =>
-                                handleCheckboxChange(
-                                  morador.id,
-                                  morador.reading_types,
-                                  FLAT_READING_TYPE_GAS,
-                                  allowGarage,
-                                )
-                              }
-                              disabled={updateReadingTypesMutation.isPending}
-                              className="h-4 w-4 cursor-pointer"
-                            />
-                          </td>
-                          <td className="border border-gray-400 px-4 py-3 text-center">
-                            {allowGarage ? (
+                            <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
+                              {morador.building_nome}
+                            </td>
+                            <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
+                              {formatFlatNumber(
+                                morador.flat_numero,
+                                morador.flat_label,
+                              )}
+                            </td>
+                            <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
+                              {renderResidentIdentity(morador)}
+                            </td>
+                            <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
+                              {morador.mobile || "-"}
+                            </td>
+                            <td className="border border-gray-400 px-4 py-3 text-center">
+                              <input
+                                type="checkbox"
+                                checked={morador.receives_flat_reading_sms}
+                                onClick={(event) => event.stopPropagation()}
+                                onChange={(event) =>
+                                  handleReadingSmsToggle(
+                                    morador.id,
+                                    event.target.checked,
+                                  )
+                                }
+                                disabled={updateReadingSmsMutation.isPending}
+                                className="h-4 w-4 cursor-pointer"
+                              />
+                            </td>
+                            <td className="border border-gray-400 px-4 py-3 text-center">
+                              <input
+                                type="checkbox"
+                                checked={morador.receives_twilio_sms}
+                                onClick={(event) => event.stopPropagation()}
+                                onChange={(event) =>
+                                  handleTwilioSmsToggle(
+                                    morador.id,
+                                    event.target.checked,
+                                  )
+                                }
+                                disabled={updateTwilioSmsMutation.isPending}
+                                className="h-4 w-4 cursor-pointer"
+                              />
+                            </td>
+                            <td className="border border-gray-400 px-4 py-3 text-center">
                               <input
                                 type="checkbox"
                                 checked={
                                   (morador.reading_types &
-                                    FLAT_READING_TYPE_GARAGE) !==
+                                    FLAT_READING_TYPE_NORMAL) !==
                                   0
                                 }
                                 onClick={(event) => event.stopPropagation()}
@@ -22753,20 +23340,65 @@ function ResidentsContent() {
                                   handleCheckboxChange(
                                     morador.id,
                                     morador.reading_types,
-                                    FLAT_READING_TYPE_GARAGE,
+                                    FLAT_READING_TYPE_NORMAL,
                                     allowGarage,
                                   )
                                 }
                                 disabled={updateReadingTypesMutation.isPending}
                                 className="h-4 w-4 cursor-pointer"
                               />
-                            ) : (
-                              <span className="text-xs text-[rgba(85,49,28,0.45)]">
-                                -
-                              </span>
-                            )}
-                          </td>
-                        </tr>
+                            </td>
+                            <td className="border border-gray-400 px-4 py-3 text-center">
+                              <input
+                                type="checkbox"
+                                checked={
+                                  (morador.reading_types &
+                                    FLAT_READING_TYPE_GAS) !==
+                                  0
+                                }
+                                onClick={(event) => event.stopPropagation()}
+                                onChange={() =>
+                                  handleCheckboxChange(
+                                    morador.id,
+                                    morador.reading_types,
+                                    FLAT_READING_TYPE_GAS,
+                                    allowGarage,
+                                  )
+                                }
+                                disabled={updateReadingTypesMutation.isPending}
+                                className="h-4 w-4 cursor-pointer"
+                              />
+                            </td>
+                            <td className="border border-gray-400 px-4 py-3 text-center">
+                              {allowGarage ? (
+                                <input
+                                  type="checkbox"
+                                  checked={
+                                    (morador.reading_types &
+                                      FLAT_READING_TYPE_GARAGE) !==
+                                    0
+                                  }
+                                  onClick={(event) => event.stopPropagation()}
+                                  onChange={() =>
+                                    handleCheckboxChange(
+                                      morador.id,
+                                      morador.reading_types,
+                                      FLAT_READING_TYPE_GARAGE,
+                                      allowGarage,
+                                    )
+                                  }
+                                  disabled={
+                                    updateReadingTypesMutation.isPending
+                                  }
+                                  className="h-4 w-4 cursor-pointer"
+                                />
+                              ) : (
+                                <span className="text-xs text-[rgba(85,49,28,0.45)]">
+                                  -
+                                </span>
+                              )}
+                            </td>
+                          </tr>
                         )
                       })}
                     </tbody>
@@ -23415,4 +24047,3 @@ function AddResidentForm({
     </div>
   )
 }
-

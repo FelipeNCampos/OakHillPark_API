@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test"
 
 test.use({ storageState: { cookies: [], origins: [] } })
 
-test("sending SMS to a building excludes residents without Twilio consent", async ({
+test("building SMS selection uses readings consent while manual selection bypasses it", async ({
   page,
 }) => {
   const sentSmsPayloads: Array<{ phone_to: string; body: string }> = []
@@ -29,7 +29,7 @@ test("sending SMS to a building excludes residents without Twilio consent", asyn
   await page.route("**/api/v1/buildings/condominio**", async (route) => {
     await route.fulfill({
       json: {
-        data: [{ id: "northwood-id", nome: "Northwood", reading_types: 3 }],
+        data: [{ id: "falcon-id", nome: "Falcon", reading_types: 3 }],
         count: 1,
       },
     })
@@ -39,27 +39,27 @@ test("sending SMS to a building excludes residents without Twilio consent", asyn
       json: {
         data: [
           {
-            id: "consented-resident",
+            id: "reading-consented-resident",
             cargo: 0,
-            building_nome: "Northwood",
+            building_nome: "Falcon",
             flat_numero: 1,
             flat_label: null,
-            flat_id: "northwood-flat-1",
-            nome: "Receives SMS",
+            flat_id: "falcon-flat-1",
+            nome: "Receives readings",
             email: "receives@example.com",
             mobile: "07700 900001",
-            receives_flat_reading_sms: false,
-            receives_twilio_sms: true,
+            receives_flat_reading_sms: true,
+            receives_twilio_sms: false,
             reading_types: 0,
           },
           {
-            id: "unconsented-resident",
+            id: "manual-selection-resident",
             cargo: 2,
-            building_nome: "Northwood",
+            building_nome: "Falcon",
             flat_numero: 2,
             flat_label: null,
-            flat_id: "northwood-flat-2",
-            nome: "Does Not Receive SMS",
+            flat_id: "falcon-flat-2",
+            nome: "Manual selection",
             email: "does-not-receive@example.com",
             mobile: "07700 900002",
             receives_flat_reading_sms: false,
@@ -82,7 +82,12 @@ test("sending SMS to a building excludes residents without Twilio consent", asyn
   await main.getByRole("button", { name: "Twilio", exact: true }).click()
   await expect(main.getByRole("heading", { name: "Messaging" })).toBeVisible()
 
-  await main.getByLabel("Northwood", { exact: true }).check()
+  await main.getByLabel("Falcon", { exact: true }).check()
+  await main
+    .getByText("Manual selection", { exact: true })
+    .locator("xpath=ancestor::label")
+    .getByRole("checkbox")
+    .check()
   await main.locator("#twilio-message-body").fill("Building update")
   await main.getByRole("button", { name: "Send bulk SMS" }).click()
 
@@ -91,10 +96,11 @@ test("sending SMS to a building excludes residents without Twilio consent", asyn
   ).toBeVisible()
   await expect.poll(() => sentSmsPayloads).toEqual([
     { phone_to: "+447700900001", body: "Building update" },
+    { phone_to: "+447700900002", body: "Building update" },
   ])
 })
 
-test("email channel shows only residents with email consent", async ({ page }) => {
+test("email channel keeps every resident available for manual selection", async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem("access_token", "twilio-email-consent-test-token")
   })
@@ -159,6 +165,21 @@ test("email channel shows only residents with email consent", async ({ page }) =
             receives_twilio_email: false,
             reading_types: 0,
           },
+          {
+            id: "office-resident",
+            cargo: 3,
+            building_nome: "Office",
+            flat_numero: 3,
+            flat_label: null,
+            flat_id: "office-flat-3",
+            nome: "Office manual selection",
+            email: "office@example.com",
+            mobile: "07700 900003",
+            receives_flat_reading_sms: false,
+            receives_twilio_sms: false,
+            receives_twilio_email: false,
+            reading_types: 0,
+          },
         ],
         count: 2,
       },
@@ -172,7 +193,13 @@ test("email channel shows only residents with email consent", async ({ page }) =
   await main.getByRole("button", { name: "Email", exact: true }).click()
 
   await expect(main.getByText("Receives Email", { exact: true })).toBeVisible()
+  const unconsentedResident = main
+    .getByText("Does Not Receive Email", { exact: true })
+    .locator("xpath=ancestor::label")
+  await expect(unconsentedResident).toBeVisible()
+  await unconsentedResident.getByRole("checkbox").check()
+  await expect(unconsentedResident.getByRole("checkbox")).toBeChecked()
   await expect(
-    main.getByText("Does Not Receive Email", { exact: true }),
-  ).toHaveCount(0)
+    main.getByText("Office manual selection", { exact: true }),
+  ).toBeVisible()
 })

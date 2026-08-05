@@ -9512,14 +9512,15 @@ function TwilioContent() {
       ),
     [buildings, sendChannel],
   )
-  const residentsForActiveChannel = useMemo(
+  const residentsForManualSelection = Residents
+  const manualSelectionBuildingNames = useMemo(
     () =>
-      Residents.filter(
-        (morador) =>
-          isTwilioBuildingVisible(morador.building_nome, sendChannel) &&
-          (sendChannel !== "email" || morador.receives_twilio_email),
-      ),
-    [Residents, sendChannel],
+      Array.from(
+        new Set(
+          residentsForManualSelection.map((morador) => morador.building_nome),
+        ),
+      ).sort((a, b) => a.localeCompare(b)),
+    [residentsForManualSelection],
   )
 
   const buildingNameById = useMemo(() => {
@@ -9540,15 +9541,15 @@ function TwilioContent() {
     )
     setResidentBuildingFilter((prev) => {
       if (prev === "all") return prev
-      return visibleBuildings.some((building) => building.nome === prev)
+      return manualSelectionBuildingNames.includes(prev)
         ? prev
         : "all"
     })
-  }, [visibleBuildings])
+  }, [manualSelectionBuildingNames, visibleBuildings])
 
   const filteredResidents = useMemo(() => {
     const search = residentSearch.trim().toLowerCase()
-    return residentsForActiveChannel.filter((morador) => {
+    return residentsForManualSelection.filter((morador) => {
       if (
         residentBuildingFilter !== "all" &&
         morador.building_nome !== residentBuildingFilter
@@ -9577,7 +9578,7 @@ function TwilioContent() {
     residentBuildingFilter,
     residentRoleFilter,
     residentSearch,
-    residentsForActiveChannel,
+    residentsForManualSelection,
   ])
 
   const recipients = useMemo(() => {
@@ -9590,14 +9591,12 @@ function TwilioContent() {
 
     const selectedMap = new Map<string, Morador>()
 
-    residentsForActiveChannel.forEach((morador) => {
+    residentsForManualSelection.forEach((morador) => {
       const id = String(morador.id)
       const includedByResident = residentIdSet.has(id)
       const includedByBuilding =
         selectedBuildingNames.has(morador.building_nome) &&
-        (sendChannel === "email"
-          ? morador.receives_twilio_email
-          : morador.receives_twilio_sms)
+        morador.receives_flat_reading_sms
 
       if (includedByResident || includedByBuilding) {
         selectedMap.set(id, morador)
@@ -9619,7 +9618,7 @@ function TwilioContent() {
     })
   }, [
     buildingNameById,
-    residentsForActiveChannel,
+    residentsForManualSelection,
     sendChannel,
     selectedBuildingIds,
     selectedResidentIds,
@@ -10107,14 +10106,11 @@ function TwilioContent() {
                   className="w-full rounded border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
                 >
                   <option value="all">All buildings</option>
-                  {visibleBuildings
-                    .map((building) => building.nome)
-                    .sort((a, b) => a.localeCompare(b))
-                    .map((buildingName) => (
-                      <option key={buildingName} value={buildingName}>
-                        {buildingName}
-                      </option>
-                    ))}
+                  {manualSelectionBuildingNames.map((buildingName) => (
+                    <option key={buildingName} value={buildingName}>
+                      {buildingName}
+                    </option>
+                  ))}
                 </select>
 
                 <select

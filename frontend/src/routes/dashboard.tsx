@@ -9283,9 +9283,9 @@ function TwilioContent() {
     residentsForActiveChannel.forEach((morador) => {
       const id = String(morador.id)
       const includedByResident = residentIdSet.has(id)
-      const includedByBuilding = selectedBuildingNames.has(
-        morador.building_nome,
-      )
+      const includedByBuilding =
+        selectedBuildingNames.has(morador.building_nome) &&
+        (sendChannel === "email" || morador.receives_twilio_sms)
 
       if (includedByResident || includedByBuilding) {
         selectedMap.set(id, morador)
@@ -9308,6 +9308,7 @@ function TwilioContent() {
   }, [
     buildingNameById,
     residentsForActiveChannel,
+    sendChannel,
     selectedBuildingIds,
     selectedResidentIds,
   ])

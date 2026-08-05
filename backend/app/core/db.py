@@ -88,6 +88,16 @@ def _ensure_morador_sms_schema(session: Session) -> None:
         )
         session.commit()
 
+    columns = {column["name"] for column in inspector.get_columns("morador")}
+    if "receives_twilio_email" not in columns:
+        session.execute(
+            text(
+                "ALTER TABLE morador "
+                "ADD COLUMN receives_twilio_email BOOLEAN NOT NULL DEFAULT FALSE"
+            )
+        )
+        session.commit()
+
 
 def _ensure_reminder_schedule_schema(session: Session) -> None:
     bind = session.get_bind()

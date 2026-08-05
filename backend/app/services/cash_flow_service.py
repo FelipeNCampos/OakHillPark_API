@@ -282,7 +282,7 @@ class CashFlowService:
                     "Yes" if item.has_invoice else "No",
                     CashFlowService._format_date(item.record_date),
                     CashFlowService._money_cell(item.amount),
-                    item.supplier or "",
+                    CashFlowService._paragraph_cell(item.supplier or "", table_body_style),
                     CashFlowService._paragraph_cell(item.description or "", table_body_style),
                     CashFlowService._money_cell(item.balance),
                 ]
@@ -322,7 +322,9 @@ class CashFlowService:
                         f"#{item.payment_number}",
                         CashFlowService._format_date(item.record_date),
                         item.invoice_media_name or "invoice",
-                        item.supplier or "",
+                        CashFlowService._paragraph_cell(
+                            item.supplier or "", invoice_body_style
+                        ),
                         CashFlowService._paragraph_cell(
                             item.description or "", invoice_body_style
                         ),

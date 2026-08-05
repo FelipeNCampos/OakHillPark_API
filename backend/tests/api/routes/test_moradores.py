@@ -265,6 +265,23 @@ def test_update_morador_sms_preference(
     assert payload["receives_flat_reading_sms"] is True
 
 
+def test_update_morador_twilio_email_preference(
+    client: TestClient, superuser_token_headers: dict[str, str], db: Session
+) -> None:
+    _, _, flat = _create_test_condominio_flat(db)
+    morador = _create_test_morador(db, flat.id)
+
+    response = client.patch(
+        f"{settings.API_V1_STR}/moradores/{morador.id}",
+        headers=superuser_token_headers,
+        json={"receives_twilio_email": True},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["receives_twilio_email"] is True
+
+
 def test_update_morador_reading_types_allows_garage_for_northwood_flat_1(
     client: TestClient, superuser_token_headers: dict[str, str], db: Session
 ) -> None:

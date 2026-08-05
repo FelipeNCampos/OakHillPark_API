@@ -12,17 +12,24 @@ import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url"
 import {
   CircleDollarSign,
   Copy,
+  Download,
   FileSpreadsheet,
   Link2,
   Pencil,
-  Plus,
   Search,
+  Trash2,
   Upload,
   X,
 } from "lucide-react"
 import QRCode from "qrcode"
 import type { ChangeEvent, KeyboardEvent } from "react"
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react"
+import {
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import {
   Bar,
   BarChart,
@@ -124,11 +131,13 @@ const READING_HIDDEN_BUILDING_NAMES = new Set([
   "cleaner",
   "contractor",
   "caretaker",
+  "estate ohp",
 ])
 const FLAT_READING_HIDDEN_BUILDING_NAMES = new Set([
   "cleaner",
   "contractor",
   "caretaker",
+  "estate ohp",
   "office",
 ])
 const TWILIO_SMS_HIDDEN_BUILDING_NAMES = new Set([
@@ -502,6 +511,7 @@ interface CashFlowInvoiceEditorState {
 
 interface CashFlowTextEditorState {
   record: CashFlowRecord
+  date: string
   value: string
   supplier: string
   description: string
@@ -589,6 +599,7 @@ interface Morador {
   car3?: string | null
   receives_flat_reading_sms: boolean
   receives_twilio_sms: boolean
+  receives_twilio_email: boolean
   reading_types: number
 }
 
@@ -772,6 +783,7 @@ interface MoradorDetail {
   car3?: string | null
   receives_flat_reading_sms: boolean
   receives_twilio_sms: boolean
+  receives_twilio_email: boolean
   flat_id: EntityId
 }
 
@@ -2940,6 +2952,17 @@ function CashFlowContent() {
   const monthInputRef = useRef<HTMLInputElement | null>(null)
   const createInvoiceFileInputRef = useRef<HTMLInputElement | null>(null)
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonthInputValue)
+  const [customPeriod, setCustomPeriod] = useState<{
+    dateFrom: string
+    dateTo: string
+  } | null>(null)
+  const [isCustomPeriodOpen, setIsCustomPeriodOpen] = useState(false)
+  const [customDateFrom, setCustomDateFrom] = useState(
+    () => getMonthDateRange(getCurrentMonthInputValue()).dateFrom,
+  )
+  const [customDateTo, setCustomDateTo] = useState(
+    () => getMonthDateRange(getCurrentMonthInputValue()).dateTo,
+  )
   const [search, setSearch] = useState("")
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [form, setForm] = useState<CashFlowFormState>(getEmptyCashFlowForm)
@@ -3000,10 +3023,9 @@ function CashFlowContent() {
   const [saving, setSaving] = useState(false)
   const [savingInvoice, setSavingInvoice] = useState(false)
   const [savingText, setSavingText] = useState(false)
-  const { dateFrom, dateTo } = useMemo(
-    () => getMonthDateRange(selectedMonth),
-    [selectedMonth],
-  )
+  const selectedMonthRange = getMonthDateRange(selectedMonth)
+  const dateFrom = customPeriod?.dateFrom ?? selectedMonthRange.dateFrom
+  const dateTo = customPeriod?.dateTo ?? selectedMonthRange.dateTo
   const deferredSearch = useDeferredValue(search.trim())
   const labelClass =
     "text-[11px] font-extrabold uppercase tracking-[0.08em] text-[rgba(85,49,28,0.72)]"
@@ -3033,6 +3055,7 @@ function CashFlowContent() {
       if (event.key !== "Escape") return
       setIsCreateOpen(false)
       setIsReportOpen(false)
+      setIsCustomPeriodOpen(false)
       setTextEditor(null)
       setInvoiceEditor(null)
     }
@@ -3042,7 +3065,7 @@ function CashFlowContent() {
   }, [])
 
   const recordsQuery = useQuery<CashFlowRecordsResponse>({
-    queryKey: ["cash-flow", selectedMonth, deferredSearch],
+    queryKey: ["cash-flow", dateFrom, dateTo, deferredSearch],
     queryFn: () =>
       apiCall("/api/v1/cash-flow/", {
         skip: 0,
@@ -3061,7 +3084,7 @@ function CashFlowContent() {
   })
 
   const cumulativeBalanceQuery = useQuery<CashFlowRecordsResponse>({
-    queryKey: ["cash-flow-summary", selectedMonth, deferredSearch],
+    queryKey: ["cash-flow-summary", dateFrom, dateTo, deferredSearch],
     queryFn: () =>
       apiCall("/api/v1/cash-flow/", {
         skip: 0,
@@ -3073,6 +3096,10 @@ function CashFlowContent() {
   })
 
   const records = recordsQuery.data?.data || []
+  const recordsTotalValue = records.reduce(
+    (total, record) => total + Number(record.amount),
+    0,
+  )
   const currentBalanceValue = Number(cumulativeBalanceQuery.data?.balance || 0)
   const thisMonthValue = Number(recordsQuery.data?.balance || 0)
   const openingBalanceValue = currentBalanceValue - thisMonthValue
@@ -3088,7 +3115,7 @@ function CashFlowContent() {
     })
   }, [openingBalanceValue, records])
 
-  const tableColumnCount = 10
+  const tableColumnCount = 9
 
   const formatCashFlowDate = (value: string) => {
     const [year, month, day] = value.split("-")
@@ -3135,6 +3162,20 @@ function CashFlowContent() {
     }
   }
 
+  const openCustomPeriodDialog = () => {
+    setCustomDateFrom(dateFrom)
+    setCustomDateTo(dateTo)
+    setIsCustomPeriodOpen(true)
+  }
+
+  const handleCustomPeriodSubmit = (
+    event: React.FormEvent<HTMLFormElement>,
+  ) => {
+    event.preventDefault()
+    setCustomPeriod({ dateFrom: customDateFrom, dateTo: customDateTo })
+    setIsCustomPeriodOpen(false)
+  }
+
   const clearCreateInvoiceMedia = () => {
     setCreateInvoicePreview((current) => {
       revokePreviewState(current)
@@ -3170,9 +3211,8 @@ function CashFlowContent() {
   }
 
   const openShareModal = () => {
-    const range = getMonthDateRange(selectedMonth)
-    setShareDateFrom(range.dateFrom)
-    setShareDateTo(range.dateTo)
+    setShareDateFrom(dateFrom)
+    setShareDateTo(dateTo)
     if (shareExpiryPreset !== "custom") {
       const hours =
         shareExpiryPreset === "24h"
@@ -3401,6 +3441,7 @@ function CashFlowContent() {
     setFeedback(null)
     setTextEditor({
       record,
+      date: record.record_date,
       value: String(record.amount),
       supplier: record.supplier || "",
       description: record.description || "",
@@ -3606,6 +3647,7 @@ function CashFlowContent() {
         type: "success",
         message: "Record deleted successfully.",
       })
+      setTextEditor(null)
       await reload()
     } catch (error) {
       const message =
@@ -3683,6 +3725,7 @@ function CashFlowContent() {
       await apiCall(`/api/v1/cash-flow/${textEditor.record.id}`, {
         method: "PATCH",
         body: {
+          record_date: textEditor.date,
           amount: parsedValue,
           supplier: textEditor.supplier.trim(),
           description: textEditor.description.trim(),
@@ -3774,16 +3817,40 @@ function CashFlowContent() {
           <h2 className="text-3xl font-extrabold text-[#55311c]">{title}</h2>
         </div>
         <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-end">
-          <label className="grid gap-2" onClick={openMonthPicker}>
-            <span className={labelClass}>Month</span>
+          <div className="grid gap-2">
+            <div className="flex items-center gap-2">
+              <span className={labelClass}>Month</span>
+              <button
+                aria-label="Customize cash flow period"
+                className="grid h-6 w-6 place-items-center rounded text-[#55311c] transition hover:bg-[#f5f1ee]"
+                title="Customize cash flow period"
+                type="button"
+                onClick={openCustomPeriodDialog}
+              >
+                <Pencil size={15} />
+              </button>
+            </div>
+            <button
+              className={`${inputClass} flex min-w-44 cursor-pointer items-center text-left`}
+              type="button"
+              onClick={openMonthPicker}
+            >
+              {customPeriod
+                ? "Customized"
+                : buildMonthRangeLabel(selectedMonth, selectedMonth)}
+            </button>
             <input
               ref={monthInputRef}
-              className={`${inputClass} cursor-pointer`}
+              aria-label="Month"
+              className="sr-only"
               type="month"
               value={selectedMonth}
-              onChange={(event) => setSelectedMonth(event.target.value)}
+              onChange={(event) => {
+                setSelectedMonth(event.target.value)
+                setCustomPeriod(null)
+              }}
             />
-          </label>
+          </div>
           <label className="grid min-w-0 gap-2 sm:flex-1 sm:min-w-72">
             <span className={`${labelClass} invisible`}>Search</span>
             <span className="relative block">
@@ -3799,17 +3866,87 @@ function CashFlowContent() {
         </div>
       </section>
 
+      {isCustomPeriodOpen ? (
+        <div className="fixed inset-0 z-40 grid place-items-center bg-black/40 p-4">
+          <article
+            aria-labelledby="cash-flow-custom-period-title"
+            aria-modal="true"
+            className="w-full max-w-md rounded-2xl border border-[#e5e0dc] bg-white shadow-2xl"
+            role="dialog"
+          >
+            <header className="flex items-center justify-between border-b border-[#e5e0dc] px-6 py-4">
+              <div>
+                <p className={labelClass}>Cash flow period</p>
+                <h2
+                  className="text-xl font-extrabold text-[#55311c]"
+                  id="cash-flow-custom-period-title"
+                >
+                  Customize cash flow period
+                </h2>
+              </div>
+              <button
+                aria-label="Close customized period"
+                className="grid h-9 w-9 place-items-center rounded-lg border border-[#d9d0ca] text-black"
+                type="button"
+                onClick={() => setIsCustomPeriodOpen(false)}
+              >
+                <X size={17} />
+              </button>
+            </header>
+            <form className="grid gap-4 p-6" onSubmit={handleCustomPeriodSubmit}>
+              <label className="grid gap-2">
+                <span className={labelClass}>Start date</span>
+                <input
+                  className={inputClass}
+                  type="date"
+                  value={customDateFrom}
+                  onChange={(event) => setCustomDateFrom(event.target.value)}
+                  required
+                />
+              </label>
+              <label className="grid gap-2">
+                <span className={labelClass}>End date</span>
+                <input
+                  className={inputClass}
+                  min={customDateFrom}
+                  type="date"
+                  value={customDateTo}
+                  onChange={(event) => setCustomDateTo(event.target.value)}
+                  required
+                />
+              </label>
+              <footer className="mt-2 flex justify-end gap-3">
+                <button
+                  className={secondaryButtonClass}
+                  type="button"
+                  onClick={() => setIsCustomPeriodOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button className={primaryButtonClass} type="submit">
+                  Apply period
+                </button>
+              </footer>
+            </form>
+          </article>
+        </div>
+      ) : null}
+
       <section className="grid gap-4 md:grid-cols-[minmax(0,1fr)_220px]">
         <article className={`${cardClass} p-6`}>
           <div className="grid overflow-hidden rounded-xl border border-[#e5e0dc] bg-[#faf8f6] sm:grid-cols-2">
             <div className="p-4 text-center sm:border-r sm:border-[#e5e0dc]">
-              <p className={labelClass}>Last Month</p>
+              <p className={labelClass}>
+                {customPeriod ? "Opening balance" : "Last Month"}
+              </p>
               <p className="mt-2 text-2xl font-extrabold text-[#55311c]">
                 {openingBalance}
               </p>
             </div>
             <div className="p-4 text-center">
-              <p className={labelClass}>This Month</p>
+              <p className={labelClass}>
+                {customPeriod ? "This period" : "This Month"}
+              </p>
               <p
                 className={`mt-2 text-2xl font-extrabold ${
                   thisMonthValue >= 0 ? "text-[#217a4b]" : "text-[#b42318]"
@@ -3861,20 +3998,83 @@ function CashFlowContent() {
       ) : null}
 
       <section className={`${cardClass} overflow-hidden`}>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[1080px] text-left">
+        <table className="w-full max-w-full table-fixed border-collapse text-left">
+          <colgroup>
+            <col className="w-[8%]" />
+            <col className="w-[8%]" />
+            <col className="w-[10%]" />
+            <col className="w-[11%]" />
+            <col className="w-[14%]" />
+            <col className="w-[17%]" />
+            <col className="w-[11%]" />
+            <col className="w-[12%]" />
+            <col className="w-[9%]" />
+          </colgroup>
             <thead className="bg-[#faf8f6] text-[11px] uppercase text-[rgba(85,49,28,0.72)]">
               <tr>
-                <th className="px-4 py-3 font-extrabold">Payment Number</th>
-                <th className="px-4 py-3 font-extrabold">Invoice</th>
-                <th className="px-4 py-3 font-extrabold">Date</th>
-                <th className="px-4 py-3 text-right font-extrabold">Amount</th>
-                <th className="px-4 py-3 font-extrabold">Supplier</th>
-                <th className="px-4 py-3 font-extrabold">Description</th>
-                <th className="px-4 py-3 font-extrabold">Location</th>
-                <th className="px-4 py-3 font-extrabold">Reason</th>
-                <th className="px-4 py-3 text-right font-extrabold">Balance</th>
-                <th className="px-4 py-3 font-extrabold">Action</th>
+                <th
+                  className="truncate whitespace-nowrap px-2 py-3 font-extrabold"
+                >
+                  <span className="block truncate" title="Payment Number">
+                    Payment Number
+                  </span>
+                </th>
+                <th
+                  className="truncate whitespace-nowrap px-2 py-3 font-extrabold"
+                >
+                  <span className="block truncate" title="Invoice">
+                    Invoice
+                  </span>
+                </th>
+                <th
+                  className="truncate whitespace-nowrap px-2 py-3 font-extrabold"
+                >
+                  <span className="block truncate" title="Date">
+                    Date
+                  </span>
+                </th>
+                <th
+                  className="truncate whitespace-nowrap px-2 py-3 text-right font-extrabold"
+                >
+                  <span className="block truncate" title="Amount">
+                    Amount
+                  </span>
+                </th>
+                <th
+                  className="truncate whitespace-nowrap px-2 py-3 font-extrabold"
+                >
+                  <span className="block truncate" title="Supplier">
+                    Supplier
+                  </span>
+                </th>
+                <th
+                  className="truncate whitespace-nowrap px-2 py-3 font-extrabold"
+                >
+                  <span className="block truncate" title="Description">
+                    Description
+                  </span>
+                </th>
+                <th
+                  className="truncate whitespace-nowrap px-2 py-3 font-extrabold"
+                >
+                  <span className="block truncate" title="Location">
+                    Location
+                  </span>
+                </th>
+                <th
+                  className="truncate whitespace-nowrap px-2 py-3 font-extrabold"
+                >
+                  <span className="block truncate" title="Reason">
+                    Reason
+                  </span>
+                </th>
+                <th
+                  className="truncate whitespace-nowrap px-2 py-3 text-right font-extrabold"
+                >
+                  <span className="block truncate" title="Balance">
+                    Balance
+                  </span>
+                </th>
               </tr>
             </thead>
 
@@ -3906,108 +4106,113 @@ function CashFlowContent() {
                       key={record.id}
                       className="cursor-pointer bg-white transition-colors hover:bg-[#faf8f6]"
                       onClick={() => openTextEditor(record)}
-                    >
-                      <td className="px-4 py-3 text-sm font-bold text-[#55311c]">
-                        #{record.payment_number}
-                      </td>
-                      <td className="px-4 py-3 text-sm font-semibold text-[#55311c]">
-                        {record.has_invoice ? (
-                          <button
-                            className="inline-flex items-center gap-1.5 rounded-lg border border-[#d9d0ca] px-2.5 py-1.5 text-xs font-extrabold text-[#55311c] transition-colors hover:bg-[#faf8f6]"
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              handleOpenInvoiceEditor(record)
-                            }}
-                          >
-                            <Pencil size={14} />
-                            View / update
-                          </button>
-                        ) : (
-                          <button
-                            className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-[#8c7569] px-2.5 py-1.5 text-xs font-extrabold text-[#55311c] transition-colors hover:bg-[#faf8f6]"
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              handleOpenInvoiceEditor(record)
-                            }}
-                          >
-                            <Plus size={14} />
-                            Add
-                          </button>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-sm font-semibold text-black/65">
-                        {formatCashFlowDate(record.record_date)}
-                      </td>
-                      <td
-                        className={`px-4 py-3 text-right text-sm font-extrabold ${
-                          Number(record.amount) >= 0
-                            ? "text-[#217a4b]"
-                            : "text-[#b42318]"
-                        }`}
-                      >
-                        {formatCurrencyGbp(record.amount)}
-                      </td>
-                      <td className="px-4 py-3 text-sm font-semibold text-black/70">
-                        <span className="block max-w-56 truncate">
-                          {record.supplier || "-"}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-sm font-semibold text-black/70">
-                        <button
-                          className="inline-flex max-w-72 items-center gap-1.5 rounded-lg px-2 py-1 text-left transition-colors hover:bg-[#faf8f6]"
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            openTextEditor(record)
-                          }}
+                      onKeyDown={(event) => {
+                        if (
+                          event.currentTarget === event.target &&
+                          (event.key === "Enter" || event.key === " ")
+                        ) {
+                          event.preventDefault()
+                          openTextEditor(record)
+                        }
+                      }}
+                      tabIndex={0}
+                      aria-label={`Edit cash flow record #${record.payment_number}`}
                         >
-                          {record.description ? (
-                            <Pencil className="shrink-0" size={14} />
-                          ) : (
-                            <Plus className="shrink-0" size={14} />
-                          )}
-                          <span className="truncate">
-                            {record.description || "Add"}
-                          </span>
-                        </button>
-                      </td>
-                      <td className="px-4 py-3 text-sm font-semibold text-black/70">
-                        <span className="block max-w-48 truncate">
-                          {record.location || "-"}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-sm font-semibold text-black/70">
-                        <span className="block max-w-56 truncate">
-                          {record.reason || "-"}
-                        </span>
-                      </td>
-                      <td
-                        className={`px-4 py-3 text-right text-sm font-extrabold ${
-                          Number(record.balance) >= 0
-                            ? "text-[#217a4b]"
-                            : "text-[#b42318]"
-                        }`}
-                      >
-                        {formatCurrencyGbp(Math.abs(record.balance))}
-                      </td>
-                      <td className="px-4 py-3 text-sm font-semibold text-black/70">
-                        <button
-                          className={`${secondaryButtonClass} !min-h-9 !px-3 !py-1.5`}
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            void handleDeleteRecord(record.id)
-                          }}
-                        >
-                          Delete
-                        </button>
-                      </td>
+                          <td className="truncate whitespace-nowrap px-2 py-3 text-xs font-bold text-[#55311c] sm:text-sm">
+                            <span className="block truncate">
+                              #{record.payment_number}
+                            </span>
+                          </td>
+                          <td className="overflow-hidden px-2 py-3 text-xs font-semibold text-[#55311c] sm:text-sm">
+                            <button
+                              className="inline-flex max-w-full items-center truncate whitespace-nowrap rounded px-1 py-1 font-extrabold transition-colors hover:bg-[#faf8f6]"
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                handleOpenInvoiceEditor(record)
+                              }}
+                            >
+                              {record.has_invoice ? "✏️ View" : "+ Add"}
+                            </button>
+                          </td>
+                          <td className="truncate whitespace-nowrap px-2 py-3 text-xs font-semibold text-black/65 sm:text-sm">
+                            <span className="block truncate">
+                              {formatCashFlowDate(record.record_date)}
+                            </span>
+                          </td>
+                          <td
+                            className={`truncate whitespace-nowrap px-2 py-3 text-right text-xs font-extrabold tabular-nums sm:text-sm ${
+                              Number(record.amount) >= 0
+                                ? "text-[#217a4b]"
+                                : "text-[#b42318]"
+                            }`}
+                          >
+                            <span
+                              className="block truncate"
+                              title={formatCurrencyGbp(record.amount)}
+                            >
+                              {formatCurrencyGbp(record.amount)}
+                            </span>
+                          </td>
+                          <td className="overflow-hidden px-2 py-3 text-xs font-semibold text-black/70 sm:text-sm">
+                            <span className="block truncate" title={record.supplier || undefined}>
+                              {record.supplier || "-"}
+                            </span>
+                          </td>
+                          <td className="overflow-hidden px-2 py-3 text-xs font-semibold text-black/70 sm:text-sm">
+                            <span
+                              className="block truncate"
+                              title={record.description || undefined}
+                            >
+                              {record.description || "-"}
+                            </span>
+                          </td>
+                          <td className="overflow-hidden px-2 py-3 text-xs font-semibold text-black/70 sm:text-sm">
+                            <span className="block truncate" title={record.location || undefined}>
+                              {record.location || "-"}
+                            </span>
+                          </td>
+                          <td className="overflow-hidden px-2 py-3 text-xs font-semibold text-black/70 sm:text-sm">
+                            <span className="block truncate" title={record.reason || undefined}>
+                              {record.reason || "-"}
+                            </span>
+                          </td>
+                          <td
+                            className={`truncate whitespace-nowrap px-2 py-3 text-right text-xs font-extrabold tabular-nums sm:text-sm ${
+                              Number(record.balance) >= 0
+                                ? "text-[#217a4b]"
+                                : "text-[#b42318]"
+                            }`}
+                          >
+                            <span
+                              className="block truncate"
+                              title={formatCurrencyGbp(Math.abs(record.balance))}
+                            >
+                              {formatCurrencyGbp(Math.abs(record.balance))}
+                            </span>
+                          </td>
                     </tr>
                   ))}
                   <tr className="bg-[#faf8f6]/70">
-                    <td className="px-4 py-3" colSpan={7} />
+                    <td className="px-4 py-3" colSpan={2} />
+                    <td className="bg-[#faf8f6] px-4 py-3 text-right text-sm font-extrabold uppercase tracking-[0.08em] text-[#55311c]">
+                      Total
+                    </td>
+                    <td
+                      className={`px-4 py-3 text-right text-sm font-extrabold ${
+                        recordsTotalValue >= 0
+                          ? "text-[#217a4b]"
+                          : "text-[#b42318]"
+                      }`}
+                    >
+                      <span
+                        className="block truncate"
+                        title={formatCurrencyGbp(recordsTotalValue)}
+                      >
+                        {formatCurrencyGbp(recordsTotalValue)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3" colSpan={3} />
                     <td className="bg-[#faf8f6] px-4 py-3 text-sm font-extrabold uppercase tracking-[0.08em] text-[#55311c]">
                       Total:
                     </td>
@@ -4018,9 +4223,10 @@ function CashFlowContent() {
                           : "text-[#b42318]"
                       }`}
                     >
-                      {currentBalance}
+                      <span className="block truncate" title={currentBalance}>
+                        {currentBalance}
+                      </span>
                     </td>
-                    <td className="bg-[#faf8f6] px-4 py-3" />
                   </tr>
                 </>
               ) : (
@@ -4034,8 +4240,7 @@ function CashFlowContent() {
                 </tr>
               )}
             </tbody>
-          </table>
-        </div>
+        </table>
       </section>
 
       {isShareOpen ? (
@@ -4579,11 +4784,19 @@ function CashFlowContent() {
 
       {textEditor ? (
         <div className="fixed inset-0 z-40 grid place-items-center bg-black/50 p-4">
-          <article className="w-full max-w-md rounded-2xl border border-[#e5e0dc] bg-white shadow-2xl">
+          <article
+            aria-labelledby="cash-flow-record-editor-title"
+            aria-modal="true"
+            className="max-h-[calc(100vh-2rem)] w-full max-w-6xl overflow-hidden rounded-2xl border border-[#e5e0dc] bg-white shadow-2xl"
+            role="dialog"
+          >
             <header className="flex items-center justify-between border-b border-[#e5e0dc] px-6 py-4">
               <div>
                 <p className={labelClass}>{title}</p>
-                <h2 className="text-lg font-extrabold text-[#55311c]">
+                <h2
+                  className="text-lg font-extrabold text-[#55311c]"
+                  id="cash-flow-record-editor-title"
+                >
                   Edit record
                 </h2>
               </div>
@@ -4597,132 +4810,227 @@ function CashFlowContent() {
               </button>
             </header>
 
-            <form className="grid gap-4 p-6" onSubmit={handleSaveText}>
-              <label className="grid gap-2">
-                <span className={labelClass}>Value</span>
-                <input
-                  className={inputClass}
-                  step="0.01"
-                  type="number"
-                  value={textEditor.value}
-                  onChange={(event) =>
-                    setTextEditor((current) =>
-                      current
-                        ? {
-                            ...current,
-                            value: event.target.value,
-                            error: null,
-                          }
-                        : current,
-                    )
-                  }
-                  required
-                />
-              </label>
+            <form
+              className="grid max-h-[calc(100vh-8.5rem)] overflow-y-auto lg:grid-cols-2 lg:overflow-hidden"
+              onSubmit={handleSaveText}
+            >
+              <section className="grid content-start gap-4 p-6 lg:overflow-y-auto lg:border-r lg:border-[#e5e0dc]">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="grid gap-2">
+                    <span className={labelClass}>Payment number</span>
+                    <input
+                      className={inputClass}
+                      readOnly
+                      value={textEditor.record.payment_number}
+                    />
+                  </label>
+                  <label className="grid gap-2">
+                    <span className={labelClass}>Date</span>
+                    <input
+                      className={inputClass}
+                      type="date"
+                      value={textEditor.date}
+                      onChange={(event) =>
+                        setTextEditor((current) =>
+                          current
+                            ? {
+                                ...current,
+                                date: event.target.value,
+                                error: null,
+                              }
+                            : current,
+                        )
+                      }
+                      required
+                    />
+                  </label>
+                </div>
 
-              <label className="grid gap-2">
-                <span className={labelClass}>Supplier</span>
-                <input
-                  className={inputClass}
-                  maxLength={255}
-                  value={textEditor.supplier}
-                  onChange={(event) =>
-                    setTextEditor((current) =>
-                      current
-                        ? {
-                            ...current,
-                            supplier: event.target.value,
-                            error: null,
-                          }
-                        : current,
-                    )
-                  }
-                />
-              </label>
+                <label className="grid gap-2">
+                  <span className={labelClass}>Value</span>
+                  <input
+                    className={inputClass}
+                    step="0.01"
+                    type="number"
+                    value={textEditor.value}
+                    onChange={(event) =>
+                      setTextEditor((current) =>
+                        current
+                          ? {
+                              ...current,
+                              value: event.target.value,
+                              error: null,
+                            }
+                          : current,
+                      )
+                    }
+                    required
+                  />
+                </label>
 
-              <label className="grid gap-2">
-                <span className={labelClass}>Comments</span>
-                <textarea
-                  className="min-h-28 w-full resize-y rounded-lg border border-[#d9d0ca] bg-white px-3.5 py-3 text-sm font-semibold text-[#55311c] outline-none transition focus:ring-2 focus:ring-[#8c7569]"
-                  maxLength={255}
-                  value={textEditor.description}
-                  onChange={(event) =>
-                    setTextEditor((current) =>
-                      current
-                        ? {
-                            ...current,
-                            description: event.target.value,
-                            error: null,
-                          }
-                        : current,
-                    )
-                  }
-                />
-              </label>
+                <label className="grid gap-2">
+                  <span className={labelClass}>Comments</span>
+                  <textarea
+                    className="min-h-28 w-full resize-y rounded-lg border border-[#d9d0ca] bg-white px-3.5 py-3 text-sm font-semibold text-[#55311c] outline-none transition focus:ring-2 focus:ring-[#8c7569]"
+                    maxLength={500}
+                    value={textEditor.description}
+                    onChange={(event) =>
+                      setTextEditor((current) =>
+                        current
+                          ? {
+                              ...current,
+                              description: event.target.value,
+                              error: null,
+                            }
+                          : current,
+                      )
+                    }
+                  />
+                </label>
 
-              <label className="grid gap-2">
-                <span className={labelClass}>Location</span>
-                <input
-                  className={inputClass}
-                  maxLength={255}
-                  value={textEditor.location}
-                  onChange={(event) =>
-                    setTextEditor((current) =>
-                      current
-                        ? {
-                            ...current,
-                            location: event.target.value,
-                            error: null,
-                          }
-                        : current,
-                    )
-                  }
-                />
-              </label>
+                <label className="grid gap-2">
+                  <span className={labelClass}>Supplier</span>
+                  <input
+                    className={inputClass}
+                    maxLength={255}
+                    value={textEditor.supplier}
+                    onChange={(event) =>
+                      setTextEditor((current) =>
+                        current
+                          ? {
+                              ...current,
+                              supplier: event.target.value,
+                              error: null,
+                            }
+                          : current,
+                      )
+                    }
+                  />
+                </label>
 
-              <label className="grid gap-2">
-                <span className={labelClass}>Reason</span>
-                <textarea
-                  className="min-h-20 w-full resize-y rounded-lg border border-[#d9d0ca] bg-white px-3.5 py-3 text-sm font-semibold text-[#55311c] outline-none transition focus:ring-2 focus:ring-[#8c7569]"
-                  maxLength={500}
-                  value={textEditor.reason}
-                  onChange={(event) =>
-                    setTextEditor((current) =>
-                      current
-                        ? {
-                            ...current,
-                            reason: event.target.value,
-                            error: null,
-                          }
-                        : current,
-                    )
-                  }
-                />
-              </label>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="grid gap-2">
+                    <span className={labelClass}>Location</span>
+                    <input
+                      className={inputClass}
+                      maxLength={255}
+                      value={textEditor.location}
+                      onChange={(event) =>
+                        setTextEditor((current) =>
+                          current
+                            ? {
+                                ...current,
+                                location: event.target.value,
+                                error: null,
+                              }
+                            : current,
+                        )
+                      }
+                    />
+                  </label>
 
-              {textEditor.error ? (
-                <p className="text-sm font-bold text-[#b42318]">
-                  {textEditor.error}
-                </p>
-              ) : null}
+                  <label className="grid gap-2">
+                    <span className={labelClass}>Reason</span>
+                    <textarea
+                      className="min-h-11 w-full resize-y rounded-lg border border-[#d9d0ca] bg-white px-3.5 py-3 text-sm font-semibold text-[#55311c] outline-none transition focus:ring-2 focus:ring-[#8c7569]"
+                      maxLength={500}
+                      value={textEditor.reason}
+                      onChange={(event) =>
+                        setTextEditor((current) =>
+                          current
+                            ? {
+                                ...current,
+                                reason: event.target.value,
+                                error: null,
+                              }
+                            : current,
+                        )
+                      }
+                    />
+                  </label>
+                </div>
 
-              <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-                <button
-                  className={secondaryButtonClass}
-                  type="button"
-                  onClick={() => setTextEditor(null)}
-                  disabled={savingText}
-                >
-                  Cancel
-                </button>
-                <button
-                  className={primaryButtonClass}
-                  type="submit"
-                  disabled={savingText}
-                >
-                  {savingText ? "Saving..." : "Save"}
-                </button>
-              </div>
+                {textEditor.error ? (
+                  <p className="text-sm font-bold text-[#b42318]">
+                    {textEditor.error}
+                  </p>
+                ) : null}
+
+                <footer className="mt-auto flex flex-wrap items-center gap-3 border-t border-[#e5e0dc] pt-4">
+                  <button
+                    aria-label="Delete record"
+                    className="grid h-11 w-11 place-items-center rounded-lg border border-[#d9d0ca] bg-white text-[#b42318] transition hover:bg-[#fff3ee] disabled:cursor-not-allowed disabled:opacity-60"
+                    type="button"
+                    onClick={() => void handleDeleteRecord(textEditor.record.id)}
+                    disabled={savingText}
+                  >
+                    <Trash2 size={17} />
+                  </button>
+                  <div className="ml-auto flex flex-wrap justify-end gap-3">
+                    <button
+                      className={secondaryButtonClass}
+                      type="button"
+                      onClick={() => setTextEditor(null)}
+                      disabled={savingText}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      className={primaryButtonClass}
+                      type="submit"
+                      disabled={savingText}
+                    >
+                      {savingText ? "Saving..." : "Save changes"}
+                    </button>
+                  </div>
+                </footer>
+              </section>
+
+              <section className="flex min-h-[420px] flex-col bg-[#faf8f6]">
+                <header className="flex items-start justify-between gap-4 border-b border-[#e5e0dc] px-6 py-4">
+                  <div className="min-w-0">
+                    <p className={labelClass}>Invoice media</p>
+                    <p className="truncate text-sm font-extrabold text-[#55311c]">
+                      {textEditor.record.invoice_media_name || "No invoice media"}
+                    </p>
+                  </div>
+                  {textEditor.record.invoice_media_data ? (
+                    <a
+                      aria-label="Download invoice media"
+                      className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-[#d9d0ca] bg-white text-[#55311c] transition hover:bg-[#f5f1ee]"
+                      download={
+                        textEditor.record.invoice_media_name || "invoice-media"
+                      }
+                      href={textEditor.record.invoice_media_data}
+                    >
+                      <Download size={17} />
+                    </a>
+                  ) : null}
+                </header>
+                <div className="grid min-h-0 flex-1 place-items-center p-5">
+                  <div className="grid h-full min-h-[330px] w-full place-items-center overflow-hidden rounded-xl border border-dashed border-[#d9d0ca] bg-white p-4">
+                    {textEditor.record.invoice_media_data ? (
+                      isImageDataUrl(textEditor.record.invoice_media_data) ? (
+                        <img
+                          alt="Invoice media preview"
+                          className="max-h-[46vh] max-w-full rounded-lg object-contain"
+                          src={textEditor.record.invoice_media_data}
+                        />
+                      ) : (
+                        <iframe
+                          className="h-[46vh] min-h-[300px] w-full rounded-lg border border-[#e5e0dc] bg-white"
+                          src={textEditor.record.invoice_media_data}
+                          title="Invoice media preview"
+                        />
+                      )
+                    ) : (
+                      <p className="max-w-xs text-center text-sm font-semibold text-black/55">
+                        No invoice media is attached to this record.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </section>
             </form>
           </article>
         </div>
@@ -9206,8 +9514,10 @@ function TwilioContent() {
   )
   const residentsForActiveChannel = useMemo(
     () =>
-      Residents.filter((morador) =>
-        isTwilioBuildingVisible(morador.building_nome, sendChannel),
+      Residents.filter(
+        (morador) =>
+          isTwilioBuildingVisible(morador.building_nome, sendChannel) &&
+          (sendChannel !== "email" || morador.receives_twilio_email),
       ),
     [Residents, sendChannel],
   )
@@ -9285,7 +9595,9 @@ function TwilioContent() {
       const includedByResident = residentIdSet.has(id)
       const includedByBuilding =
         selectedBuildingNames.has(morador.building_nome) &&
-        (sendChannel === "email" || morador.receives_twilio_sms)
+        (sendChannel === "email"
+          ? morador.receives_twilio_email
+          : morador.receives_twilio_sms)
 
       if (includedByResident || includedByBuilding) {
         selectedMap.set(id, morador)
@@ -22591,7 +22903,13 @@ function ResidentsContent() {
       buildings
         .filter((building) => {
           const normalizedName = building.nome.trim().toLowerCase()
-          return !["office", "cleaner", "caretaker"].includes(normalizedName)
+          return ![
+            "office",
+            "cleaner",
+            "caretaker",
+            "estate ohp",
+            "state ohp",
+          ].includes(normalizedName)
         })
         .sort(compareReadingBuildings),
     [buildings],
@@ -22784,6 +23102,27 @@ function ResidentsContent() {
     },
   })
 
+  const updateTwilioEmailMutation = useMutation({
+    mutationFn: async ({ id, enabled }: { id: EntityId; enabled: boolean }) => {
+      const response = await apiCall(`/api/v1/moradores/${id}`, {
+        method: "PATCH",
+        body: { receives_twilio_email: enabled },
+      })
+      return response
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["Residents"] })
+      showSuccessToast("Email preference updated successfully!")
+    },
+    onError: (error) => {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Error updating email preference"
+      showErrorToast(message)
+    },
+  })
+
   const handleCheckboxChange = (
     id: EntityId,
     currentTypes: number,
@@ -22817,6 +23156,10 @@ function ResidentsContent() {
 
   const handleTwilioSmsToggle = (id: EntityId, enabled: boolean) => {
     updateTwilioSmsMutation.mutate({ id, enabled })
+  }
+
+  const handleTwilioEmailToggle = (id: EntityId, enabled: boolean) => {
+    updateTwilioEmailMutation.mutate({ id, enabled })
   }
 
   const renderReadingSmsToggle = (morador?: Morador) => {
@@ -22861,6 +23204,29 @@ function ResidentsContent() {
           className="h-4 w-4 cursor-pointer"
         />
         Receive Twilio SMS
+      </label>
+    )
+  }
+
+  const renderTwilioEmailToggle = (morador?: Morador) => {
+    if (!morador)
+      return <span className="text-xs text-[rgba(85,49,28,0.55)]">-</span>
+    return (
+      <label
+        className="mt-2 inline-flex items-center gap-2 text-xs font-semibold text-[#55311c]"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <input
+          type="checkbox"
+          checked={morador.receives_twilio_email}
+          onClick={(event) => event.stopPropagation()}
+          onChange={(event) =>
+            handleTwilioEmailToggle(morador.id, event.target.checked)
+          }
+          disabled={updateTwilioEmailMutation.isPending}
+          className="h-4 w-4 cursor-pointer"
+        />
+        Receive Email
       </label>
     )
   }
@@ -23194,6 +23560,7 @@ function ResidentsContent() {
                               <span>{row.owner_1?.mobile || "-"}</span>
                               {renderReadingSmsToggle(row.owner_1)}
                               {renderTwilioSmsToggle(row.owner_1)}
+                              {renderTwilioEmailToggle(row.owner_1)}
                             </div>
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
@@ -23207,6 +23574,7 @@ function ResidentsContent() {
                               <span>{row.owner_2?.mobile || "-"}</span>
                               {renderReadingSmsToggle(row.owner_2)}
                               {renderTwilioSmsToggle(row.owner_2)}
+                              {renderTwilioEmailToggle(row.owner_2)}
                             </div>
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
@@ -23217,6 +23585,7 @@ function ResidentsContent() {
                               <span>{row.tenant?.mobile || "-"}</span>
                               {renderReadingSmsToggle(row.tenant)}
                               {renderTwilioSmsToggle(row.tenant)}
+                              {renderTwilioEmailToggle(row.tenant)}
                             </div>
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
@@ -23227,6 +23596,7 @@ function ResidentsContent() {
                               <span>{row.agent?.mobile || "-"}</span>
                               {renderReadingSmsToggle(row.agent)}
                               {renderTwilioSmsToggle(row.agent)}
+                              {renderTwilioEmailToggle(row.agent)}
                             </div>
                           </td>
                         </tr>
@@ -23251,6 +23621,9 @@ function ResidentsContent() {
                         </th>
                         <th className="border border-gray-400 px-4 py-3 text-center font-['Nunito',sans-serif] font-semibold text-white">
                           Receive readings
+                        </th>
+                        <th className="border border-gray-400 px-4 py-3 text-center font-['Nunito',sans-serif] font-semibold text-white">
+                          Receive Email
                         </th>
                         <th className="border border-gray-400 px-4 py-3 text-center font-['Nunito',sans-serif] font-semibold text-white">
                           Receive Twilio SMS
@@ -23310,6 +23683,21 @@ function ResidentsContent() {
                                   )
                                 }
                                 disabled={updateReadingSmsMutation.isPending}
+                                className="h-4 w-4 cursor-pointer"
+                              />
+                            </td>
+                            <td className="border border-gray-400 px-4 py-3 text-center">
+                              <input
+                                type="checkbox"
+                                checked={morador.receives_twilio_email}
+                                onClick={(event) => event.stopPropagation()}
+                                onChange={(event) =>
+                                  handleTwilioEmailToggle(
+                                    morador.id,
+                                    event.target.checked,
+                                  )
+                                }
+                                disabled={updateTwilioEmailMutation.isPending}
                                 className="h-4 w-4 cursor-pointer"
                               />
                             </td>
@@ -23472,6 +23860,7 @@ function getDefaultResidentFormData() {
     cargo: 0,
     receives_flat_reading_sms: false,
     receives_twilio_sms: false,
+    receives_twilio_email: false,
     car1: "",
     car2: "",
     flat_id: "",
@@ -23605,6 +23994,7 @@ function AddResidentForm({
             cargo: morador.cargo,
             receives_flat_reading_sms: morador.receives_flat_reading_sms,
             receives_twilio_sms: morador.receives_twilio_sms,
+            receives_twilio_email: morador.receives_twilio_email,
             car1: morador.car1 || "",
             car2: morador.car2 || "",
             flat_id: String(morador.flat_id),
@@ -23700,6 +24090,7 @@ function AddResidentForm({
         mobile: formData.mobile || "",
         receives_flat_reading_sms: formData.receives_flat_reading_sms,
         receives_twilio_sms: formData.receives_twilio_sms,
+        receives_twilio_email: formData.receives_twilio_email,
         ...(!activeEditingId ? { cargo: formData.cargo } : {}),
         ...(shouldShowCarFields
           ? {
@@ -23903,6 +24294,23 @@ function AddResidentForm({
                 htmlFor="resident-receives-flat-reading-sms"
               >
                 Receive flat reading SMS
+              </label>
+            </div>
+
+            <div className="flex items-center gap-3 rounded-lg border-2 border-[#ddd] bg-[#faf8f6] px-4 py-3 md:col-span-2">
+              <input
+                type="checkbox"
+                id="resident-receives-twilio-email"
+                name="receives_twilio_email"
+                checked={formData.receives_twilio_email}
+                onChange={handleInputChange}
+                className="h-4 w-4 cursor-pointer"
+              />
+              <label
+                className="font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                htmlFor="resident-receives-twilio-email"
+              >
+                Receive Email
               </label>
             </div>
 

@@ -178,6 +178,7 @@ class Morador(SQLModel, table=True):
     mobile: str = Field(default="", max_length=20)
     receives_flat_reading_sms: bool = Field(default=False)
     receives_twilio_sms: bool = Field(default=False)
+    receives_twilio_email: bool = Field(default=False)
     flat_id: uuid.UUID = Field(
         foreign_key="flat.id", nullable=False, ondelete="CASCADE"
     )
@@ -905,6 +906,7 @@ class MoradorBase(SQLModel):
     mobile: str = Field(default="", max_length=20)  # Changed to str for phone numbers
     receives_flat_reading_sms: bool = Field(default=False)
     receives_twilio_sms: bool = Field(default=False)
+    receives_twilio_email: bool = Field(default=False)
     flat_id: uuid.UUID
 
 
@@ -923,6 +925,7 @@ class MoradorUpdate(SQLModel):
     mobile: str | None = Field(default=None, max_length=20)
     receives_flat_reading_sms: bool | None = None
     receives_twilio_sms: bool | None = None
+    receives_twilio_email: bool | None = None
     car1: str | None = Field(default=None, max_length=50)
     car2: str | None = Field(default=None, max_length=50)
     car3: str | None = Field(default=None, max_length=50)

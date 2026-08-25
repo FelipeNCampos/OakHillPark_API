@@ -3,8 +3,7 @@ from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlmodel import delete
-from sqlmodel import Session
+from sqlmodel import Session, delete, select
 
 from app import crud
 from app.core.config import settings
@@ -762,6 +761,41 @@ def test_manual_caretaker_time_in_allows_a_current_open_session(
 
     assert response.status_code == 201
     assert response.json()["operacao"] == 0
+
+
+def test_create_caretaker_record_completes_an_existing_unmatched_time_out(
+    client: TestClient,
+    caretaker_sms_setup: Funcionario,
+    db: Session,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    db.add(
+        WorkTimeSession(
+            funcionario_id=caretaker_sms_setup.id,
+            operacao=1,
+            data=datetime(2026, 8, 21, 9, 0, tzinfo=timezone.utc),
+        )
+    )
+    db.commit()
+
+    response = client.post(
+        f"{settings.API_V1_STR}/acess/caretaker/work-time/record",
+        headers=superuser_token_headers,
+        json={
+            "condominio_id": str(caretaker_sms_setup.condominio_id),
+            "time_in": "2026-08-21T04:00:00Z",
+            "time_out": "2026-08-21T09:00:00Z",
+        },
+    )
+
+    assert response.status_code == 201
+    records = db.exec(
+        select(WorkTimeSession).where(
+            WorkTimeSession.funcionario_id == caretaker_sms_setup.id
+        )
+    ).all()
+    assert len(records) == 2
+    assert sorted(record.operacao for record in records) == [0, 1]
 
 
 def test_update_caretaker_work_time_record(

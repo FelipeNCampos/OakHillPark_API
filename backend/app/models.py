@@ -1100,6 +1100,12 @@ class WorkTimeSessionCreate(WorkTimeSessionBase):
     condominio_id: uuid.UUID
 
 
+class WorkTimeRecordCreate(SQLModel):
+    condominio_id: uuid.UUID
+    time_in: datetime
+    time_out: datetime
+
+
 class WorkTimeSessionUpdate(SQLModel):
     data: datetime | None = None
 

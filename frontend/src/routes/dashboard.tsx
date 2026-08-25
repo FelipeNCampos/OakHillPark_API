@@ -12511,20 +12511,12 @@ function CaretakerRecordCreateDialog({
         throw new Error("Time OUT must be after Time IN")
       }
 
-      await apiCall("/api/v1/acess/caretaker/work-time", {
+      await apiCall("/api/v1/acess/caretaker/work-time/record", {
         method: "POST",
         body: {
           condominio_id: user.condominio_id,
-          operacao: 0,
-          data: inAtIso,
-        },
-      })
-      await apiCall("/api/v1/acess/caretaker/work-time", {
-        method: "POST",
-        body: {
-          condominio_id: user.condominio_id,
-          operacao: 1,
-          data: outAtIso,
+          time_in: inAtIso,
+          time_out: outAtIso,
         },
       })
     },

@@ -32,6 +32,7 @@ from app.models import (
     WorkTimeSession,
     WorkTimeSessionCreate,
     WorkTimeSessionPublic,
+    WorkTimeRecordCreate,
     WorkTimeSessionUpdate,
     WorkTimeSessionsPublic,
 )
@@ -111,6 +112,34 @@ def has_open_work_time_session_at(
         .limit(1)
     ).first()
     return bool(last_session_before_time and last_session_before_time.operacao == 0)
+
+
+def get_unmatched_work_time_out_at(
+    session: SessionDep,
+    funcionario_id: uuid.UUID,
+    session_time: datetime.datetime,
+) -> WorkTimeSession | None:
+    records = session.exec(
+        select(WorkTimeSession)
+        .where(
+            WorkTimeSession.funcionario_id == funcionario_id,
+            WorkTimeSession.data <= session_time,
+        )
+        .order_by(WorkTimeSession.data.asc(), WorkTimeSession.operacao.asc())
+    ).all()
+    open_record: WorkTimeSession | None = None
+
+    for record in records:
+        if record.operacao == 0:
+            if open_record is None:
+                open_record = record
+        elif record.operacao == 1:
+            if open_record:
+                open_record = None
+            elif record.data == session_time:
+                return record
+
+    return None
 
 
 def _has_work_time_operation_for_day(
@@ -582,6 +611,63 @@ def create_caretaker_work_time(
         payload=payload,
         allow_open_time_in=False,
     )
+
+
+@router.post(
+    "/caretaker/work-time/record",
+    response_model=WorkTimeSessionsPublic,
+    status_code=201,
+    dependencies=[Depends(require_cargo(2))],
+)
+def create_caretaker_work_time_record(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    payload: WorkTimeRecordCreate,
+) -> Any:
+    if not current_user.is_superuser and current_user.condominio_id != payload.condominio_id:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    if payload.time_out <= payload.time_in:
+        raise HTTPException(status_code=422, detail="Time OUT must be after Time IN")
+
+    caretaker = get_default_funcionario(session, 1, payload.condominio_id)
+    if not caretaker:
+        raise HTTPException(status_code=404, detail="Default caretaker not found")
+
+    existing_out = get_unmatched_work_time_out_at(
+        session,
+        caretaker.id,
+        payload.time_out,
+    )
+    in_record = _create_caretaker_work_time(
+        session=session,
+        payload=WorkTimeSessionCreate(
+            condominio_id=payload.condominio_id,
+            operacao=0,
+            data=payload.time_in,
+        ),
+        allow_open_time_in=True,
+    )
+    if existing_out:
+        out_record = WorkTimeSessionPublic(
+            id=existing_out.id,
+            status=existing_out.status,
+            data=existing_out.data,
+            operacao=existing_out.operacao,
+            funcionario_id=existing_out.funcionario_id,
+        )
+    else:
+        out_record = _create_caretaker_work_time(
+            session=session,
+            payload=WorkTimeSessionCreate(
+                condominio_id=payload.condominio_id,
+                operacao=1,
+                data=payload.time_out,
+            ),
+            allow_open_time_in=False,
+        )
+
+    return WorkTimeSessionsPublic(data=[in_record, out_record], count=2)
 
 
 @router.post(

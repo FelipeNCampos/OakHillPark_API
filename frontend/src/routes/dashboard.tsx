@@ -19852,6 +19852,8 @@ function CaretakerSummary({
   >(null)
   const [editingCaretakerRecord, setEditingCaretakerRecord] =
     useState<CaretakerRecordEditState | null>(null)
+  const [caretakerRecordActions, setCaretakerRecordActions] =
+    useState<CaretakerRecordEditState | null>(null)
   const [editedCaretakerTimeValue, setEditedCaretakerTimeValue] = useState("")
   const [editedCaretakerInTimeValue, setEditedCaretakerInTimeValue] =
     useState("")
@@ -20906,6 +20908,48 @@ function CaretakerSummary({
     }
   }
 
+  const createCaretakerRecordEditState = (
+    recordId: EntityId | null,
+    isoValue: string | null,
+    label: "Time IN" | "Time OUT",
+    recordType: "work-time" | "bins",
+    rowContext?: {
+      rowKey: string
+      buildingLabel: string
+      dateValue: string | null
+      inRecordId: EntityId | null
+      inValue: string | null
+      outRecordId: EntityId | null
+      outValue: string | null
+    },
+  ): CaretakerRecordEditState | null => {
+    if (!recordId || !isoValue) return null
+    return {
+      recordId,
+      originalIso: isoValue,
+      label,
+      recordType,
+      rowKey: rowContext?.rowKey,
+      buildingLabel: rowContext?.buildingLabel,
+      dateValue: rowContext?.dateValue,
+      inRecordId: rowContext?.inRecordId,
+      inOriginalIso: rowContext?.inValue,
+      outRecordId: rowContext?.outRecordId,
+      outOriginalIso: rowContext?.outValue,
+    }
+  }
+
+  const openCaretakerRecordEditor = (
+    record: CaretakerRecordEditState,
+    confirmDelete = false,
+  ) => {
+    setEditingCaretakerRecord(record)
+    setEditedCaretakerTimeValue(toTimeInputValue(record.originalIso))
+    setEditedCaretakerInTimeValue(toTimeInputValue(record.inOriginalIso))
+    setEditedCaretakerOutTimeValue(toTimeInputValue(record.outOriginalIso))
+    setIsConfirmingCaretakerRecordDelete(confirmDelete)
+  }
+
   const handleOpenCaretakerRecordEdit = (
     recordId: EntityId | null,
     isoValue: string | null,
@@ -20922,24 +20966,15 @@ function CaretakerSummary({
     },
     confirmDelete = false,
   ) => {
-    if (!recordId || !isoValue) return
-    setEditingCaretakerRecord({
+    const record = createCaretakerRecordEditState(
       recordId,
-      originalIso: isoValue,
+      isoValue,
       label,
       recordType,
-      rowKey: rowContext?.rowKey,
-      buildingLabel: rowContext?.buildingLabel,
-      dateValue: rowContext?.dateValue,
-      inRecordId: rowContext?.inRecordId,
-      inOriginalIso: rowContext?.inValue,
-      outRecordId: rowContext?.outRecordId,
-      outOriginalIso: rowContext?.outValue,
-    })
-    setEditedCaretakerTimeValue(toTimeInputValue(isoValue))
-    setEditedCaretakerInTimeValue(toTimeInputValue(rowContext?.inValue))
-    setEditedCaretakerOutTimeValue(toTimeInputValue(rowContext?.outValue))
-    setIsConfirmingCaretakerRecordDelete(confirmDelete)
+      rowContext,
+    )
+    if (!record) return
+    openCaretakerRecordEditor(record, confirmDelete)
   }
 
   const handleCaretakerEditCellKeyDown = (
@@ -21871,9 +21906,6 @@ function CaretakerSummary({
               <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700">
                 Used
               </th>
-              <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700">
-                Actions
-              </th>
             </tr>
           </thead>
           <tbody>
@@ -21882,7 +21914,7 @@ function CaretakerSummary({
               <tr>
                 <td
                   className="border border-gray-400 px-3 py-3 text-center text-sm text-gray-600"
-                  colSpan={7}
+                  colSpan={6}
                 >
                   Loading...
                 </td>
@@ -21894,7 +21926,7 @@ function CaretakerSummary({
                 <tr>
                   <td
                     className="border border-gray-400 px-3 py-3 text-center text-sm text-gray-600"
-                  colSpan={7}
+                  colSpan={6}
                   >
                     No records found.
                   </td>
@@ -21937,85 +21969,43 @@ function CaretakerSummary({
                 (canEditIn || canEditOut)
               const canManageWorkTimeRow =
                 row.kind === "work-time" && (canEditIn || canEditOut)
-              const openWorkTimeRowEdit = () => {
-                if (!canManageWorkTimeRow) return
-                if (row.inRecordId && row.inValue) {
-                  handleOpenCaretakerRecordEdit(
-                    row.inRecordId,
-                    row.inValue,
-                    "Time IN",
-                    row.kind,
-                    rowEditContext,
-                  )
-                  return
-                }
-                handleOpenCaretakerRecordEdit(
-                  row.outRecordId,
-                  row.outValue,
-                  "Time OUT",
-                  row.kind,
-                  rowEditContext,
-                )
-              }
-              const openWorkTimeRowDelete = () => {
-                if (!canManageWorkTimeRow) return
-                if (row.inRecordId && row.inValue) {
-                  handleOpenCaretakerRecordEdit(
-                    row.inRecordId,
-                    row.inValue,
-                    "Time IN",
-                    row.kind,
-                    rowEditContext,
-                    true,
-                  )
-                  return
-                }
-                handleOpenCaretakerRecordEdit(
-                  row.outRecordId,
-                  row.outValue,
-                  "Time OUT",
-                  row.kind,
-                  rowEditContext,
-                  true,
-                )
-              }
-              const openBinsRowEdit = () => {
-                if (!canEditBinsRow) return
-                if (row.inRecordId && row.inValue) {
-                  handleOpenCaretakerRecordEdit(
-                    row.inRecordId,
-                    row.inValue,
-                    "Time IN",
-                    row.kind,
-                    rowEditContext,
-                  )
-                  return
-                }
-                handleOpenCaretakerRecordEdit(
-                  row.outRecordId,
-                  row.outValue,
-                  "Time OUT",
-                  row.kind,
-                  rowEditContext,
-                )
+              const canManageCaretakerRow =
+                canEditBinsRow || canManageWorkTimeRow
+              const rowActionRecord = createCaretakerRecordEditState(
+                row.inRecordId || row.outRecordId,
+                row.inValue || row.outValue,
+                row.inRecordId && row.inValue ? "Time IN" : "Time OUT",
+                row.kind,
+                rowEditContext,
+              )
+              const openCaretakerRowActions = () => {
+                if (!rowActionRecord) return
+                setCaretakerRecordActions(rowActionRecord)
               }
 
               return (
                 <tr
                   key={row.key}
                   className={`bg-white hover:bg-gray-50 ${
-                    canEditBinsRow ? "cursor-pointer" : ""
+                    canManageCaretakerRow ? "cursor-pointer" : ""
                   }`}
-                  onClick={canEditBinsRow ? openBinsRowEdit : undefined}
+                  onClick={
+                    canManageCaretakerRow ? openCaretakerRowActions : undefined
+                  }
                   onKeyDown={
-                    canEditBinsRow
+                    canManageCaretakerRow
                       ? (event) =>
-                          handleCaretakerEditCellKeyDown(event, openBinsRowEdit)
+                          handleCaretakerEditCellKeyDown(
+                            event,
+                            openCaretakerRowActions,
+                          )
                       : undefined
                   }
-                  role={canEditBinsRow ? "button" : undefined}
-                  tabIndex={canEditBinsRow ? 0 : undefined}
-                  title={canEditBinsRow ? "Edit bins record" : undefined}
+                  role={canManageCaretakerRow ? "button" : undefined}
+                  tabIndex={canManageCaretakerRow ? 0 : undefined}
+                  title={
+                    canManageCaretakerRow ? "Manage caretaker record" : undefined
+                  }
                 >
                   <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
                     {dateLabel}
@@ -22116,32 +22106,6 @@ function CaretakerSummary({
                   </td>
                   <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
                     {formatUsed(row.inValue, row.outValue)}
-                  </td>
-                  <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
-                    {canManageWorkTimeRow && (
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            openWorkTimeRowEdit()
-                          }}
-                          className="rounded border border-[#8c7569] px-2 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            openWorkTimeRowDelete()
-                          }}
-                          className="rounded border border-red-300 px-2 py-1 text-xs font-semibold text-red-700 transition-all duration-200 hover:bg-red-50"
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    )}
                   </td>
                 </tr>
               )
@@ -22712,6 +22676,55 @@ function CaretakerSummary({
             </div>
           </div>
         </div>
+      )}
+
+      {caretakerRecordActions && (
+        <Dialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setCaretakerRecordActions(null)
+          }}
+        >
+          <DialogContent className="border-[#d9d0ca] bg-white sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="text-[#55311c]">
+                Caretaker record actions
+              </DialogTitle>
+              <DialogDescription>
+                Choose what you want to do with this record.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <button
+                type="button"
+                onClick={() => setCaretakerRecordActions(null)}
+                className="rounded-lg border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  openCaretakerRecordEditor(caretakerRecordActions)
+                  setCaretakerRecordActions(null)
+                }}
+                className="rounded-lg border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+              >
+                Edit
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  openCaretakerRecordEditor(caretakerRecordActions, true)
+                  setCaretakerRecordActions(null)
+                }}
+                className="rounded-lg border border-red-300 px-4 py-2 text-sm font-semibold text-red-700 transition-all duration-200 hover:bg-red-50"
+              >
+                Delete
+              </button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
 
       {editingCaretakerRecord && (

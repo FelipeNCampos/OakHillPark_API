@@ -19794,21 +19794,6 @@ function CaretakerSummary({
       ),
     [caretakersData],
   )
-  const visibleStaff = useMemo(
-    () =>
-      (caretakersData?.data || [])
-        .filter((funcionario: Funcionario) => funcionario.cargo >= 0 && funcionario.cargo <= 2)
-        .map((funcionario: Funcionario) => ({
-          ...funcionario,
-          role:
-            funcionario.cargo === 0
-              ? "Cleaner"
-              : funcionario.cargo === 1
-                ? "Caretaker"
-                : "Contractor",
-        })),
-    [caretakersData],
-  )
   const workTimeRecords = workTimeRecordsRaw
   const binSessions = useMemo(() => {
     if (!activeCaretakerId) return binSessionsRaw

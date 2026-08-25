@@ -96,6 +96,23 @@ def get_last_work_time_session(
     ).first()
 
 
+def has_open_work_time_session_at(
+    session: SessionDep,
+    funcionario_id: uuid.UUID,
+    session_time: datetime.datetime,
+) -> bool:
+    last_session_before_time = session.exec(
+        select(WorkTimeSession)
+        .where(
+            WorkTimeSession.funcionario_id == funcionario_id,
+            WorkTimeSession.data < session_time,
+        )
+        .order_by(desc(col(WorkTimeSession.data)))
+        .limit(1)
+    ).first()
+    return bool(last_session_before_time and last_session_before_time.operacao == 0)
+
+
 def _has_work_time_operation_for_day(
     session: SessionDep,
     funcionario_id: uuid.UUID,
@@ -567,9 +584,13 @@ def create_caretaker_work_time(
     if payload.operacao not in {0, 1}:
         raise HTTPException(status_code=422, detail="Invalid operacao")
 
-    last_session = get_last_work_time_session(session, caretaker.id)
     session_time = payload.data if payload.data else datetime.datetime.now(datetime.timezone.utc)
     session_date = session_time.date()
+    has_open_session_at_time = has_open_work_time_session_at(
+        session,
+        caretaker.id,
+        session_time,
+    )
     should_send_caretaker_in_sms = (
         payload.operacao == 0
         and not _has_work_time_operation_for_day(
@@ -589,10 +610,10 @@ def create_caretaker_work_time(
         )
     )
 
-    if payload.operacao == 0 and last_session and last_session.operacao == 0:
+    if payload.operacao == 0 and has_open_session_at_time:
         raise HTTPException(status_code=400, detail="Caretaker already has an open work time session")
 
-    if payload.operacao == 1 and (last_session is None or last_session.operacao == 1):
+    if payload.operacao == 1 and not has_open_session_at_time:
         raise HTTPException(
             status_code=400,
             detail="Caretaker does not have an open work time session to close",

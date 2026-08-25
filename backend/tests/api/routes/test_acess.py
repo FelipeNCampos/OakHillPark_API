@@ -690,6 +690,44 @@ def test_create_caretaker_work_time_does_not_resend_out_same_day(
     sms_mock.assert_not_called()
 
 
+def test_create_caretaker_time_in_before_an_unmatched_previous_month_time_out(
+    client: TestClient,
+    caretaker_sms_setup: Funcionario,
+    db: Session,
+) -> None:
+    db.add_all(
+        [
+            WorkTimeSession(
+                funcionario_id=caretaker_sms_setup.id,
+                operacao=1,
+                data=datetime.datetime(2026, 7, 15, 17, 0, tzinfo=datetime.timezone.utc),
+            ),
+            WorkTimeSession(
+                funcionario_id=caretaker_sms_setup.id,
+                operacao=0,
+                data=datetime.datetime(2026, 8, 20, 8, 0, tzinfo=datetime.timezone.utc),
+            ),
+        ]
+    )
+    db.commit()
+
+    response = client.post(
+        f"{settings.API_V1_STR}/acess/caretaker/work-time",
+        json={
+            "condominio_id": str(caretaker_sms_setup.condominio_id),
+            "operacao": 0,
+            "data": "2026-07-15T08:00:00Z",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["operacao"] == 0
+    created_at = datetime.fromisoformat(response.json()["data"])
+    assert created_at.astimezone(timezone.utc) == datetime(
+        2026, 7, 15, 8, 0, tzinfo=timezone.utc
+    )
+
+
 def test_update_caretaker_work_time_record(
     client: TestClient,
     caretaker_sms_setup: Funcionario,

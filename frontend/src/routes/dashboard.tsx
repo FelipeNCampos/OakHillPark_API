@@ -21501,18 +21501,6 @@ function CaretakerSummary({
       {activeTab === "summary" ? (
         <>
           <div className="mb-6 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <h4 className="font-semibold text-[#55311c]">Staff visibility</h4>
-                <p className="text-sm text-[rgba(85,49,28,0.72)]">
-                  Workers available to this condominium. Use the identifier to
-                  confirm which worker created each event.
-                </p>
-              </div>
-              <span className="text-sm text-[rgba(85,49,28,0.72)]">
-                {workTimeRecordsRaw.length} work-time event(s) received
-              </span>
-            </div>
             <div className="mt-3 flex flex-wrap gap-2">
               {visibleStaff.map((staff) => (
                 <span

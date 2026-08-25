@@ -21501,6 +21501,9 @@ function CaretakerSummary({
       {activeTab === "summary" ? (
         <>
           <div className="mb-6 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
+            
+          </div>
+          <div className="mb-6 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
             <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-center">
               <div className="lg:pr-6">
                 <p className="text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]">

@@ -728,6 +728,42 @@ def test_create_caretaker_time_in_before_an_unmatched_previous_month_time_out(
     )
 
 
+def test_manual_caretaker_time_in_allows_a_current_open_session(
+    client: TestClient,
+    caretaker_sms_setup: Funcionario,
+    db: Session,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    db.add_all(
+        [
+            WorkTimeSession(
+                funcionario_id=caretaker_sms_setup.id,
+                operacao=1,
+                data=datetime(2026, 8, 21, 9, 0, tzinfo=timezone.utc),
+            ),
+            WorkTimeSession(
+                funcionario_id=caretaker_sms_setup.id,
+                operacao=0,
+                data=datetime(2026, 8, 25, 8, 0, tzinfo=timezone.utc),
+            ),
+        ]
+    )
+    db.commit()
+
+    response = client.post(
+        f"{settings.API_V1_STR}/acess/caretaker/work-time/manual",
+        headers=superuser_token_headers,
+        json={
+            "condominio_id": str(caretaker_sms_setup.condominio_id),
+            "operacao": 0,
+            "data": "2026-08-21T06:00:00Z",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["operacao"] == 0
+
+
 def test_update_caretaker_work_time_record(
     client: TestClient,
     caretaker_sms_setup: Funcionario,

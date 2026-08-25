@@ -21214,7 +21214,7 @@ function CaretakerSummary({
 
     const apiPath =
       caretakerManualAction.recordType === "work-time"
-        ? "/api/v1/acess/caretaker/work-time"
+        ? "/api/v1/acess/caretaker/work-time/manual"
         : "/api/v1/bins/sessions"
     const queryKey =
       caretakerManualAction.recordType === "work-time"

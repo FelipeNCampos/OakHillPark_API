@@ -577,6 +577,41 @@ def read_active_caretaker_work_time(
 def create_caretaker_work_time(
     *, session: SessionDep, payload: WorkTimeSessionCreate
 ) -> Any:
+    return _create_caretaker_work_time(
+        session=session,
+        payload=payload,
+        allow_open_time_in=False,
+    )
+
+
+@router.post(
+    "/caretaker/work-time/manual",
+    response_model=WorkTimeSessionPublic,
+    status_code=201,
+    dependencies=[Depends(require_cargo(2))],
+)
+def create_manual_caretaker_work_time(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    payload: WorkTimeSessionCreate,
+) -> Any:
+    if not current_user.is_superuser and current_user.condominio_id != payload.condominio_id:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    return _create_caretaker_work_time(
+        session=session,
+        payload=payload,
+        allow_open_time_in=True,
+    )
+
+
+def _create_caretaker_work_time(
+    *,
+    session: SessionDep,
+    payload: WorkTimeSessionCreate,
+    allow_open_time_in: bool,
+) -> Any:
     caretaker = get_default_funcionario(session, 1, payload.condominio_id)
     if not caretaker:
         raise HTTPException(status_code=404, detail="Default caretaker not found")
@@ -610,7 +645,11 @@ def create_caretaker_work_time(
         )
     )
 
-    if payload.operacao == 0 and has_open_session_at_time:
+    if (
+        payload.operacao == 0
+        and has_open_session_at_time
+        and not allow_open_time_in
+    ):
         raise HTTPException(status_code=400, detail="Caretaker already has an open work time session")
 
     if payload.operacao == 1 and not has_open_session_at_time:

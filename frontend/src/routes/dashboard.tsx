@@ -21501,25 +21501,6 @@ function CaretakerSummary({
       {activeTab === "summary" ? (
         <>
           <div className="mb-6 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
-            <div className="mt-3 flex flex-wrap gap-2">
-              {visibleStaff.map((staff) => (
-                <span
-                  key={staff.id}
-                  className="rounded-full border border-[#d9d0ca] bg-white px-3 py-1 text-xs text-[#55311c]"
-                  title={`ID: ${staff.id}`}
-                >
-                  {staff.role}: {staff.nome || "Unnamed"} · {String(staff.id).slice(0, 8)}
-                  {staff.is_default ? " · default" : ""}
-                </span>
-              ))}
-              {visibleStaff.length === 0 && (
-                <span className="text-sm text-[rgba(85,49,28,0.72)]">
-                  No Caretaker, Cleaner or Contractor registered.
-                </span>
-              )}
-            </div>
-          </div>
-          <div className="mb-6 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
             <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-center">
               <div className="lg:pr-6">
                 <p className="text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]">

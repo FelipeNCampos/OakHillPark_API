@@ -20916,7 +20916,80 @@ function CaretakerSummary({
     try {
       setIsSavingCaretakerRecordEdit(true)
 
-      if (isWorkTimeEdit) {
+      const isEditingCaretakerWorkTimePair =
+        isWorkTimeEdit &&
+        Boolean(
+          editingCaretakerRecord.inRecordId &&
+            editingCaretakerRecord.inOriginalIso &&
+            editingCaretakerRecord.outRecordId &&
+            editingCaretakerRecord.outOriginalIso,
+        )
+
+      if (isEditingCaretakerWorkTimePair) {
+        if (!editedCaretakerInTimeValue || !editedCaretakerOutTimeValue) {
+          showErrorToast("Time IN and Time OUT are required")
+          return
+        }
+
+        const [inHoursRaw, inMinutesRaw] = editedCaretakerInTimeValue.split(":")
+        const [outHoursRaw, outMinutesRaw] =
+          editedCaretakerOutTimeValue.split(":")
+        const inHours = Number(inHoursRaw)
+        const inMinutes = Number(inMinutesRaw)
+        const outHours = Number(outHoursRaw)
+        const outMinutes = Number(outMinutesRaw)
+        if (
+          Number.isNaN(inHours) ||
+          Number.isNaN(inMinutes) ||
+          Number.isNaN(outHours) ||
+          Number.isNaN(outMinutes) ||
+          inHours < 0 ||
+          inHours > 23 ||
+          inMinutes < 0 ||
+          inMinutes > 59 ||
+          outHours < 0 ||
+          outHours > 23 ||
+          outMinutes < 0 ||
+          outMinutes > 59
+        ) {
+          showErrorToast("Invalid time")
+          return
+        }
+
+        const nextInDate = new Date(editingCaretakerRecord.inOriginalIso!)
+        const nextOutDate = new Date(editingCaretakerRecord.outOriginalIso!)
+        if (
+          Number.isNaN(nextInDate.getTime()) ||
+          Number.isNaN(nextOutDate.getTime())
+        ) {
+          showErrorToast("Invalid original record date")
+          return
+        }
+
+        nextInDate.setHours(inHours, inMinutes, 0, 0)
+        nextOutDate.setHours(outHours, outMinutes, 0, 0)
+        if (nextOutDate.getTime() <= nextInDate.getTime()) {
+          showErrorToast("Time OUT must be after Time IN")
+          return
+        }
+
+        await Promise.all([
+          apiCall(
+            `/api/v1/acess/caretaker/work-time/${editingCaretakerRecord.inRecordId}`,
+            {
+              method: "PATCH",
+              body: { data: nextInDate.toISOString() },
+            },
+          ),
+          apiCall(
+            `/api/v1/acess/caretaker/work-time/${editingCaretakerRecord.outRecordId}`,
+            {
+              method: "PATCH",
+              body: { data: nextOutDate.toISOString() },
+            },
+          ),
+        ])
+      } else if (isWorkTimeEdit) {
         if (!editedCaretakerTimeValue) {
           showErrorToast("Time is required")
           return
@@ -21778,7 +21851,7 @@ function CaretakerSummary({
                   row.inValue,
                   "Time IN",
                   row.kind,
-                  row.kind === "bins" ? rowEditContext : undefined,
+                  rowEditContext,
                 )
               const openOutEdit = () =>
                 handleOpenCaretakerRecordEdit(
@@ -21786,7 +21859,7 @@ function CaretakerSummary({
                   row.outValue,
                   "Time OUT",
                   row.kind,
-                  row.kind === "bins" ? rowEditContext : undefined,
+                  rowEditContext,
                 )
               const canEditBinsRow =
                 activeTab === "bins" &&
@@ -22577,9 +22650,18 @@ function CaretakerSummary({
                 : "Edit caretaker record"}
             </h3>
             <p className="mt-1 text-sm text-[rgba(0,0,0,0.7)]">
-              {editingCaretakerRecord.recordType === "bins" ? (
+              {editingCaretakerRecord.recordType === "bins" ||
+              (editingCaretakerRecord.recordType === "work-time" &&
+                editingCaretakerRecord.inRecordId &&
+                editingCaretakerRecord.inOriginalIso &&
+                editingCaretakerRecord.outRecordId &&
+                editingCaretakerRecord.outOriginalIso) ? (
                 <>
-                  Update this bins record
+                  Update this{" "}
+                  {editingCaretakerRecord.recordType === "bins"
+                    ? "bins"
+                    : "work time"}{" "}
+                  record
                   {editingCaretakerRecord.buildingLabel
                     ? ` for ${editingCaretakerRecord.buildingLabel}`
                     : ""}
@@ -22597,7 +22679,12 @@ function CaretakerSummary({
             </p>
 
             <div className="mt-4 grid gap-4">
-              {editingCaretakerRecord.recordType === "bins" ? (
+              {editingCaretakerRecord.recordType === "bins" ||
+              (editingCaretakerRecord.recordType === "work-time" &&
+                editingCaretakerRecord.inRecordId &&
+                editingCaretakerRecord.inOriginalIso &&
+                editingCaretakerRecord.outRecordId &&
+                editingCaretakerRecord.outOriginalIso) ? (
                 <>
                   {editingCaretakerRecord.inRecordId &&
                     editingCaretakerRecord.inOriginalIso && (

@@ -694,6 +694,7 @@ def test_update_caretaker_work_time_record(
     client: TestClient,
     caretaker_sms_setup: Funcionario,
     superuser_token_headers: dict[str, str],
+    db: Session,
 ) -> None:
     with patch("app.api.routes.acess.get_default_funcionario", return_value=caretaker_sms_setup):
         create_response = client.post(
@@ -719,6 +720,11 @@ def test_update_caretaker_work_time_record(
     assert payload["id"] == record_id
     updated_at = datetime.fromisoformat(payload["data"])
     assert updated_at.astimezone(timezone.utc) == datetime(
+        2026, 3, 15, 9, 45, tzinfo=timezone.utc
+    )
+    persisted_record = db.get(WorkTimeSession, record_id)
+    assert persisted_record is not None
+    assert persisted_record.data.astimezone(timezone.utc) == datetime(
         2026, 3, 15, 9, 45, tzinfo=timezone.utc
     )
 

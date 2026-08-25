@@ -18,6 +18,12 @@ const searchSchema = z.object({
 })
 
 const WORK_TIME_LABEL = "Work Time"
+const PUBLIC_ACCESS_UPDATE_STORAGE_KEY = "oakhill-public-access-updated"
+
+const notifyPublicAccessUpdate = () => {
+  if (typeof window === "undefined") return
+  window.localStorage.setItem(PUBLIC_ACCESS_UPDATE_STORAGE_KEY, String(Date.now()))
+}
 
 type QueryParams = Record<string, string | number | boolean | null | undefined>
 type RequestOptions = { method?: string; body?: unknown }
@@ -122,7 +128,9 @@ function CaretakerAccess() {
   const canCloseSession = hasOpenSessionForCurrentContext
 
   useEffect(() => {
-    if (!isWorkTimeMode && !buildingId) return
+    if ((isWorkTimeMode && !condominioId) || (!isWorkTimeMode && !buildingId)) {
+      return
+    }
     let isActive = true
 
     setIsCheckingSession(true)
@@ -130,6 +138,7 @@ function CaretakerAccess() {
       isWorkTimeMode
         ? "/api/v1/acess/caretaker/work-time/active"
         : "/api/v1/bins/sessions/active",
+      isWorkTimeMode ? { condominio_id: condominioId } : undefined,
     )
       .then((data) => {
         if (!isActive) return
@@ -180,6 +189,7 @@ function CaretakerAccess() {
     status: boolean
     operacao: 0 | 1
     building_id?: string
+    condominio_id?: string
   }
 
   const mutation = useMutation({
@@ -194,6 +204,7 @@ function CaretakerAccess() {
         },
       ),
     onSuccess: () => {
+      notifyPublicAccessUpdate()
       showSuccessToast("Record confirmed")
       setShowConfirmation(true)
       setTimeout(() => {
@@ -230,6 +241,7 @@ function CaretakerAccess() {
   const canSubmit =
     Boolean(operationLabel) &&
     (isWorkTimeMode || Boolean(buildingId)) &&
+    (!isWorkTimeMode || Boolean(condominioId)) &&
     isSelectedOperationAllowed
   const shouldRedirectToPublicTasks =
     isWorkTimeMode && selectedOperation === "in"
@@ -249,6 +261,7 @@ function CaretakerAccess() {
       status: true,
       operacao: selectedOperation === "in" ? 0 : 1,
       ...(buildingId ? { building_id: buildingId } : {}),
+      ...(isWorkTimeMode ? { condominio_id: condominioId } : {}),
     }
 
     mutation.mutate(payload)

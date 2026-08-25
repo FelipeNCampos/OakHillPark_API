@@ -505,7 +505,10 @@ def test_create_caretaker_work_time_sends_sms_on_first_in(
         with patch("app.api.routes.acess.send_sms_notification", return_value="SM123") as sms_mock:
             response = client.post(
                 f"{settings.API_V1_STR}/acess/caretaker/work-time",
-                json={"operacao": 0},
+                json={
+                    "condominio_id": str(caretaker_sms_setup.condominio_id),
+                    "operacao": 0,
+                },
             )
 
     assert response.status_code == 201
@@ -513,6 +516,52 @@ def test_create_caretaker_work_time_sends_sms_on_first_in(
         phone_to="+447952474965",
         body="Caretaker IN",
     )
+
+
+def test_caretaker_work_time_uses_the_caretaker_from_the_qr_condominio(
+    client: TestClient,
+    db: Session,
+) -> None:
+    first_condominio = Condominio.model_validate(
+        CondominioCreate(nome="First Caretaker QR Condominio")
+    )
+    target_condominio = Condominio.model_validate(
+        CondominioCreate(nome="Target Caretaker QR Condominio")
+    )
+    db.add(first_condominio)
+    db.add(target_condominio)
+    db.flush()
+
+    first_caretaker = Funcionario(
+        nome="First QR Caretaker",
+        cargo=1,
+        status=True,
+        is_default=True,
+        mobile=0,
+        email=None,
+        condominio_id=first_condominio.id,
+    )
+    target_caretaker = Funcionario(
+        nome="Target QR Caretaker",
+        cargo=1,
+        status=True,
+        is_default=True,
+        mobile=0,
+        email=None,
+        condominio_id=target_condominio.id,
+    )
+    db.add(first_caretaker)
+    db.add(target_caretaker)
+    db.commit()
+    db.refresh(target_caretaker)
+
+    response = client.post(
+        f"{settings.API_V1_STR}/acess/caretaker/work-time",
+        json={"condominio_id": str(target_condominio.id), "operacao": 0},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["funcionario_id"] == str(target_caretaker.id)
 
 
 def test_create_caretaker_work_time_does_not_resend_in_same_day(
@@ -526,13 +575,19 @@ def test_create_caretaker_work_time_does_not_resend_in_same_day(
         with patch("app.api.routes.acess.send_sms_notification", return_value="SM123") as sms_mock:
             first_in = client.post(
                 f"{settings.API_V1_STR}/acess/caretaker/work-time",
-                json={"operacao": 0},
+                json={
+                    "condominio_id": str(caretaker_sms_setup.condominio_id),
+                    "operacao": 0,
+                },
             )
             assert first_in.status_code == 201
 
             first_out = client.post(
                 f"{settings.API_V1_STR}/acess/caretaker/work-time",
-                json={"operacao": 1},
+                json={
+                    "condominio_id": str(caretaker_sms_setup.condominio_id),
+                    "operacao": 1,
+                },
             )
             assert first_out.status_code == 201
 
@@ -540,7 +595,10 @@ def test_create_caretaker_work_time_does_not_resend_in_same_day(
 
             second_in = client.post(
                 f"{settings.API_V1_STR}/acess/caretaker/work-time",
-                json={"operacao": 0},
+                json={
+                    "condominio_id": str(caretaker_sms_setup.condominio_id),
+                    "operacao": 0,
+                },
             )
 
     assert second_in.status_code == 201
@@ -558,7 +616,10 @@ def test_create_caretaker_work_time_sends_sms_on_out(
         with patch("app.api.routes.acess.send_sms_notification", return_value="SM123") as sms_mock:
             first_in = client.post(
                 f"{settings.API_V1_STR}/acess/caretaker/work-time",
-                json={"operacao": 0},
+                json={
+                    "condominio_id": str(caretaker_sms_setup.condominio_id),
+                    "operacao": 0,
+                },
             )
             assert first_in.status_code == 201
 
@@ -566,7 +627,10 @@ def test_create_caretaker_work_time_sends_sms_on_out(
 
             response = client.post(
                 f"{settings.API_V1_STR}/acess/caretaker/work-time",
-                json={"operacao": 1},
+                json={
+                    "condominio_id": str(caretaker_sms_setup.condominio_id),
+                    "operacao": 1,
+                },
             )
 
     assert response.status_code == 201
@@ -587,19 +651,28 @@ def test_create_caretaker_work_time_does_not_resend_out_same_day(
         with patch("app.api.routes.acess.send_sms_notification", return_value="SM123") as sms_mock:
             first_in = client.post(
                 f"{settings.API_V1_STR}/acess/caretaker/work-time",
-                json={"operacao": 0},
+                json={
+                    "condominio_id": str(caretaker_sms_setup.condominio_id),
+                    "operacao": 0,
+                },
             )
             assert first_in.status_code == 201
 
             first_out = client.post(
                 f"{settings.API_V1_STR}/acess/caretaker/work-time",
-                json={"operacao": 1},
+                json={
+                    "condominio_id": str(caretaker_sms_setup.condominio_id),
+                    "operacao": 1,
+                },
             )
             assert first_out.status_code == 201
 
             second_in = client.post(
                 f"{settings.API_V1_STR}/acess/caretaker/work-time",
-                json={"operacao": 0},
+                json={
+                    "condominio_id": str(caretaker_sms_setup.condominio_id),
+                    "operacao": 0,
+                },
             )
             assert second_in.status_code == 201
 
@@ -607,7 +680,10 @@ def test_create_caretaker_work_time_does_not_resend_out_same_day(
 
             second_out = client.post(
                 f"{settings.API_V1_STR}/acess/caretaker/work-time",
-                json={"operacao": 1},
+                json={
+                    "condominio_id": str(caretaker_sms_setup.condominio_id),
+                    "operacao": 1,
+                },
             )
 
     assert second_out.status_code == 201
@@ -622,7 +698,11 @@ def test_update_caretaker_work_time_record(
     with patch("app.api.routes.acess.get_default_funcionario", return_value=caretaker_sms_setup):
         create_response = client.post(
             f"{settings.API_V1_STR}/acess/caretaker/work-time",
-            json={"operacao": 0, "data": "2026-03-15T08:00:00Z"},
+            json={
+                "condominio_id": str(caretaker_sms_setup.condominio_id),
+                "operacao": 0,
+                "data": "2026-03-15T08:00:00Z",
+            },
         )
 
     assert create_response.status_code == 201
@@ -641,6 +721,35 @@ def test_update_caretaker_work_time_record(
     assert updated_at.astimezone(timezone.utc) == datetime(
         2026, 3, 15, 9, 45, tzinfo=timezone.utc
     )
+
+
+def test_delete_caretaker_work_time_record(
+    client: TestClient,
+    caretaker_sms_setup: Funcionario,
+    superuser_token_headers: dict[str, str],
+    db: Session,
+) -> None:
+    with patch("app.api.routes.acess.get_default_funcionario", return_value=caretaker_sms_setup):
+        create_response = client.post(
+            f"{settings.API_V1_STR}/acess/caretaker/work-time",
+            json={
+                "condominio_id": str(caretaker_sms_setup.condominio_id),
+                "operacao": 0,
+                "data": "2026-03-15T08:00:00Z",
+            },
+        )
+
+    assert create_response.status_code == 201
+    record_id = create_response.json()["id"]
+
+    delete_response = client.delete(
+        f"{settings.API_V1_STR}/acess/caretaker/work-time/{record_id}",
+        headers=superuser_token_headers,
+    )
+
+    assert delete_response.status_code == 200
+    assert delete_response.json()["message"] == "Work time session deleted successfully"
+    assert db.get(WorkTimeSession, record_id) is None
 
 
 def test_update_caretaker_work_time_requires_manager_permissions(
@@ -670,7 +779,11 @@ def test_update_caretaker_work_time_requires_manager_permissions(
     with patch("app.api.routes.acess.get_default_funcionario", return_value=caretaker_sms_setup):
         create_response = client.post(
             f"{settings.API_V1_STR}/acess/caretaker/work-time",
-            json={"operacao": 0, "data": "2026-03-15T08:00:00Z"},
+            json={
+                "condominio_id": str(caretaker_sms_setup.condominio_id),
+                "operacao": 0,
+                "data": "2026-03-15T08:00:00Z",
+            },
         )
 
     assert create_response.status_code == 201

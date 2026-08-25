@@ -1162,6 +1162,7 @@ const CONTRACTOR_HISTORY_EXECUTE_DUE_COOLDOWN_MS = 60 * 1000
 const FIRE_ALARM_ANCHOR_DATE = "2026-02-26"
 const FIRE_ALARM_ANCHOR_REPETITION = 14
 const FIRE_ALARM_STORAGE_KEY = "ohp_fire_alarm_schedule_v1"
+const PUBLIC_ACCESS_UPDATE_STORAGE_KEY = "oakhill-public-access-updated"
 const FIRE_ALARM_DELETED_DATES_STORAGE_KEY =
   "ohp_fire_alarm_schedule_deleted_dates_v1"
 const LIFT_SCHEDULE_STORAGE_KEY = "ohp_lift_schedule_v1"
@@ -12489,6 +12490,7 @@ function CaretakerRecordCreateDialog({
 }) {
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
+  const { user } = useAuth()
   const [inAt, setInAt] = useState("")
   const [outAt, setOutAt] = useState("")
 
@@ -12499,6 +12501,9 @@ function CaretakerRecordCreateDialog({
 
   const createMutation = useMutation({
     mutationFn: async () => {
+      if (!user?.condominio_id) {
+        throw new Error("User is not associated with a condominium")
+      }
       const inAtIso = parseDateTimeLocalToIso(inAt)
       const outAtIso = parseDateTimeLocalToIso(outAt)
       if (!inAtIso || !outAtIso) throw new Error("Enter valid dates")
@@ -12509,6 +12514,7 @@ function CaretakerRecordCreateDialog({
       await apiCall("/api/v1/acess/caretaker/work-time", {
         method: "POST",
         body: {
+          condominio_id: user.condominio_id,
           operacao: 0,
           data: inAtIso,
         },
@@ -12516,6 +12522,7 @@ function CaretakerRecordCreateDialog({
       await apiCall("/api/v1/acess/caretaker/work-time", {
         method: "POST",
         body: {
+          condominio_id: user.condominio_id,
           operacao: 1,
           data: outAtIso,
         },
@@ -13734,6 +13741,16 @@ function ContractorsContent() {
       }),
     placeholderData: keepPreviousData,
   })
+
+  useEffect(() => {
+    const handlePublicAccessUpdate = (event: StorageEvent) => {
+      if (event.key !== PUBLIC_ACCESS_UPDATE_STORAGE_KEY) return
+      void queryClient.invalidateQueries({ queryKey: ["contractor-visits"] })
+    }
+
+    window.addEventListener("storage", handlePublicAccessUpdate)
+    return () => window.removeEventListener("storage", handlePublicAccessUpdate)
+  }, [queryClient])
 
   const visits = data?.data || []
   const buildingOptions = useMemo(
@@ -19662,6 +19679,7 @@ function CaretakerSummary({
 }) {
   const { showSuccessToast, showErrorToast } = useCustomToast()
   const queryClient = useQueryClient()
+  const { user } = useAuth()
   const { data: caretakersData } = useQuery<ApiListResponse<Funcionario>>({
     queryKey: ["funcionarios", "caretakers-summary"],
     queryFn: () => apiCall("/api/v1/funcionarios/", { skip: 0, limit: 500 }),
@@ -19675,6 +19693,18 @@ function CaretakerSummary({
       apiCall("/api/v1/acess/caretaker/work-time", { skip: 0, limit: 1000 }),
     refetchInterval: 30000,
   })
+
+  useEffect(() => {
+    const handlePublicAccessUpdate = (event: StorageEvent) => {
+      if (event.key !== PUBLIC_ACCESS_UPDATE_STORAGE_KEY) return
+      void queryClient.invalidateQueries({
+        queryKey: ["acess", "caretaker", "work-time"],
+      })
+    }
+
+    window.addEventListener("storage", handlePublicAccessUpdate)
+    return () => window.removeEventListener("storage", handlePublicAccessUpdate)
+  }, [queryClient])
 
   const { data: binSessionsData, isLoading: isLoadingBinSessions } = useQuery<
     ApiListResponse<BinSessionRecord>
@@ -19802,6 +19832,9 @@ function CaretakerSummary({
   const [deletingBinsRowKey, setDeletingBinsRowKey] = useState<string | null>(
     null,
   )
+  const [deletingWorkTimeRowKey, setDeletingWorkTimeRowKey] = useState<
+    string | null
+  >(null)
   const [editingCaretakerRecord, setEditingCaretakerRecord] =
     useState<CaretakerRecordEditState | null>(null)
   const [editedCaretakerTimeValue, setEditedCaretakerTimeValue] = useState("")
@@ -20835,6 +20868,7 @@ function CaretakerSummary({
       outRecordId: EntityId | null
       outValue: string | null
     },
+    confirmDelete = false,
   ) => {
     if (!recordId || !isoValue) return
     setEditingCaretakerRecord({
@@ -20853,7 +20887,7 @@ function CaretakerSummary({
     setEditedCaretakerTimeValue(toTimeInputValue(isoValue))
     setEditedCaretakerInTimeValue(toTimeInputValue(rowContext?.inValue))
     setEditedCaretakerOutTimeValue(toTimeInputValue(rowContext?.outValue))
-    setIsConfirmingCaretakerRecordDelete(false)
+    setIsConfirmingCaretakerRecordDelete(confirmDelete)
   }
 
   const handleCaretakerEditCellKeyDown = (
@@ -21122,6 +21156,14 @@ function CaretakerSummary({
       return
     }
 
+    if (
+      caretakerManualAction.recordType === "work-time" &&
+      !user?.condominio_id
+    ) {
+      showErrorToast("User is not associated with a condominium")
+      return
+    }
+
     try {
       setIsSavingCaretakerManualAction(true)
       await apiCall(apiPath, {
@@ -21129,6 +21171,7 @@ function CaretakerSummary({
         body:
           caretakerManualAction.recordType === "work-time"
             ? {
+                condominio_id: user?.condominio_id,
                 operacao: caretakerManualAction.mode === "checkin" ? 0 : 1,
                 data: nextActionDate.toISOString(),
               }
@@ -21194,9 +21237,44 @@ function CaretakerSummary({
     }
   }
 
+  const handleDeleteWorkTimeHistoryRow = async ({
+    rowKey,
+    inRecordId,
+    outRecordId,
+  }: {
+    rowKey: string
+    inRecordId: EntityId | null
+    outRecordId: EntityId | null
+  }): Promise<boolean> => {
+    const recordIds = [inRecordId, outRecordId].filter(
+      (value): value is EntityId => Boolean(value),
+    )
+    if (recordIds.length === 0) return false
+
+    try {
+      setDeletingWorkTimeRowKey(rowKey)
+      for (const recordId of recordIds) {
+        await apiCall(`/api/v1/acess/caretaker/work-time/${recordId}`, {
+          method: "DELETE",
+        })
+      }
+      await queryClient.invalidateQueries({
+        queryKey: ["acess", "caretaker", "work-time"],
+      })
+      showSuccessToast("Work time record deleted successfully")
+      return true
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to delete work time"
+      showErrorToast(message)
+      return false
+    } finally {
+      setDeletingWorkTimeRowKey(null)
+    }
+  }
+
   const handleDeleteEditingCaretakerRecord = async () => {
-    if (!editingCaretakerRecord || editingCaretakerRecord.recordType !== "bins")
-      return
+    if (!editingCaretakerRecord) return
 
     if (!isConfirmingCaretakerRecordDelete) {
       setIsConfirmingCaretakerRecordDelete(true)
@@ -21205,11 +21283,18 @@ function CaretakerSummary({
 
     if (!editingCaretakerRecord.rowKey) return
 
-    const deleted = await handleDeleteBinsHistoryRow({
-      rowKey: editingCaretakerRecord.rowKey,
-      inRecordId: editingCaretakerRecord.inRecordId || null,
-      outRecordId: editingCaretakerRecord.outRecordId || null,
-    })
+    const deleted =
+      editingCaretakerRecord.recordType === "work-time"
+        ? await handleDeleteWorkTimeHistoryRow({
+            rowKey: editingCaretakerRecord.rowKey,
+            inRecordId: editingCaretakerRecord.inRecordId || null,
+            outRecordId: editingCaretakerRecord.outRecordId || null,
+          })
+        : await handleDeleteBinsHistoryRow({
+            rowKey: editingCaretakerRecord.rowKey,
+            inRecordId: editingCaretakerRecord.inRecordId || null,
+            outRecordId: editingCaretakerRecord.outRecordId || null,
+          })
 
     if (deleted) {
       setEditingCaretakerRecord(null)
@@ -21643,6 +21728,9 @@ function CaretakerSummary({
               <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700">
                 Used
               </th>
+              <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700">
+                Actions
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -21651,7 +21739,7 @@ function CaretakerSummary({
               <tr>
                 <td
                   className="border border-gray-400 px-3 py-3 text-center text-sm text-gray-600"
-                  colSpan={5}
+                  colSpan={6}
                 >
                   Loading...
                 </td>
@@ -21663,7 +21751,7 @@ function CaretakerSummary({
                 <tr>
                   <td
                     className="border border-gray-400 px-3 py-3 text-center text-sm text-gray-600"
-                    colSpan={5}
+                    colSpan={6}
                   >
                     No records found.
                   </td>
@@ -21704,6 +21792,50 @@ function CaretakerSummary({
                 activeTab === "bins" &&
                 row.kind === "bins" &&
                 (canEditIn || canEditOut)
+              const canManageWorkTimeRow =
+                row.kind === "work-time" && (canEditIn || canEditOut)
+              const openWorkTimeRowEdit = () => {
+                if (!canManageWorkTimeRow) return
+                if (row.inRecordId && row.inValue) {
+                  handleOpenCaretakerRecordEdit(
+                    row.inRecordId,
+                    row.inValue,
+                    "Time IN",
+                    row.kind,
+                    rowEditContext,
+                  )
+                  return
+                }
+                handleOpenCaretakerRecordEdit(
+                  row.outRecordId,
+                  row.outValue,
+                  "Time OUT",
+                  row.kind,
+                  rowEditContext,
+                )
+              }
+              const openWorkTimeRowDelete = () => {
+                if (!canManageWorkTimeRow) return
+                if (row.inRecordId && row.inValue) {
+                  handleOpenCaretakerRecordEdit(
+                    row.inRecordId,
+                    row.inValue,
+                    "Time IN",
+                    row.kind,
+                    rowEditContext,
+                    true,
+                  )
+                  return
+                }
+                handleOpenCaretakerRecordEdit(
+                  row.outRecordId,
+                  row.outValue,
+                  "Time OUT",
+                  row.kind,
+                  rowEditContext,
+                  true,
+                )
+              }
               const openBinsRowEdit = () => {
                 if (!canEditBinsRow) return
                 if (row.inRecordId && row.inValue) {
@@ -21838,6 +21970,32 @@ function CaretakerSummary({
                   </td>
                   <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
                     {formatUsed(row.inValue, row.outValue)}
+                  </td>
+                  <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
+                    {canManageWorkTimeRow && (
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            openWorkTimeRowEdit()
+                          }}
+                          className="rounded border border-[#8c7569] px-2 py-1 text-xs font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            openWorkTimeRowDelete()
+                          }}
+                          className="rounded border border-red-300 px-2 py-1 text-xs font-semibold text-red-700 transition-all duration-200 hover:bg-red-50"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    )}
                   </td>
                 </tr>
               )
@@ -22506,17 +22664,19 @@ function CaretakerSummary({
             </div>
 
             <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              {editingCaretakerRecord.recordType === "bins" && (
+              {editingCaretakerRecord.rowKey && (
                 <button
                   type="button"
                   onClick={handleDeleteEditingCaretakerRecord}
                   disabled={
                     isSavingCaretakerRecordEdit ||
-                    deletingBinsRowKey === editingCaretakerRecord.rowKey
+                    deletingBinsRowKey === editingCaretakerRecord.rowKey ||
+                    deletingWorkTimeRowKey === editingCaretakerRecord.rowKey
                   }
                   className="w-full rounded-lg border border-red-300 px-4 py-2 text-sm font-semibold text-red-700 transition-all duration-200 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
                 >
-                  {deletingBinsRowKey === editingCaretakerRecord.rowKey
+                  {deletingBinsRowKey === editingCaretakerRecord.rowKey ||
+                  deletingWorkTimeRowKey === editingCaretakerRecord.rowKey
                     ? "Deleting..."
                     : isConfirmingCaretakerRecordDelete
                       ? "Confirm?"
@@ -22531,7 +22691,8 @@ function CaretakerSummary({
                     setIsConfirmingCaretakerRecordDelete(false)
                   }}
                   disabled={
-                    deletingBinsRowKey === editingCaretakerRecord.rowKey
+                    deletingBinsRowKey === editingCaretakerRecord.rowKey ||
+                    deletingWorkTimeRowKey === editingCaretakerRecord.rowKey
                   }
                   className="w-full rounded-lg border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
                 >
@@ -22542,7 +22703,8 @@ function CaretakerSummary({
                   onClick={handleSaveCaretakerRecordEdit}
                   disabled={
                     isSavingCaretakerRecordEdit ||
-                    deletingBinsRowKey === editingCaretakerRecord.rowKey
+                    deletingBinsRowKey === editingCaretakerRecord.rowKey ||
+                    deletingWorkTimeRowKey === editingCaretakerRecord.rowKey
                   }
                   className="w-full rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
                 >

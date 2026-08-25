@@ -845,7 +845,6 @@ class BuildingsPublic(SQLModel):
 
 
 
-
 class FlatCreate(FlatBase):
     pass
 
@@ -1098,7 +1097,7 @@ class WorkTimeSessionBase(SQLModel):
 
 
 class WorkTimeSessionCreate(WorkTimeSessionBase):
-    pass
+    condominio_id: uuid.UUID
 
 
 class WorkTimeSessionUpdate(SQLModel):

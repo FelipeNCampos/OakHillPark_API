@@ -543,8 +543,10 @@ def create_caretaker_acess(*, session: SessionDep, acess_in: AcessCreate) -> Any
 
 
 @router.get("/caretaker/work-time/active", response_model=AcessActiveStatus)
-def read_active_caretaker_work_time(session: SessionDep) -> Any:
-    caretaker = get_default_funcionario(session, 1)
+def read_active_caretaker_work_time(
+    session: SessionDep, condominio_id: uuid.UUID
+) -> Any:
+    caretaker = get_default_funcionario(session, 1, condominio_id)
     if not caretaker:
         return AcessActiveStatus(has_open_session=False, building_id=None)
 
@@ -558,7 +560,7 @@ def read_active_caretaker_work_time(session: SessionDep) -> Any:
 def create_caretaker_work_time(
     *, session: SessionDep, payload: WorkTimeSessionCreate
 ) -> Any:
-    caretaker = get_default_funcionario(session, 1)
+    caretaker = get_default_funcionario(session, 1, payload.condominio_id)
     if not caretaker:
         raise HTTPException(status_code=404, detail="Default caretaker not found")
 
@@ -910,6 +912,35 @@ def update_caretaker_work_time(
         operacao=item.operacao,
         funcionario_id=item.funcionario_id,
     )
+
+
+@router.delete(
+    "/caretaker/work-time/{id}",
+    response_model=Message,
+    dependencies=[Depends(require_cargo(2))],
+)
+def delete_caretaker_work_time(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+) -> Message:
+    item = session.get(WorkTimeSession, id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Work time session not found")
+
+    funcionario = session.get(Funcionario, item.funcionario_id)
+    if not funcionario or funcionario.cargo != 1:
+        raise HTTPException(status_code=404, detail="Caretaker work time session not found")
+
+    if not current_user.is_superuser and (
+        current_user.condominio_id != funcionario.condominio_id
+    ):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    session.delete(item)
+    session.commit()
+    return Message(message="Work time session deleted successfully")
 
 
 @router.patch("/{id}", response_model=AcessPublic, dependencies=[Depends(require_cargo(1))])

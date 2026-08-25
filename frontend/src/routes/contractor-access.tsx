@@ -12,6 +12,12 @@ const CONTRACTOR_HIDDEN_BUILDING_NAMES = new Set([
   "caretaker",
   "contractor",
 ])
+const PUBLIC_ACCESS_UPDATE_STORAGE_KEY = "oakhill-public-access-updated"
+
+const notifyPublicAccessUpdate = () => {
+  if (typeof window === "undefined") return
+  window.localStorage.setItem(PUBLIC_ACCESS_UPDATE_STORAGE_KEY, String(Date.now()))
+}
 
 const searchSchema = z.object({
   condominioId: z.string().optional().catch(""),
@@ -203,6 +209,7 @@ function ContractorAccess() {
     },
     onSuccess: (response) => {
       const operation = response.out_at ? "out" : "in"
+      notifyPublicAccessUpdate()
       showSuccessToast("Record confirmed")
       setConfirmation({
         operation,

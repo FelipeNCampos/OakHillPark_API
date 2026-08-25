@@ -857,6 +857,8 @@ def test_create_caretaker_record_completes_an_existing_unmatched_time_out(
     )
 
     assert response.status_code == 201
+    created_records = response.json()["data"]
+    assert created_records[0]["session_id"] == created_records[1]["session_id"]
     records = db.exec(
         select(WorkTimeSession).where(
             WorkTimeSession.funcionario_id == caretaker_sms_setup.id
@@ -864,6 +866,8 @@ def test_create_caretaker_record_completes_an_existing_unmatched_time_out(
     ).all()
     assert len(records) == 2
     assert sorted(record.operacao for record in records) == [0, 1]
+    assert len({record.session_id for record in records}) == 1
+    assert records[0].session_id is not None
 
 
 def test_update_caretaker_work_time_record(

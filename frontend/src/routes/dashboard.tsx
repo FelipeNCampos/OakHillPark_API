@@ -422,6 +422,7 @@ interface WorkTimeSessionRecord {
   status: boolean
   data: string
   operacao: number
+  session_id?: EntityId | null
   funcionario_id: EntityId
 }
 
@@ -19894,8 +19895,26 @@ function CaretakerSummary({
 
   const workTimeSessionsGrouped = useMemo(() => {
     const recordsByCaretaker = new Map<EntityId, WorkTimeSessionRecord[]>()
+    const recordsBySession = new Map<
+      string,
+      {
+        funcionarioId: EntityId
+        inRecord?: WorkTimeSessionRecord
+        outRecord?: WorkTimeSessionRecord
+      }
+    >()
     workTimeRecords.forEach((record) => {
       if (!record?.data) return
+      if (record.session_id) {
+        const sessionKey = String(record.session_id)
+        const session = recordsBySession.get(sessionKey) || {
+          funcionarioId: record.funcionario_id,
+        }
+        if (record.operacao === 0) session.inRecord = record
+        if (record.operacao === 1) session.outRecord = record
+        recordsBySession.set(sessionKey, session)
+        return
+      }
       const records = recordsByCaretaker.get(record.funcionario_id) || []
       records.push(record)
       recordsByCaretaker.set(record.funcionario_id, records)
@@ -19905,7 +19924,7 @@ function CaretakerSummary({
       funcionarioId: EntityId
       inRecord?: WorkTimeSessionRecord
       outRecord?: WorkTimeSessionRecord
-    }> = []
+    }> = [...recordsBySession.values()]
 
     recordsByCaretaker.forEach((records, funcionarioId) => {
       const sorted = records.sort(

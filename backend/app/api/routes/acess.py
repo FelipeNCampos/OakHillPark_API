@@ -639,6 +639,7 @@ def create_caretaker_work_time_record(
         caretaker.id,
         payload.time_out,
     )
+    work_time_session_id = uuid.uuid4()
     in_record = _create_caretaker_work_time(
         session=session,
         payload=WorkTimeSessionCreate(
@@ -647,13 +648,19 @@ def create_caretaker_work_time_record(
             data=payload.time_in,
         ),
         allow_open_time_in=True,
+        work_time_session_id=work_time_session_id,
     )
     if existing_out:
+        existing_out.session_id = work_time_session_id
+        session.add(existing_out)
+        session.commit()
+        session.refresh(existing_out)
         out_record = WorkTimeSessionPublic(
             id=existing_out.id,
             status=existing_out.status,
             data=existing_out.data,
             operacao=existing_out.operacao,
+            session_id=existing_out.session_id,
             funcionario_id=existing_out.funcionario_id,
         )
     else:
@@ -665,6 +672,7 @@ def create_caretaker_work_time_record(
                 data=payload.time_out,
             ),
             allow_open_time_in=False,
+            work_time_session_id=work_time_session_id,
         )
 
     return WorkTimeSessionsPublic(data=[in_record, out_record], count=2)
@@ -697,6 +705,7 @@ def _create_caretaker_work_time(
     session: SessionDep,
     payload: WorkTimeSessionCreate,
     allow_open_time_in: bool,
+    work_time_session_id: uuid.UUID | None = None,
 ) -> Any:
     caretaker = get_default_funcionario(session, 1, payload.condominio_id)
     if not caretaker:
@@ -749,6 +758,7 @@ def _create_caretaker_work_time(
         update={
             "status": True,
             "data": session_time,
+            "session_id": work_time_session_id,
             "funcionario_id": caretaker.id,
         },
     )
@@ -766,6 +776,7 @@ def _create_caretaker_work_time(
         status=item.status,
         data=item.data,
         operacao=item.operacao,
+        session_id=item.session_id,
         funcionario_id=item.funcionario_id,
     )
 
@@ -807,6 +818,7 @@ def read_caretaker_work_time(
             status=item.status,
             data=item.data,
             operacao=item.operacao,
+            session_id=item.session_id,
             funcionario_id=item.funcionario_id,
         )
         for item in rows
@@ -1056,6 +1068,7 @@ def update_caretaker_work_time(
         status=item.status,
         data=item.data,
         operacao=item.operacao,
+        session_id=item.session_id,
         funcionario_id=item.funcionario_id,
     )
 

@@ -267,6 +267,7 @@ class WorkTimeSession(SQLModel, table=True):
         sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
     )
     operacao: int = Field(default=0)
+    session_id: uuid.UUID | None = Field(default=None, index=True)
     funcionario_id: uuid.UUID = Field(
         foreign_key="funcionario.id", nullable=False, ondelete="CASCADE"
     )
@@ -1112,6 +1113,7 @@ class WorkTimeSessionUpdate(SQLModel):
 
 class WorkTimeSessionPublic(WorkTimeSessionBase):
     id: uuid.UUID
+    session_id: uuid.UUID | None = None
     funcionario_id: uuid.UUID
 
 

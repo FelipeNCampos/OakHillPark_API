@@ -12511,14 +12511,32 @@ function CaretakerRecordCreateDialog({
         throw new Error("Time OUT must be after Time IN")
       }
 
-      await apiCall("/api/v1/acess/caretaker/work-time/record", {
+      const createdRecords = (await apiCall(
+        "/api/v1/acess/caretaker/work-time/record",
+        {
         method: "POST",
         body: {
           condominio_id: user.condominio_id,
           time_in: inAtIso,
           time_out: outAtIso,
         },
-      })
+        },
+      )) as ApiListResponse<WorkTimeSessionRecord>
+      queryClient.setQueryData<ApiListResponse<WorkTimeSessionRecord>>(
+        ["acess", "caretaker", "work-time"],
+        (current) => {
+          const createdIds = new Set(
+            createdRecords.data.map((record) => record.id),
+          )
+          const existing = (current?.data || []).filter(
+            (record) => !createdIds.has(record.id),
+          )
+          return {
+            data: [...createdRecords.data, ...existing],
+            count: createdRecords.data.length + existing.length,
+          }
+        },
+      )
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({
@@ -19766,12 +19784,31 @@ function CaretakerSummary({
     return "Caretaker"
   }, [caretakersData])
 
-  const workTimeRecords = useMemo(() => {
-    if (!activeCaretakerId) return workTimeRecordsRaw
-    return workTimeRecordsRaw.filter(
-      (record) => record.funcionario_id === activeCaretakerId,
-    )
-  }, [workTimeRecordsRaw, activeCaretakerId])
+  const caretakerNameById = useMemo(
+    () =>
+      new Map(
+        (caretakersData?.data || [])
+          .filter((funcionario: Funcionario) => funcionario.cargo === 1)
+          .map((caretaker: Funcionario) => [caretaker.id, caretaker.nome]),
+      ),
+    [caretakersData],
+  )
+  const visibleStaff = useMemo(
+    () =>
+      (caretakersData?.data || [])
+        .filter((funcionario: Funcionario) => funcionario.cargo >= 0 && funcionario.cargo <= 2)
+        .map((funcionario: Funcionario) => ({
+          ...funcionario,
+          role:
+            funcionario.cargo === 0
+              ? "Cleaner"
+              : funcionario.cargo === 1
+                ? "Caretaker"
+                : "Contractor",
+        })),
+    [caretakersData],
+  )
+  const workTimeRecords = workTimeRecordsRaw
   const binSessions = useMemo(() => {
     if (!activeCaretakerId) return binSessionsRaw
     return binSessionsRaw.filter(
@@ -19856,34 +19893,49 @@ function CaretakerSummary({
   const caretakerHistoryPageSize = 10
 
   const workTimeSessionsGrouped = useMemo(() => {
-    const sorted = [...workTimeRecords]
-      .filter((record) => record?.data)
-      .sort(
-        (a, b) =>
-          new Date(a.data ?? 0).getTime() - new Date(b.data ?? 0).getTime(),
-      )
+    const recordsByCaretaker = new Map<EntityId, WorkTimeSessionRecord[]>()
+    workTimeRecords.forEach((record) => {
+      if (!record?.data) return
+      const records = recordsByCaretaker.get(record.funcionario_id) || []
+      records.push(record)
+      recordsByCaretaker.set(record.funcionario_id, records)
+    })
 
     const result: Array<{
+      funcionarioId: EntityId
       inRecord?: WorkTimeSessionRecord
       outRecord?: WorkTimeSessionRecord
     }> = []
-    let openRecord: WorkTimeSessionRecord | null = null
 
-    sorted.forEach((record) => {
-      if (record.operacao === 0) {
-        if (!openRecord) openRecord = record
-      } else if (record.operacao === 1) {
-        if (openRecord) {
-          result.push({ inRecord: openRecord, outRecord: record })
-          openRecord = null
-        } else {
-          result.push({ outRecord: record })
+    recordsByCaretaker.forEach((records, funcionarioId) => {
+      const sorted = records.sort(
+        (a, b) =>
+          new Date(a.data ?? 0).getTime() - new Date(b.data ?? 0).getTime() ||
+          a.operacao - b.operacao,
+      )
+      let openRecord: WorkTimeSessionRecord | null = null
+
+      sorted.forEach((record) => {
+        if (record.operacao === 0) {
+          if (!openRecord) openRecord = record
+        } else if (record.operacao === 1) {
+          if (openRecord) {
+            result.push({ funcionarioId, inRecord: openRecord, outRecord: record })
+            openRecord = null
+          } else {
+            result.push({ funcionarioId, outRecord: record })
+          }
         }
-      }
+      })
+
+      if (openRecord) result.push({ funcionarioId, inRecord: openRecord })
     })
 
-    if (openRecord) result.push({ inRecord: openRecord })
-    return result.reverse()
+    return result.sort(
+      (a, b) =>
+        new Date(b.inRecord?.data || b.outRecord?.data || 0).getTime() -
+        new Date(a.inRecord?.data || a.outRecord?.data || 0).getTime(),
+    )
   }, [workTimeRecords])
 
   const formatDate = (dateValue?: string | null) => {
@@ -20317,6 +20369,7 @@ function CaretakerSummary({
         key: `bins-${index}-${session.inRecord?.id || "in"}-${session.outRecord?.id || "out"}`,
         kind: "bins" as const,
         buildingLabel,
+        workerName: null,
         buildingId: buildingId || null,
         inValue: session.inRecord?.data || null,
         outValue: session.outRecord?.data || null,
@@ -20341,6 +20394,9 @@ function CaretakerSummary({
         key: `work-time-${index}-${session.inRecord?.id || "in"}-${session.outRecord?.id || "out"}`,
         kind: "work-time" as const,
         buildingLabel: "WORK TIME",
+        workerName:
+          caretakerNameById.get(session.funcionarioId) ||
+          `Caretaker ${String(session.funcionarioId).slice(0, 8)}`,
         buildingId: null,
         inValue: session.inRecord?.data || null,
         outValue: session.outRecord?.data || null,
@@ -20354,7 +20410,7 @@ function CaretakerSummary({
         sortTime,
       }
     })
-  }, [getDurationMinutes, workTimeSessionsGrouped])
+  }, [caretakerNameById, getDurationMinutes, workTimeSessionsGrouped])
 
   const filteredHistoryRows = useMemo(() => {
     const sourceRows =
@@ -21231,7 +21287,7 @@ function CaretakerSummary({
 
     try {
       setIsSavingCaretakerManualAction(true)
-      await apiCall(apiPath, {
+      const createdRecord = (await apiCall(apiPath, {
         method: "POST",
         body:
           caretakerManualAction.recordType === "work-time"
@@ -21245,7 +21301,22 @@ function CaretakerSummary({
                 operacao: caretakerManualAction.mode === "checkin" ? 0 : 1,
                 data: nextActionDate.toISOString(),
               },
-      })
+      })) as WorkTimeSessionRecord | BinSessionRecord
+      if (caretakerManualAction.recordType === "work-time") {
+        queryClient.setQueryData<ApiListResponse<WorkTimeSessionRecord>>(
+          queryKey,
+          (current) => {
+            const data = current?.data || []
+            if (data.some((record) => record.id === createdRecord.id)) {
+              return current
+            }
+            return {
+              data: [createdRecord as WorkTimeSessionRecord, ...data],
+              count: (current?.count || 0) + 1,
+            }
+          },
+        )
+      }
       await queryClient.invalidateQueries({
         queryKey,
       })
@@ -21410,6 +21481,37 @@ function CaretakerSummary({
 
       {activeTab === "summary" ? (
         <>
+          <div className="mb-6 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h4 className="font-semibold text-[#55311c]">Staff visibility</h4>
+                <p className="text-sm text-[rgba(85,49,28,0.72)]">
+                  Workers available to this condominium. Use the identifier to
+                  confirm which worker created each event.
+                </p>
+              </div>
+              <span className="text-sm text-[rgba(85,49,28,0.72)]">
+                {workTimeRecordsRaw.length} work-time event(s) received
+              </span>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {visibleStaff.map((staff) => (
+                <span
+                  key={staff.id}
+                  className="rounded-full border border-[#d9d0ca] bg-white px-3 py-1 text-xs text-[#55311c]"
+                  title={`ID: ${staff.id}`}
+                >
+                  {staff.role}: {staff.nome || "Unnamed"} · {String(staff.id).slice(0, 8)}
+                  {staff.is_default ? " · default" : ""}
+                </span>
+              ))}
+              {visibleStaff.length === 0 && (
+                <span className="text-sm text-[rgba(85,49,28,0.72)]">
+                  No Caretaker, Cleaner or Contractor registered.
+                </span>
+              )}
+            </div>
+          </div>
           <div className="mb-6 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
             <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-center">
               <div className="lg:pr-6">
@@ -21785,6 +21887,9 @@ function CaretakerSummary({
                 Building
               </th>
               <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700">
+                Worker
+              </th>
+              <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700">
                 Time IN
               </th>
               <th className="border border-gray-400 px-3 py-2 text-left font-['Nunito',sans-serif] text-sm font-bold text-gray-700">
@@ -21804,7 +21909,7 @@ function CaretakerSummary({
               <tr>
                 <td
                   className="border border-gray-400 px-3 py-3 text-center text-sm text-gray-600"
-                  colSpan={6}
+                  colSpan={7}
                 >
                   Loading...
                 </td>
@@ -21816,7 +21921,7 @@ function CaretakerSummary({
                 <tr>
                   <td
                     className="border border-gray-400 px-3 py-3 text-center text-sm text-gray-600"
-                    colSpan={6}
+                  colSpan={7}
                   >
                     No records found.
                   </td>
@@ -21944,6 +22049,9 @@ function CaretakerSummary({
                   </td>
                   <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
                     {row.buildingLabel}
+                  </td>
+                  <td className="border border-gray-400 px-3 py-2 text-sm text-gray-700">
+                    {row.workerName || "-"}
                   </td>
                   <td
                     className={`border border-gray-400 px-3 py-2 text-sm text-gray-700 ${

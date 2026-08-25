@@ -563,6 +563,74 @@ def test_caretaker_work_time_uses_the_caretaker_from_the_qr_condominio(
     assert response.json()["funcionario_id"] == str(target_caretaker.id)
 
 
+def test_funcionarios_list_is_scoped_to_the_manager_condominio(
+    client: TestClient,
+    db: Session,
+) -> None:
+    manager_condominio = Condominio.model_validate(
+        CondominioCreate(nome="Test Manager Funcionario Condominio")
+    )
+    other_condominio = Condominio.model_validate(
+        CondominioCreate(nome="Test Other Funcionario Condominio")
+    )
+    db.add(manager_condominio)
+    db.add(other_condominio)
+    db.flush()
+
+    visible_caretaker = Funcionario(
+        nome="Visible Caretaker",
+        cargo=1,
+        status=True,
+        is_default=True,
+        mobile=0,
+        email=None,
+        condominio_id=manager_condominio.id,
+    )
+    hidden_caretaker = Funcionario(
+        nome="Hidden Caretaker",
+        cargo=1,
+        status=True,
+        is_default=True,
+        mobile=0,
+        email=None,
+        condominio_id=other_condominio.id,
+    )
+    db.add(visible_caretaker)
+    db.add(hidden_caretaker)
+    db.commit()
+    db.refresh(visible_caretaker)
+    db.refresh(hidden_caretaker)
+
+    manager_email = random_email()
+    manager_password = random_lower_string()
+    crud.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=manager_email,
+            password=manager_password,
+            is_active=True,
+            is_superuser=False,
+            cargo=2,
+            condominio_id=manager_condominio.id,
+        ),
+    )
+    manager_headers = user_authentication_headers(
+        client=client,
+        email=manager_email,
+        password=manager_password,
+    )
+
+    response = client.get(
+        f"{settings.API_V1_STR}/funcionarios/",
+        headers=manager_headers,
+    )
+
+    assert response.status_code == 200
+    response_ids = {item["id"] for item in response.json()["data"]}
+    assert str(visible_caretaker.id) in response_ids
+    assert str(hidden_caretaker.id) not in response_ids
+
+
 def test_create_caretaker_work_time_does_not_resend_in_same_day(
     client: TestClient,
     caretaker_sms_setup: Funcionario,

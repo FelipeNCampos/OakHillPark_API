@@ -31,6 +31,7 @@ from app.models import (
     User,
     WorkTimeSession,
     WorkTimeSessionCreate,
+    WorkTimeSessionManualCreate,
     WorkTimeSessionPublic,
     WorkTimeRecordCreate,
     WorkTimeSessionUpdate,
@@ -688,15 +689,45 @@ def create_manual_caretaker_work_time(
     *,
     session: SessionDep,
     current_user: CurrentUser,
-    payload: WorkTimeSessionCreate,
+    payload: WorkTimeSessionManualCreate,
 ) -> Any:
     if not current_user.is_superuser and current_user.condominio_id != payload.condominio_id:
         raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    caretaker = get_default_funcionario(session, 1, payload.condominio_id)
+    if not caretaker:
+        raise HTTPException(status_code=404, detail="Default caretaker not found")
+
+    work_time_session_id: uuid.UUID | None = None
+    allow_unmatched_time_out = False
+    if payload.reference_record_id:
+        reference_record = session.get(WorkTimeSession, payload.reference_record_id)
+        if not reference_record or reference_record.funcionario_id != caretaker.id:
+            raise HTTPException(status_code=404, detail="Referenced work time session not found")
+
+        expected_reference_operation = 1 if payload.operacao == 0 else 0
+        if reference_record.operacao != expected_reference_operation:
+            raise HTTPException(
+                status_code=422,
+                detail="The referenced record must be the opposite operation",
+            )
+
+        if payload.operacao == 0 and payload.data >= reference_record.data:
+            raise HTTPException(status_code=422, detail="Time IN must be before Time OUT")
+        if payload.operacao == 1 and payload.data <= reference_record.data:
+            raise HTTPException(status_code=422, detail="Time OUT must be after Time IN")
+
+        work_time_session_id = reference_record.session_id or uuid.uuid4()
+        reference_record.session_id = work_time_session_id
+        session.add(reference_record)
+        allow_unmatched_time_out = payload.operacao == 1
 
     return _create_caretaker_work_time(
         session=session,
         payload=payload,
         allow_open_time_in=True,
+        allow_unmatched_time_out=allow_unmatched_time_out,
+        work_time_session_id=work_time_session_id,
     )
 
 
@@ -705,6 +736,7 @@ def _create_caretaker_work_time(
     session: SessionDep,
     payload: WorkTimeSessionCreate,
     allow_open_time_in: bool,
+    allow_unmatched_time_out: bool = False,
     work_time_session_id: uuid.UUID | None = None,
 ) -> Any:
     caretaker = get_default_funcionario(session, 1, payload.condominio_id)
@@ -747,7 +779,11 @@ def _create_caretaker_work_time(
     ):
         raise HTTPException(status_code=400, detail="Caretaker already has an open work time session")
 
-    if payload.operacao == 1 and not has_open_session_at_time:
+    if (
+        payload.operacao == 1
+        and not has_open_session_at_time
+        and not allow_unmatched_time_out
+    ):
         raise HTTPException(
             status_code=400,
             detail="Caretaker does not have an open work time session to close",

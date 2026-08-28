@@ -563,6 +563,7 @@ interface CaretakerManualActionState {
   recordType: "work-time" | "bins"
   buildingId: EntityId | null
   buildingLabel: string
+  referenceRecordId: EntityId | null
   referenceIso: string
 }
 
@@ -837,6 +838,33 @@ type ApiQueryParams = Record<
 type ApiRequestOptions = { method?: string; body?: unknown }
 const FIRE_ALARM_CERTIFICATE_MAX_MEDIA_BYTES = 10 * 1024 * 1024
 
+const getApiErrorMessage = (payload: unknown, fallback: string) => {
+  if (!payload || typeof payload !== "object") return fallback
+
+  const response = payload as { detail?: unknown; message?: unknown }
+  if (typeof response.detail === "string") return response.detail
+  if (typeof response.message === "string") return response.message
+
+  if (Array.isArray(response.detail)) {
+    const message = response.detail
+      .map((detail) => {
+        if (typeof detail === "string") return detail
+        if (!detail || typeof detail !== "object") return null
+        const error = detail as { loc?: unknown; msg?: unknown }
+        if (typeof error.msg !== "string") return null
+        const field = Array.isArray(error.loc)
+          ? error.loc.filter((value) => value !== "body").join(".")
+          : ""
+        return field ? `${field}: ${error.msg}` : error.msg
+      })
+      .filter((detail): detail is string => Boolean(detail))
+      .join(". ")
+    if (message) return message
+  }
+
+  return fallback
+}
+
 const isRequestOptions = (
   params?: ApiQueryParams | ApiRequestOptions,
 ): params is ApiRequestOptions => {
@@ -895,11 +923,7 @@ const apiCall = async (
   if (!response.ok) {
     let message = "API call failed"
     try {
-      const payload = (await response.json()) as {
-        detail?: string
-        message?: string
-      }
-      message = payload.detail || payload.message || message
+      message = getApiErrorMessage(await response.json(), message)
     } catch {
       // ignore parse errors
     }
@@ -21237,12 +21261,16 @@ function CaretakerSummary({
       buildingLabel: string
       buildingId: EntityId | null
       inValue: string | null
+      inRecordId: EntityId | null
       outValue: string | null
+      outRecordId: EntityId | null
     },
     mode: CaretakerManualActionState["mode"],
   ) => {
     const referenceIso = mode === "checkin" ? row.outValue : row.inValue
-    if (!referenceIso) {
+    const referenceRecordId =
+      mode === "checkin" ? row.outRecordId : row.inRecordId
+    if (!referenceIso || !referenceRecordId) {
       showErrorToast("Could not identify the record date")
       return
     }
@@ -21252,6 +21280,7 @@ function CaretakerSummary({
       recordType: row.kind,
       buildingId: row.kind === "bins" ? row.buildingId : null,
       buildingLabel: row.buildingLabel,
+      referenceRecordId,
       referenceIso,
     })
     setCaretakerManualTimeValue("")
@@ -21324,6 +21353,16 @@ function CaretakerSummary({
       return
     }
 
+    if (
+      caretakerManualAction.recordType === "work-time" &&
+      !caretakerManualAction.referenceRecordId
+    ) {
+      showErrorToast("Could not identify the work time record")
+      return
+    }
+
+    const condominioId = user?.condominio_id
+
     try {
       setIsSavingCaretakerManualAction(true)
       const createdRecord = (await apiCall(apiPath, {
@@ -21331,9 +21370,10 @@ function CaretakerSummary({
         body:
           caretakerManualAction.recordType === "work-time"
             ? {
-                condominio_id: user?.condominio_id,
+                condominio_id: condominioId,
                 operacao: caretakerManualAction.mode === "checkin" ? 0 : 1,
                 data: nextActionDate.toISOString(),
+                reference_record_id: caretakerManualAction.referenceRecordId,
               }
             : {
                 building_id: caretakerManualAction.buildingId,

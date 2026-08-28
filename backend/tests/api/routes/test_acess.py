@@ -831,6 +831,38 @@ def test_manual_caretaker_time_in_allows_a_current_open_session(
     assert response.json()["operacao"] == 0
 
 
+def test_manual_caretaker_time_out_pairs_the_selected_time_in(
+    client: TestClient,
+    caretaker_sms_setup: Funcionario,
+    db: Session,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    time_in = WorkTimeSession(
+        funcionario_id=caretaker_sms_setup.id,
+        operacao=0,
+        data=datetime(2026, 8, 25, 8, 0, tzinfo=timezone.utc),
+    )
+    db.add(time_in)
+    db.commit()
+    db.refresh(time_in)
+
+    response = client.post(
+        f"{settings.API_V1_STR}/acess/caretaker/work-time/manual",
+        headers=superuser_token_headers,
+        json={
+            "condominio_id": str(caretaker_sms_setup.condominio_id),
+            "operacao": 1,
+            "data": "2026-08-25T17:00:00Z",
+            "reference_record_id": str(time_in.id),
+        },
+    )
+
+    assert response.status_code == 201
+    db.refresh(time_in)
+    assert time_in.session_id is not None
+    assert response.json()["session_id"] == str(time_in.session_id)
+
+
 def test_create_caretaker_record_completes_an_existing_unmatched_time_out(
     client: TestClient,
     caretaker_sms_setup: Funcionario,

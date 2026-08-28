@@ -452,6 +452,10 @@ interface CaretakerMonthlyMetricRecord {
   remaining_hours: number
 }
 
+interface CaretakerMonthlyGoalSettings {
+  enabled: boolean
+}
+
 interface WorkerInvoiceHourEntry {
   id: string
   monthKey: string
@@ -12567,6 +12571,9 @@ function CaretakerRecordCreateDialog({
       await queryClient.invalidateQueries({
         queryKey: ["acess", "caretaker", "work-time"],
       })
+      await queryClient.invalidateQueries({
+        queryKey: ["acess", "caretaker", "work-time", "monthly-metrics"],
+      })
       onOpenChange(false)
       resetForm()
       showSuccessToast("Caretaker record created successfully")
@@ -19735,6 +19742,9 @@ function CaretakerSummary({
       void queryClient.invalidateQueries({
         queryKey: ["acess", "caretaker", "work-time"],
       })
+      void queryClient.invalidateQueries({
+        queryKey: ["acess", "caretaker", "work-time", "monthly-metrics"],
+      })
     }
 
     window.addEventListener("storage", handlePublicAccessUpdate)
@@ -19769,6 +19779,12 @@ function CaretakerSummary({
     queryKey: ["acess", "caretaker", "work-time", "monthly-metrics"],
     queryFn: () => apiCall("/api/v1/acess/caretaker/work-time/monthly-metrics"),
   })
+  const { data: monthlyGoalSettings } =
+    useQuery<CaretakerMonthlyGoalSettings>({
+      queryKey: ["acess", "caretaker", "work-time", "goals", "settings"],
+      queryFn: () =>
+        apiCall("/api/v1/acess/caretaker/work-time/goals/settings"),
+    })
 
   const workTimeRecordsRaw = (workTimeData?.data ||
     []) as WorkTimeSessionRecord[]
@@ -19778,6 +19794,7 @@ function CaretakerSummary({
     []) as CaretakerMonthlyGoalRecord[]
   const monthlyMetrics = (monthlyMetricsData?.data ||
     []) as CaretakerMonthlyMetricRecord[]
+  const monthlyGoalsEnabled = monthlyGoalSettings?.enabled ?? true
 
   const buildingMap = useMemo(() => {
     const map = new Map<EntityId, string>()
@@ -20160,6 +20177,37 @@ function CaretakerSummary({
       const message =
         error instanceof Error ? error.message : "Failed to save monthly goal"
       showErrorToast(message)
+    },
+  })
+
+  const updateMonthlyGoalsEnabledMutation = useMutation({
+    mutationFn: (enabled: boolean) =>
+      apiCall("/api/v1/acess/caretaker/work-time/goals/settings", {
+        method: "PUT",
+        body: { enabled },
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: [
+          "acess",
+          "caretaker",
+          "work-time",
+          "goals",
+          "settings",
+        ],
+      })
+      showSuccessToast(
+        monthlyGoalsEnabled
+          ? "Monthly goals disabled"
+          : "Monthly goals enabled",
+      )
+    },
+    onError: (error) => {
+      showErrorToast(
+        error instanceof Error
+          ? error.message
+          : "Failed to update monthly goals setting",
+      )
     },
   })
 
@@ -21235,6 +21283,16 @@ function CaretakerSummary({
       await queryClient.invalidateQueries({
         queryKey,
       })
+      if (editingCaretakerRecord.recordType === "work-time") {
+        await queryClient.invalidateQueries({
+          queryKey: [
+            "acess",
+            "caretaker",
+            "work-time",
+            "monthly-metrics",
+          ],
+        })
+      }
       setEditingCaretakerRecord(null)
       setIsConfirmingCaretakerRecordDelete(false)
       showSuccessToast(successMessage)
@@ -21401,6 +21459,16 @@ function CaretakerSummary({
       await queryClient.invalidateQueries({
         queryKey,
       })
+      if (caretakerManualAction.recordType === "work-time") {
+        await queryClient.invalidateQueries({
+          queryKey: [
+            "acess",
+            "caretaker",
+            "work-time",
+            "monthly-metrics",
+          ],
+        })
+      }
       resetCaretakerManualAction()
       showSuccessToast(
         `${caretakerManualAction.recordType === "work-time" ? "Caretaker" : "Bin"} ${
@@ -21477,6 +21545,9 @@ function CaretakerSummary({
       }
       await queryClient.invalidateQueries({
         queryKey: ["acess", "caretaker", "work-time"],
+      })
+      await queryClient.invalidateQueries({
+        queryKey: ["acess", "caretaker", "work-time", "monthly-metrics"],
       })
       showSuccessToast("Work time record deleted successfully")
       return true
@@ -21576,10 +21647,12 @@ function CaretakerSummary({
                     {weekRangeLabel}
                   </span>
                 </div>
-                <p className="mt-2 text-sm text-[rgba(85,49,28,0.72)]">
-                  {formatDecimalHours(remainingWeeklyTargetHours)} left to reach
-                  20h
-                </p>
+                {monthlyGoalsEnabled && (
+                  <p className="mt-2 text-sm text-[rgba(85,49,28,0.72)]">
+                    {formatDecimalHours(remainingWeeklyTargetHours)} left to
+                    reach 20h
+                  </p>
+                )}
               </div>
               <div className="lg:border-l lg:border-[#e5e0dc] lg:px-6">
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -21604,20 +21677,24 @@ function CaretakerSummary({
                     Monthly goals
                   </button>
                 </div>
-                <div className="mt-3 flex flex-wrap items-start gap-2 text-sm text-[rgba(85,49,28,0.78)]">
-                  <span className="font-semibold text-[#55311c]">
-                    Target {formatDecimalHours(selectedWorkMonthTargetHours)}
-                  </span>
-                </div>
-                <p className="mt-2 text-sm text-[rgba(85,49,28,0.72)]">
-                  {isLoadingMonthlyMetrics
-                    ? "Loading monthly target..."
-                    : monthlyMetricsError
-                      ? "Failed to load monthly target."
-                      : selectedWorkMonthEffectiveTargetHours > 0
-                        ? `${formatDecimalHours(selectedWorkMonthRemainingHours)} left to reach ${formatDecimalHours(selectedWorkMonthEffectiveTargetHours)}`
-                        : "No monthly goal defined for this month."}
-                </p>
+                {monthlyGoalsEnabled && (
+                  <>
+                    <div className="mt-3 flex flex-wrap items-start gap-2 text-sm text-[rgba(85,49,28,0.78)]">
+                      <span className="font-semibold text-[#55311c]">
+                        Target {formatDecimalHours(selectedWorkMonthTargetHours)}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-sm text-[rgba(85,49,28,0.72)]">
+                      {isLoadingMonthlyMetrics
+                        ? "Loading monthly target..."
+                        : monthlyMetricsError
+                          ? "Failed to load monthly target."
+                          : selectedWorkMonthEffectiveTargetHours > 0
+                            ? `${formatDecimalHours(selectedWorkMonthRemainingHours)} left to reach ${formatDecimalHours(selectedWorkMonthEffectiveTargetHours)}`
+                            : "No monthly goal defined for this month."}
+                    </p>
+                  </>
+                )}
               </div>
               <div className="flex flex-col gap-2 lg:border-l lg:border-[#e5e0dc] lg:items-end lg:pl-6">
                 <span className="text-xs font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.75)]">
@@ -22304,7 +22381,45 @@ function CaretakerSummary({
           </DialogHeader>
 
           <div className="grid gap-4">
-            <div className="grid gap-3 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4 md:grid-cols-[minmax(0,180px)_minmax(0,1fr)_auto] md:items-end">
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4">
+              <div>
+                <p className="font-semibold text-[#55311c]">Monthly goals</p>
+                <p className="text-sm text-[rgba(0,0,0,0.7)]">
+                  {monthlyGoalsEnabled
+                    ? "Targets and progress are shown in the caretaker summary."
+                    : "Targets and progress are hidden from the caretaker summary."}
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={monthlyGoalsEnabled}
+                onClick={() =>
+                  updateMonthlyGoalsEnabledMutation.mutate(
+                    !monthlyGoalsEnabled,
+                  )
+                }
+                disabled={updateMonthlyGoalsEnabledMutation.isPending}
+                className={`relative h-7 w-12 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                  monthlyGoalsEnabled ? "bg-[#8c7569]" : "bg-[#c9c1bb]"
+                }`}
+              >
+                <span
+                  className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                    monthlyGoalsEnabled ? "translate-x-6" : "translate-x-1"
+                  }`}
+                />
+                <span className="sr-only">
+                  {monthlyGoalsEnabled
+                    ? "Disable monthly goals"
+                    : "Enable monthly goals"}
+                </span>
+              </button>
+            </div>
+
+            {monthlyGoalsEnabled && (
+              <>
+                <div className="grid gap-3 rounded-lg border border-[#e5e0dc] bg-[#faf8f6] p-4 md:grid-cols-[minmax(0,180px)_minmax(0,1fr)_auto] md:items-end">
               <div>
                 <label
                   htmlFor="caretaker-goal-month"
@@ -22317,6 +22432,7 @@ function CaretakerSummary({
                   type="month"
                   value={goalFormMonth}
                   onChange={(event) => setGoalFormMonth(event.target.value)}
+                  disabled={!monthlyGoalsEnabled}
                   className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
                 />
               </div>
@@ -22334,6 +22450,7 @@ function CaretakerSummary({
                   step="0.25"
                   value={goalFormHours}
                   onChange={(event) => setGoalFormHours(event.target.value)}
+                  disabled={!monthlyGoalsEnabled}
                   className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
                   placeholder="0"
                 />
@@ -22351,7 +22468,9 @@ function CaretakerSummary({
                 <button
                   type="button"
                   onClick={handleSaveMonthlyGoal}
-                  disabled={saveMonthlyGoalMutation.isPending}
+                  disabled={
+                    !monthlyGoalsEnabled || saveMonthlyGoalMutation.isPending
+                  }
                   className="rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {saveMonthlyGoalMutation.isPending
@@ -22361,9 +22480,9 @@ function CaretakerSummary({
                       : "Save"}
                 </button>
               </div>
-            </div>
+                </div>
 
-            <div className="overflow-x-auto rounded-lg border border-[#e5e0dc]">
+                <div className="overflow-x-auto rounded-lg border border-[#e5e0dc]">
               <table className="w-full border-collapse">
                 <thead>
                   <tr className="bg-[#f3ede8]">
@@ -22432,6 +22551,7 @@ function CaretakerSummary({
                           <button
                             type="button"
                             onClick={() => handleEditMonthlyGoal(goal)}
+                            disabled={!monthlyGoalsEnabled}
                             className="rounded-lg border border-[#8c7569] px-3 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
                           >
                             Edit
@@ -22439,7 +22559,10 @@ function CaretakerSummary({
                           <button
                             type="button"
                             onClick={() => handleDeleteMonthlyGoal(goal)}
-                            disabled={deletingMonthlyGoalId === goal.id}
+                            disabled={
+                              !monthlyGoalsEnabled ||
+                              deletingMonthlyGoalId === goal.id
+                            }
                             className="rounded-lg border border-[#d28a6f] px-3 py-2 text-sm font-semibold text-[#8a3d1b] transition-all duration-200 hover:bg-[#fff1ea] disabled:cursor-not-allowed disabled:opacity-60"
                           >
                             {deletingMonthlyGoalId === goal.id
@@ -22452,7 +22575,9 @@ function CaretakerSummary({
                   ))}
                 </tbody>
               </table>
-            </div>
+                </div>
+              </>
+            )}
           </div>
         </DialogContent>
       </Dialog>

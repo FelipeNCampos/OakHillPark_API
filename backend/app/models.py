@@ -78,6 +78,7 @@ class UsersPublic(SQLModel):
 class Condominio(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     nome: str = Field(default="OakHillPark", max_length=255)
+    caretaker_monthly_goals_enabled: bool = Field(default=True)
     buildings: list["Building"] = Relationship(
         back_populates="condominio", cascade_delete=True
     )
@@ -1134,6 +1135,14 @@ class CaretakerMonthlyGoalCreate(SQLModel):
 class CaretakerMonthlyGoalUpdate(SQLModel):
     month_start: date | None = None
     target_hours: float | None = Field(default=None, ge=0)
+
+
+class CaretakerMonthlyGoalSettingsUpdate(SQLModel):
+    enabled: bool
+
+
+class CaretakerMonthlyGoalSettingsPublic(SQLModel):
+    enabled: bool
 
 
 class CaretakerMonthlyGoalPublic(SQLModel):

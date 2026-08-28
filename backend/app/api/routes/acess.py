@@ -22,10 +22,13 @@ from app.models import (
     CaretakerMonthlyGoal,
     CaretakerMonthlyGoalCreate,
     CaretakerMonthlyGoalPublic,
+    CaretakerMonthlyGoalSettingsPublic,
+    CaretakerMonthlyGoalSettingsUpdate,
     CaretakerMonthlyGoalsPublic,
     CaretakerMonthlyGoalUpdate,
     CaretakerMonthlyMetricPublic,
     CaretakerMonthlyMetricsPublic,
+    Condominio,
     Funcionario,
     Message,
     User,
@@ -290,14 +293,35 @@ def _iter_month_starts(
 def _build_closed_work_time_pairs(
     records: list[WorkTimeSession],
 ) -> list[tuple[WorkTimeSession, WorkTimeSession]]:
-    sorted_records = sorted(
-        (record for record in records if record.data),
+    records_by_session_id: dict[
+        uuid.UUID, dict[int, WorkTimeSession]
+    ] = {}
+    legacy_records: list[WorkTimeSession] = []
+
+    for record in records:
+        if not record.data:
+            continue
+        if not record.session_id:
+            legacy_records.append(record)
+            continue
+        records_by_session_id.setdefault(record.session_id, {})[record.operacao] = (
+            record
+        )
+
+    pairs: list[tuple[WorkTimeSession, WorkTimeSession]] = []
+    for session_records in records_by_session_id.values():
+        in_record = session_records.get(0)
+        out_record = session_records.get(1)
+        if in_record and out_record:
+            pairs.append((in_record, out_record))
+
+    sorted_legacy_records = sorted(
+        legacy_records,
         key=lambda record: (record.data, record.operacao),
     )
-    pairs: list[tuple[WorkTimeSession, WorkTimeSession]] = []
     open_record: WorkTimeSession | None = None
 
-    for record in sorted_records:
+    for record in sorted_legacy_records:
         if record.operacao == 0:
             if open_record is None:
                 open_record = record
@@ -894,6 +918,58 @@ def read_caretaker_work_time_goals(
         for item in rows
     ]
     return CaretakerMonthlyGoalsPublic(data=data, count=len(data))
+
+
+@router.get(
+    "/caretaker/work-time/goals/settings",
+    response_model=CaretakerMonthlyGoalSettingsPublic,
+    dependencies=[Depends(require_cargo(1))],
+)
+def read_caretaker_work_time_goal_settings(
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> CaretakerMonthlyGoalSettingsPublic:
+    ensure_caretaker_monthly_goal_schema(session)
+    condominio_id = _resolve_user_condominio_id(session, current_user)
+    if not condominio_id:
+        raise HTTPException(status_code=404, detail="Condominium not found")
+
+    condominio = session.get(Condominio, condominio_id)
+    if not condominio:
+        raise HTTPException(status_code=404, detail="Condominium not found")
+
+    return CaretakerMonthlyGoalSettingsPublic(
+        enabled=condominio.caretaker_monthly_goals_enabled
+    )
+
+
+@router.put(
+    "/caretaker/work-time/goals/settings",
+    response_model=CaretakerMonthlyGoalSettingsPublic,
+    dependencies=[Depends(require_cargo(2))],
+)
+def update_caretaker_work_time_goal_settings(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    payload: CaretakerMonthlyGoalSettingsUpdate,
+) -> CaretakerMonthlyGoalSettingsPublic:
+    ensure_caretaker_monthly_goal_schema(session)
+    condominio_id = _resolve_user_condominio_id(session, current_user)
+    if not condominio_id:
+        raise HTTPException(status_code=404, detail="Condominium not found")
+
+    condominio = session.get(Condominio, condominio_id)
+    if not condominio:
+        raise HTTPException(status_code=404, detail="Condominium not found")
+
+    condominio.caretaker_monthly_goals_enabled = payload.enabled
+    session.add(condominio)
+    session.commit()
+    session.refresh(condominio)
+    return CaretakerMonthlyGoalSettingsPublic(
+        enabled=condominio.caretaker_monthly_goals_enabled
+    )
 
 
 @router.post(

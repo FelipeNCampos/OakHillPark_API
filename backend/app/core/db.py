@@ -570,6 +570,20 @@ def ensure_caretaker_monthly_goal_schema(session: Session) -> None:
     bind = session.get_bind()
     inspector = inspect(bind)
 
+    if inspector.has_table("condominio"):
+        condominio_columns = {
+            column["name"] for column in inspector.get_columns("condominio")
+        }
+        if "caretaker_monthly_goals_enabled" not in condominio_columns:
+            session.execute(
+                text(
+                    "ALTER TABLE condominio "
+                    "ADD COLUMN caretaker_monthly_goals_enabled "
+                    "BOOLEAN NOT NULL DEFAULT TRUE"
+                )
+            )
+            session.commit()
+
     if inspector.has_table("caretakermonthlygoal"):
         session.execute(
             text(

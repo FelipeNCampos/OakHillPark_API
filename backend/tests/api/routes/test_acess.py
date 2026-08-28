@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime, timezone
 from unittest.mock import patch
 
@@ -19,7 +20,7 @@ from app.models import (
     UserCreate,
     WorkTimeSession,
 )
-from app.api.routes.acess import get_last_acess
+from app.api.routes.acess import _build_closed_work_time_pairs, get_last_acess
 from tests.utils.user import user_authentication_headers
 from tests.utils.utils import random_email, random_lower_string
 
@@ -1014,6 +1015,93 @@ def test_update_caretaker_work_time_requires_manager_permissions(
     )
 
     assert update_response.status_code == 403
+
+
+def test_monthly_metrics_pair_records_by_session_id() -> None:
+    caretaker_id = uuid.uuid4()
+    first_session_id = uuid.uuid4()
+    second_session_id = uuid.uuid4()
+    records = [
+        WorkTimeSession(
+            funcionario_id=caretaker_id,
+            session_id=first_session_id,
+            operacao=0,
+            data=datetime(2026, 8, 25, 8, 0, tzinfo=timezone.utc),
+        ),
+        WorkTimeSession(
+            funcionario_id=caretaker_id,
+            session_id=second_session_id,
+            operacao=0,
+            data=datetime(2026, 8, 25, 9, 0, tzinfo=timezone.utc),
+        ),
+        WorkTimeSession(
+            funcionario_id=caretaker_id,
+            session_id=second_session_id,
+            operacao=1,
+            data=datetime(2026, 8, 25, 12, 0, tzinfo=timezone.utc),
+        ),
+        WorkTimeSession(
+            funcionario_id=caretaker_id,
+            session_id=first_session_id,
+            operacao=1,
+            data=datetime(2026, 8, 25, 16, 0, tzinfo=timezone.utc),
+        ),
+    ]
+
+    pairs = _build_closed_work_time_pairs(records)
+
+    assert {
+        (in_record.data, out_record.data) for in_record, out_record in pairs
+    } == {
+        (
+            datetime(2026, 8, 25, 8, 0, tzinfo=timezone.utc),
+            datetime(2026, 8, 25, 16, 0, tzinfo=timezone.utc),
+        ),
+        (
+            datetime(2026, 8, 25, 9, 0, tzinfo=timezone.utc),
+            datetime(2026, 8, 25, 12, 0, tzinfo=timezone.utc),
+        ),
+    }
+
+
+def test_caretaker_monthly_goal_settings_can_be_disabled(
+    client: TestClient,
+    db: Session,
+) -> None:
+    caretaker = _create_caretaker_metrics_scenario(db)
+    manager_password = random_lower_string()
+    manager_email = random_email()
+    crud.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=manager_email,
+            password=manager_password,
+            is_active=True,
+            is_superuser=False,
+            cargo=2,
+            condominio_id=caretaker.condominio_id,
+        ),
+    )
+    manager_headers = user_authentication_headers(
+        client=client,
+        email=manager_email,
+        password=manager_password,
+    )
+
+    initial_response = client.get(
+        f"{settings.API_V1_STR}/acess/caretaker/work-time/goals/settings",
+        headers=manager_headers,
+    )
+    update_response = client.put(
+        f"{settings.API_V1_STR}/acess/caretaker/work-time/goals/settings",
+        headers=manager_headers,
+        json={"enabled": False},
+    )
+
+    assert initial_response.status_code == 200
+    assert initial_response.json() == {"enabled": True}
+    assert update_response.status_code == 200
+    assert update_response.json() == {"enabled": False}
 
 
 def test_caretaker_work_time_monthly_metrics_include_carry_over(

@@ -20608,12 +20608,14 @@ function CaretakerSummary({
       return
     }
 
-    const filteredSessions = workTimeSessionsGrouped.filter((session) =>
-      isDateWithinRange(
-        session.inRecord?.data || session.outRecord?.data || "",
-        reportDateFrom,
-        reportDateTo,
-      ),
+    const filteredSessions = workTimeSessionsGrouped.filter(
+      (session) =>
+        session.funcionarioId === activeCaretakerId &&
+        isDateWithinRange(
+          session.inRecord?.data || session.outRecord?.data || "",
+          reportDateFrom,
+          reportDateTo,
+        ),
     )
 
     if (filteredSessions.length === 0) {

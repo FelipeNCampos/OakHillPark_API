@@ -583,7 +583,7 @@ def test_contractor_history_execute_due_sends_sms_to_martlett_owner_1_flat_6(
     assert matching[0]["next_notification_sent_at"] is not None
 
 
-def test_contractor_maintenance_links_phone_to_future_check_in_and_out(
+def test_contractor_maintenance_links_future_matching_contractor_records(
     client: TestClient,
     db: Session,
 ) -> None:
@@ -605,16 +605,42 @@ def test_contractor_maintenance_links_phone_to_future_check_in_and_out(
             "category_id": category_response.json()["id"],
             "tag": "Annual gas",
             "report": "Gas safety inspection",
-            "frequency_days": 365,
+            "frequency_value": 365,
+            "frequency_unit": "days",
             "notes": "Bring the current certificate",
-            "mobile": "07123456789",
+            "filters": [
+                {"field": "company", "value": "Boiler Team"},
+                {"field": "job_description", "value": "Gas safety inspection"},
+                {"field": "mobile", "value": "07123456789"},
+                {"field": "name", "value": "Jamie Cole"},
+            ],
+            "last_completed_at": datetime.now(timezone.utc).isoformat(),
         },
     )
     assert maintenance_response.status_code == 201
     maintenance = maintenance_response.json()
     assert maintenance["is_overdue"] is False
-    assert maintenance["last_completed_at"] is None
-    assert maintenance["status"] == "pending"
+    assert maintenance["last_completed_at"] is not None
+    assert maintenance["status"] == "ok"
+    assert {item["field"] for item in maintenance["filters"]} == {
+        "company",
+        "job_description",
+        "mobile",
+        "name",
+    }
+
+    unmatched_check_in_response = client.post(
+        f"{settings.API_V1_STR}/contractor-access/check-in",
+        json={
+            "condominio_id": str(condominio.id),
+            "name": "Jamie Cole",
+            "company": "Different Contractor",
+            "building_id": str(building.id),
+            "job_description": "Gas safety inspection",
+            "mobile": "07123456789",
+        },
+    )
+    assert unmatched_check_in_response.status_code == 201
 
     check_in_response = client.post(
         f"{settings.API_V1_STR}/contractor-access/check-in",
@@ -658,6 +684,47 @@ def test_contractor_maintenance_links_phone_to_future_check_in_and_out(
     assert completed_record["out_at"] is not None
 
 
+def test_contractor_maintenance_accepts_monthly_interval_and_optional_tag(
+    client: TestClient,
+    db: Session,
+) -> None:
+    condominio = _create_test_condominio(db)
+    manager_headers = _create_manager_headers(client, db, condominio.id)
+
+    category_response = client.post(
+        f"{settings.API_V1_STR}/contractor-access/maintenance/categories",
+        headers=manager_headers,
+        json={"name": "Compliance"},
+    )
+    assert category_response.status_code == 201
+
+    last_completed_at = datetime(2025, 1, 31, 9, 0, tzinfo=timezone.utc)
+    maintenance_response = client.post(
+        f"{settings.API_V1_STR}/contractor-access/maintenance",
+        headers=manager_headers,
+        json={
+            "category_id": category_response.json()["id"],
+            "report": "Quarterly inspection",
+            "frequency_value": 3,
+            "frequency_unit": "months",
+            "filters": [{"field": "company", "value": "Compliance Ltd"}],
+            "last_completed_at": last_completed_at.isoformat(),
+        },
+    )
+    assert maintenance_response.status_code == 201
+
+    maintenance = maintenance_response.json()
+    assert maintenance["tag"] == ""
+    assert maintenance["frequency_value"] == 3
+    assert maintenance["frequency_unit"] == "months"
+    assert maintenance["frequency_days"] is None
+    assert maintenance["last_completed_at"] is not None
+    assert datetime.fromisoformat(maintenance["next_due_at"]).astimezone(
+        timezone.utc
+    ) == datetime(2025, 4, 30, 9, 0, tzinfo=timezone.utc)
+    assert maintenance["is_overdue"] is True
+
+
 def test_contractor_maintenance_schedule_marks_overdue_after_frequency_days(
     client: TestClient,
     db: Session,
@@ -678,8 +745,11 @@ def test_contractor_maintenance_schedule_marks_overdue_after_frequency_days(
             "category_id": category_response.json()["id"],
             "tag": "Boiler",
             "report": "Annual service",
-            "frequency_days": 30,
+            "frequency_value": 30,
+            "frequency_unit": "days",
             "notes": "",
+            "filters": [{"field": "company", "value": "Other Company"}],
+            "last_completed_at": datetime(2020, 1, 1, tzinfo=timezone.utc).isoformat(),
         },
     )
     assert maintenance_response.status_code == 201
@@ -751,8 +821,11 @@ def test_contractor_maintenance_schedule_marks_soon_within_seven_days(
             "category_id": category_response.json()["id"],
             "tag": "Generator",
             "report": "Generator service",
-            "frequency_days": 30,
+            "frequency_value": 30,
+            "frequency_unit": "days",
             "notes": "",
+            "filters": [{"field": "company", "value": "Other Company"}],
+            "last_completed_at": datetime(2020, 1, 1, tzinfo=timezone.utc).isoformat(),
         },
     )
     assert maintenance_response.status_code == 201

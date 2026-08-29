@@ -99,16 +99,31 @@ interface ContractorMaintenanceCategory {
   name: string
 }
 
+type ContractorMaintenanceFilterField =
+  | "company"
+  | "job_description"
+  | "mobile"
+  | "name"
+
+interface ContractorMaintenanceFilter {
+  field: ContractorMaintenanceFilterField
+  value: string
+}
+
 interface ContractorMaintenanceSchedule {
   id: EntityId
   category_id: EntityId
   category_name: string
   tag: string
   report: string
-  frequency_days: number
+  frequency_value: number
+  frequency_unit: "days" | "months"
+  frequency_days?: number | null
   notes: string
+  filters: ContractorMaintenanceFilter[]
   mobile?: string | null
   last_completed_at?: string | null
+  next_due_at?: string | null
   is_overdue: boolean
   status: "pending" | "soon" | "ok"
 }
@@ -2564,7 +2579,9 @@ function ClientDashboard() {
   }
 
   const isTabActive = (targetTab: string) =>
-    activeTab === targetTab || activeTab === `${targetTab}-add`
+    activeTab === targetTab ||
+    activeTab === `${targetTab}-add` ||
+    (targetTab === "contractors" && activeTab === "contractor-maintenance")
 
   const menuGroups = [
     {
@@ -2654,7 +2671,17 @@ function ClientDashboard() {
       case "residents":
         return <ResidentsContent />
       case "contractors":
-        return <ContractorsContent />
+        return (
+          <ContractorsContent
+            onOpenMaintenance={() => setActiveTab("contractor-maintenance")}
+          />
+        )
+      case "contractor-maintenance":
+        return (
+          <ContractorMaintenanceContent
+            onBack={() => setActiveTab("contractors")}
+          />
+        )
       case "tasks":
         return <TasksBoard mode="manager" />
       case "reminds":
@@ -12661,13 +12688,7 @@ function CaretakerRecordCreateDialog({
   )
 }
 
-function ContractorMaintenanceDialog({
-  open,
-  onOpenChange,
-}: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-}) {
+function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
   const queryClient = useQueryClient()
   const { showErrorToast, showSuccessToast } = useCustomToast()
   const [isAddTypeDialogOpen, setIsAddTypeDialogOpen] = useState(false)
@@ -12678,9 +12699,15 @@ function ContractorMaintenanceDialog({
   const [categoryId, setCategoryId] = useState("")
   const [tag, setTag] = useState("")
   const [report, setReport] = useState("")
-  const [frequencyDays, setFrequencyDays] = useState("30")
+  const [frequencyValue, setFrequencyValue] = useState("30")
+  const [frequencyUnit, setFrequencyUnit] = useState<"days" | "months">(
+    "days",
+  )
+  const [lastCompletedAt, setLastCompletedAt] = useState("")
   const [notes, setNotes] = useState("")
-  const [mobile, setMobile] = useState("")
+  const [filters, setFilters] = useState<ContractorMaintenanceFilter[]>([
+    { field: "company", value: "" },
+  ])
   const [scheduleStatusFilter, setScheduleStatusFilter] = useState<
     "all" | "pending" | "soon" | "ok"
   >("all")
@@ -12691,14 +12718,12 @@ function ContractorMaintenanceDialog({
   >({
     queryKey: ["contractor-maintenance-categories"],
     queryFn: () => apiCall("/api/v1/contractor-access/maintenance/categories"),
-    enabled: open,
   })
   const scheduleQuery = useQuery<
     ApiListResponse<ContractorMaintenanceSchedule>
   >({
     queryKey: ["contractor-maintenance-schedule"],
     queryFn: () => apiCall("/api/v1/contractor-access/maintenance/schedule"),
-    enabled: open,
   })
   const historyQuery = useQuery<
     ApiListResponse<ContractorMaintenanceHistoryRecord>
@@ -12706,7 +12731,6 @@ function ContractorMaintenanceDialog({
     queryKey: ["contractor-maintenance-history"],
     queryFn: () =>
       apiCall("/api/v1/contractor-access/maintenance/history", { limit: 100 }),
-    enabled: open,
   })
 
   const resetAddForm = () => {
@@ -12715,9 +12739,11 @@ function ContractorMaintenanceDialog({
     setCategoryId("")
     setTag("")
     setReport("")
-    setFrequencyDays("30")
+    setFrequencyValue("30")
+    setFrequencyUnit("days")
+    setLastCompletedAt("")
     setNotes("")
-    setMobile("")
+    setFilters([{ field: "company", value: "" }])
   }
 
   const createCategoryMutation = useMutation({
@@ -12775,22 +12801,35 @@ function ContractorMaintenanceDialog({
       createCategoryMutation.mutate(name)
       return
     }
-    const frequency = Number(frequencyDays)
-    if (!categoryId || !tag.trim() || !report.trim()) {
-      showErrorToast("Fill category, tag and report")
+    const frequency = Number(frequencyValue)
+    if (!categoryId || !report.trim() || !lastCompletedAt) {
+      showErrorToast("Fill category, report and last completed date")
       return
     }
     if (!Number.isInteger(frequency) || frequency < 1) {
-      showErrorToast("Frequency must be at least one day")
+      showErrorToast("Interval must be at least one")
+      return
+    }
+    if (!filters.length || filters.some((filter) => !filter.value.trim())) {
+      showErrorToast("Add at least one completed link hook")
+      return
+    }
+    if (new Set(filters.map((filter) => filter.field)).size !== filters.length) {
+      showErrorToast("Use each link hook field only once")
       return
     }
     createMaintenanceMutation.mutate({
       category_id: categoryId,
       tag: tag.trim(),
       report: report.trim(),
-      frequency_days: frequency,
+      frequency_value: frequency,
+      frequency_unit: frequencyUnit,
       notes: notes.trim(),
-      mobile: mobile.trim() || null,
+      filters: filters.map((filter) => ({
+        field: filter.field,
+        value: filter.value.trim(),
+      })),
+      last_completed_at: `${lastCompletedAt}T00:00:00.000Z`,
     })
   }
 
@@ -12808,6 +12847,35 @@ function ContractorMaintenanceDialog({
         })
   }
 
+  const formatDate = (value?: string | null) => {
+    if (!value) return "-"
+    const date = new Date(value)
+    return Number.isNaN(date.getTime())
+      ? "-"
+      : date.toLocaleDateString("en-GB", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+          timeZone: "UTC",
+        })
+  }
+
+  const filterFieldLabels: Record<ContractorMaintenanceFilterField, string> = {
+    company: "Company",
+    job_description: "Job description",
+    mobile: "Mobile",
+    name: "Name",
+  }
+
+  const formatMaintenanceFilters = (item: ContractorMaintenanceSchedule) =>
+    item.filters.length
+      ? item.filters
+          .map(
+            (filter) => `${filterFieldLabels[filter.field]} = ${filter.value}`,
+          )
+          .join(" • ")
+      : "-"
+
   const categories = categoriesQuery.data?.data || []
   const schedules = scheduleQuery.data?.data || []
   const history = historyQuery.data?.data || []
@@ -12823,19 +12891,26 @@ function ContractorMaintenanceDialog({
 
   return (
     <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-h-[92vh] overflow-y-auto border-[#e5e0dc] bg-white text-[#55311c] sm:max-w-6xl">
-          <DialogHeader>
-            <div className="flex items-start justify-between gap-4 pr-6">
-              <div>
-                <DialogTitle className="text-[#55311c]">
-                  Maintenance
-                </DialogTitle>
-                <DialogDescription className="text-[rgba(0,0,0,0.7)]">
-                  Track scheduled contractor maintenance and completed IN/OUT
-                  records.
-                </DialogDescription>
-              </div>
+      <div className="w-full space-y-6">
+        <div className="rounded-lg bg-white p-6 shadow-md">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
+                Maintenance
+              </h2>
+              <p className="mt-1 text-sm text-[rgba(0,0,0,0.7)]">
+                Track scheduled contractor maintenance and completed IN/OUT
+                records.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={onBack}
+                className="rounded-lg border border-[#8c7569] bg-white px-4 py-2 text-sm font-semibold text-[#55311c] transition-all hover:bg-[#f0ebe7]"
+              >
+                Back to contractors
+              </button>
               <button
                 type="button"
                 onClick={() => {
@@ -12847,9 +12922,9 @@ function ContractorMaintenanceDialog({
                 + Add
               </button>
             </div>
-          </DialogHeader>
+          </div>
 
-          <Tabs defaultValue="schedule" className="mt-2">
+          <Tabs defaultValue="schedule" className="mt-6">
             <TabsList className="bg-[#f0ebe7]">
               <TabsTrigger
                 value="schedule"
@@ -12908,20 +12983,23 @@ function ContractorMaintenanceDialog({
                       <th className="px-4 py-3">Category</th>
                       <th className="px-4 py-3">Tag</th>
                       <th className="px-4 py-3">Report</th>
-                      <th className="px-4 py-3">Frequency</th>
+                      <th className="px-4 py-3">Last date</th>
+                      <th className="px-4 py-3">Next date</th>
+                      <th className="px-4 py-3">Interval</th>
+                      <th className="px-4 py-3">Link hooks</th>
                       <th className="px-4 py-3">Notes</th>
                     </tr>
                   </thead>
                   <tbody>
                     {scheduleQuery.isLoading ? (
                       <tr>
-                        <td className="px-4 py-5 text-center" colSpan={5}>
+                        <td className="px-4 py-5 text-center" colSpan={8}>
                           Loading maintenance schedule...
                         </td>
                       </tr>
                     ) : filteredSchedules.length === 0 ? (
                       <tr>
-                        <td className="px-4 py-5 text-center" colSpan={5}>
+                        <td className="px-4 py-5 text-center" colSpan={8}>
                           No maintenance matches the selected filters.
                         </td>
                       </tr>
@@ -12940,10 +13018,22 @@ function ContractorMaintenanceDialog({
                           <td className="px-4 py-3 font-semibold">
                             {item.category_name}
                           </td>
-                          <td className="px-4 py-3">{item.tag}</td>
+                          <td className="px-4 py-3">{item.tag || "-"}</td>
                           <td className="px-4 py-3">{item.report}</td>
                           <td className="px-4 py-3">
-                            {item.frequency_days} day(s)
+                            {formatDate(item.last_completed_at)}
+                          </td>
+                          <td className="px-4 py-3">
+                            {formatDate(item.next_due_at)}
+                          </td>
+                          <td className="px-4 py-3">
+                            {item.frequency_value}{" "}
+                            {item.frequency_unit === "days"
+                              ? "day(s)"
+                              : "month(s)"}
+                          </td>
+                          <td className="px-4 py-3">
+                            {formatMaintenanceFilters(item)}
                           </td>
                           <td className="px-4 py-3">{item.notes || "-"}</td>
                         </tr>
@@ -12986,7 +13076,7 @@ function ContractorMaintenanceDialog({
                       history.map((item) => (
                         <tr key={item.id} className="border-t border-[#e5e0dc]">
                           <td className="px-4 py-3">{item.category_name}</td>
-                          <td className="px-4 py-3">{item.tag}</td>
+                          <td className="px-4 py-3">{item.tag || "-"}</td>
                           <td className="px-4 py-3">{item.contractor_name}</td>
                           <td className="px-4 py-3">
                             {formatDateTime(item.in_at)}
@@ -13002,8 +13092,8 @@ function ContractorMaintenanceDialog({
               </div>
             </TabsContent>
           </Tabs>
-        </DialogContent>
-      </Dialog>
+        </div>
+      </div>
 
       <Dialog
         open={isAddTypeDialogOpen}
@@ -13087,7 +13177,7 @@ function ContractorMaintenanceDialog({
                   htmlFor="maintenance-tag"
                   className="mb-1 block text-sm font-semibold"
                 >
-                  Tag
+                  Tag (optional)
                 </label>
                 <input
                   id="maintenance-tag"
@@ -13112,33 +13202,138 @@ function ContractorMaintenanceDialog({
               </div>
               <div>
                 <label
-                  htmlFor="maintenance-frequency"
+                  htmlFor="maintenance-frequency-value"
                   className="mb-1 block text-sm font-semibold"
                 >
-                  Frequency (days)
+                  Interval
                 </label>
                 <input
-                  id="maintenance-frequency"
+                  id="maintenance-frequency-value"
                   type="number"
                   min="1"
-                  value={frequencyDays}
-                  onChange={(event) => setFrequencyDays(event.target.value)}
+                  value={frequencyValue}
+                  onChange={(event) => setFrequencyValue(event.target.value)}
                   className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2"
                 />
               </div>
               <div>
                 <label
-                  htmlFor="maintenance-mobile"
+                  htmlFor="maintenance-frequency-unit"
                   className="mb-1 block text-sm font-semibold"
                 >
-                  Cellphone (optional)
+                  Interval unit
+                </label>
+                <select
+                  id="maintenance-frequency-unit"
+                  value={frequencyUnit}
+                  onChange={(event) =>
+                    setFrequencyUnit(event.target.value as "days" | "months")
+                  }
+                  className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2"
+                >
+                  <option value="days">Days</option>
+                  <option value="months">Months</option>
+                </select>
+              </div>
+              <div>
+                <label
+                  htmlFor="maintenance-last-completed-at"
+                  className="mb-1 block text-sm font-semibold"
+                >
+                  Last completed date
                 </label>
                 <input
-                  id="maintenance-mobile"
-                  value={mobile}
-                  onChange={(event) => setMobile(event.target.value)}
+                  id="maintenance-last-completed-at"
+                  type="date"
+                  value={lastCompletedAt}
+                  onChange={(event) => setLastCompletedAt(event.target.value)}
+                  required
                   className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2"
                 />
+              </div>
+              <div className="md:col-span-2 rounded-lg border border-[#d9d0ca] p-3">
+                <div className="mb-3 flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold">Link hooks</p>
+                    <p className="text-xs text-[rgba(0,0,0,0.65)]">
+                      A contractor record is linked only when all hooks below
+                      match exactly.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setFilters((current) => [
+                        ...current,
+                        { field: "company", value: "" },
+                      ])
+                    }
+                    disabled={filters.length >= 4}
+                    className="rounded border border-[#8c7569] px-3 py-1 text-xs font-semibold text-[#55311c] disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    + Add hook
+                  </button>
+                </div>
+                <div className="grid gap-3">
+                  {filters.map((filter, index) => (
+                    <div
+                      key={`${filter.field}-${index}`}
+                      className="grid gap-2 sm:grid-cols-[minmax(0,180px)_1fr_auto]"
+                    >
+                      <select
+                        aria-label={`Link hook field ${index + 1}`}
+                        value={filter.field}
+                        onChange={(event) =>
+                          setFilters((current) =>
+                            current.map((item, itemIndex) =>
+                              itemIndex === index
+                                ? {
+                                    ...item,
+                                    field: event.target
+                                      .value as ContractorMaintenanceFilterField,
+                                  }
+                                : item,
+                            ),
+                          )
+                        }
+                        className="rounded-lg border border-[#d9d0ca] px-3 py-2"
+                      >
+                        <option value="company">Company</option>
+                        <option value="job_description">Job description</option>
+                        <option value="mobile">Mobile</option>
+                        <option value="name">Name</option>
+                      </select>
+                      <input
+                        aria-label={`Link hook value ${index + 1}`}
+                        value={filter.value}
+                        onChange={(event) =>
+                          setFilters((current) =>
+                            current.map((item, itemIndex) =>
+                              itemIndex === index
+                                ? { ...item, value: event.target.value }
+                                : item,
+                            ),
+                          )
+                        }
+                        placeholder="Value to match"
+                        className="rounded-lg border border-[#d9d0ca] px-3 py-2"
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setFilters((current) =>
+                            current.filter((_, itemIndex) => itemIndex !== index),
+                          )
+                        }
+                        disabled={filters.length === 1}
+                        aria-label={`Remove link hook ${index + 1}`}
+                        className="rounded border border-[#8c7569] px-2 text-[#55311c] disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        <X className="size-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
               <div className="md:col-span-2">
                 <label
@@ -13743,7 +13938,11 @@ function ContractorRecordEditDialog({
   )
 }
 
-function ContractorsContent() {
+function ContractorsContent({
+  onOpenMaintenance,
+}: {
+  onOpenMaintenance: () => void
+}) {
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
   const { user } = useAuth()
@@ -13752,7 +13951,6 @@ function ContractorsContent() {
   const [dateTo, setDateTo] = useState("")
   const [selectedBuildings, setSelectedBuildings] = useState<string[]>([])
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
-  const [isMaintenanceDialogOpen, setIsMaintenanceDialogOpen] = useState(false)
   const [editingContractorVisit, setEditingContractorVisit] =
     useState<ContractorVisitAdmin | null>(null)
   const [isMediaDialogOpen, setIsMediaDialogOpen] = useState(false)
@@ -14041,7 +14239,7 @@ function ContractorsContent() {
             </button>
             <button
               type="button"
-              onClick={() => setIsMaintenanceDialogOpen(true)}
+              onClick={onOpenMaintenance}
               className="rounded-lg border border-[#8c7569] bg-white px-4 py-2 text-sm font-semibold text-[#55311c] transition-all duration-200 hover:bg-[#f0ebe7]"
             >
               Maintenance
@@ -14162,10 +14360,6 @@ function ContractorsContent() {
       <ContractorRecordCreateDialog
         open={isCreateDialogOpen}
         onOpenChange={setIsCreateDialogOpen}
-      />
-      <ContractorMaintenanceDialog
-        open={isMaintenanceDialogOpen}
-        onOpenChange={setIsMaintenanceDialogOpen}
       />
       <ContractorRecordEditDialog
         visit={editingContractorVisit}

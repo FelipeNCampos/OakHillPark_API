@@ -37,6 +37,9 @@ from app.models import (
     ContractorMaintenanceCategoryCreate,
     ContractorMaintenanceCategoryPublic,
     ContractorMaintenanceCreate,
+    ContractorMaintenanceFilter,
+    ContractorMaintenanceFilterCreate,
+    ContractorMaintenanceFilterPublic,
     ContractorMaintenancePublic,
     ContractorMaintenanceRecord,
     ContractorMaintenanceRecordCreate,
@@ -594,30 +597,136 @@ def _require_contractor_maintenance(
     return item
 
 
+def _normalise_maintenance_filter_value(field: str, value: str | None) -> str | None:
+    normalised_value = _normalise_text(value)
+    if not normalised_value:
+        return None
+    if field == "mobile":
+        return _normalize_phone_to_e164(normalised_value)
+    return " ".join(normalised_value.casefold().split())
+
+
+def _get_contractor_maintenance_filters(
+    session: SessionDep, maintenance_id: uuid.UUID
+) -> list[ContractorMaintenanceFilter]:
+    return session.exec(
+        select(ContractorMaintenanceFilter)
+        .where(ContractorMaintenanceFilter.maintenance_id == maintenance_id)
+        .order_by(ContractorMaintenanceFilter.field.asc())
+    ).all()
+
+
+def _contractor_maintenance_matches_visit(
+    maintenance: ContractorMaintenance,
+    filters: list[ContractorMaintenanceFilter],
+    visit: ContractorVisit,
+) -> bool:
+    if not filters:
+        return bool(
+            maintenance.mobile
+            and _normalise_maintenance_filter_value("mobile", maintenance.mobile)
+            == _normalise_maintenance_filter_value("mobile", visit.mobile)
+        )
+
+    visit_values = {
+        "company": visit.company,
+        "job_description": visit.job_description,
+        "mobile": visit.mobile,
+        "name": visit.name,
+    }
+    for maintenance_filter in filters:
+        visit_value = visit_values.get(maintenance_filter.field)
+        expected_value = _normalise_maintenance_filter_value(
+            maintenance_filter.field, maintenance_filter.value
+        )
+        if (
+            not visit_value
+            or not expected_value
+            or _normalise_maintenance_filter_value(
+                maintenance_filter.field, visit_value
+            )
+            != expected_value
+        ):
+            return False
+    return True
+
+
+def _validated_contractor_maintenance_filters(
+    payload_filters: list[ContractorMaintenanceFilterCreate],
+    legacy_mobile: str | None,
+) -> list[tuple[str, str]]:
+    filters: list[tuple[str, str]] = []
+    fields: set[str] = set()
+    for maintenance_filter in payload_filters:
+        field = maintenance_filter.field
+        value = _normalise_text(maintenance_filter.value)
+        if not value:
+            raise HTTPException(status_code=422, detail="Maintenance filter value is required")
+        if not _normalise_maintenance_filter_value(field, value):
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid maintenance filter value for {field}",
+            )
+        if field in fields:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Only one {field} maintenance filter is allowed",
+            )
+        fields.add(field)
+        filters.append((field, value))
+
+    if legacy_mobile:
+        if not _normalise_maintenance_filter_value("mobile", legacy_mobile):
+            raise HTTPException(
+                status_code=422,
+                detail="Invalid maintenance filter value for mobile",
+            )
+        if "mobile" in fields:
+            raise HTTPException(
+                status_code=422,
+                detail="Use either mobile or a mobile maintenance filter, not both",
+            )
+        filters.append(("mobile", legacy_mobile))
+
+    if not filters:
+        raise HTTPException(
+            status_code=422,
+            detail="At least one maintenance filter is required",
+        )
+    return filters
+
+
+def _as_utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
+
+
+def _maintenance_due_at(
+    last_completed_at: datetime, frequency_value: int, frequency_unit: str
+) -> datetime:
+    completed_at = _as_utc(last_completed_at)
+    if frequency_unit == "days":
+        return completed_at + timedelta(days=frequency_value)
+    return _add_months(completed_at, frequency_value)
+
+
 def _is_contractor_maintenance_overdue(
-    last_completed_at: datetime | None, frequency_days: int
+    last_completed_at: datetime | None, frequency_value: int, frequency_unit: str
 ) -> bool:
     if last_completed_at is None:
         return False
-    completed_at = (
-        last_completed_at.replace(tzinfo=timezone.utc)
-        if last_completed_at.tzinfo is None
-        else last_completed_at
-    )
-    return completed_at + timedelta(days=frequency_days) < datetime.now(timezone.utc)
+    return _maintenance_due_at(
+        last_completed_at, frequency_value, frequency_unit
+    ) < datetime.now(timezone.utc)
 
 
 def _contractor_maintenance_status(
-    last_completed_at: datetime | None, frequency_days: int
+    last_completed_at: datetime | None, frequency_value: int, frequency_unit: str
 ) -> Literal["pending", "soon", "ok"]:
     if last_completed_at is None:
         return "pending"
-    completed_at = (
-        last_completed_at.replace(tzinfo=timezone.utc)
-        if last_completed_at.tzinfo is None
-        else last_completed_at
+    due_at = _maintenance_due_at(
+        last_completed_at, frequency_value, frequency_unit
     )
-    due_at = completed_at + timedelta(days=frequency_days)
     now = datetime.now(timezone.utc)
     if due_at < now:
         return "pending"
@@ -631,7 +740,8 @@ def _contractor_maintenance_to_public(
     maintenance: ContractorMaintenance,
     category: ContractorMaintenanceCategory,
 ) -> ContractorMaintenancePublic:
-    last_completed_at = session.exec(
+    filters = _get_contractor_maintenance_filters(session, maintenance.id)
+    record_last_completed_at = session.exec(
         select(ContractorMaintenanceRecord.out_at)
         .where(
             ContractorMaintenanceRecord.maintenance_id == maintenance.id,
@@ -640,21 +750,59 @@ def _contractor_maintenance_to_public(
         .order_by(ContractorMaintenanceRecord.out_at.desc())
         .limit(1)
     ).first()
+    last_completed_at = maintenance.last_completed_at
+    if record_last_completed_at and (
+        last_completed_at is None
+        or _as_utc(record_last_completed_at) > _as_utc(last_completed_at)
+    ):
+        last_completed_at = record_last_completed_at
+    frequency_unit: Literal["days", "months"] = (
+        maintenance.frequency_unit
+        if maintenance.frequency_unit in {"days", "months"}
+        else "days"
+    )
+    next_due_at = (
+        _maintenance_due_at(
+            last_completed_at,
+            maintenance.frequency_value,
+            frequency_unit,
+        )
+        if last_completed_at
+        else None
+    )
     return ContractorMaintenancePublic(
         id=maintenance.id,
         category_id=category.id,
         category_name=category.name,
         tag=maintenance.tag,
         report=maintenance.report,
-        frequency_days=maintenance.frequency_days,
+        frequency_value=maintenance.frequency_value,
+        frequency_unit=frequency_unit,
+        frequency_days=(
+            maintenance.frequency_value
+            if maintenance.frequency_unit == "days"
+            else None
+        ),
         notes=maintenance.notes,
+        filters=[
+            ContractorMaintenanceFilterPublic(
+                field=item.field,
+                value=item.value,
+            )
+            for item in filters
+        ],
         mobile=maintenance.mobile,
         last_completed_at=last_completed_at,
+        next_due_at=next_due_at,
         is_overdue=_is_contractor_maintenance_overdue(
-            last_completed_at, maintenance.frequency_days
+            last_completed_at,
+            maintenance.frequency_value,
+            frequency_unit,
         ),
         status=_contractor_maintenance_status(
-            last_completed_at, maintenance.frequency_days
+            last_completed_at,
+            maintenance.frequency_value,
+            frequency_unit,
         ),
         created_at=maintenance.created_at,
         updated_at=maintenance.updated_at,
@@ -684,18 +832,14 @@ def _contractor_maintenance_record_to_public(
 def _create_maintenance_records_for_contractor_visit(
     session: SessionDep, visit: ContractorVisit
 ) -> None:
-    normalized_visit_mobile = _normalize_phone_to_e164(visit.mobile)
-    if not normalized_visit_mobile:
-        return
-
     maintenances = session.exec(
         select(ContractorMaintenance).where(
             ContractorMaintenance.condominio_id == visit.condominio_id,
-            ContractorMaintenance.mobile.is_not(None),
         )
     ).all()
     for maintenance in maintenances:
-        if _normalize_phone_to_e164(maintenance.mobile) != normalized_visit_mobile:
+        filters = _get_contractor_maintenance_filters(session, maintenance.id)
+        if not _contractor_maintenance_matches_visit(maintenance, filters, visit):
             continue
         existing = session.exec(
             select(ContractorMaintenanceRecord).where(
@@ -1237,21 +1381,52 @@ def create_contractor_maintenance(
     category = _require_contractor_maintenance_category(
         session, condominio_id, payload.category_id
     )
-    tag = _normalise_text(payload.tag)
+    tag = _normalise_text(payload.tag) or ""
     report = _normalise_text(payload.report)
-    if not tag or not report:
-        raise HTTPException(status_code=422, detail="Tag and report are required")
+    if not report:
+        raise HTTPException(status_code=422, detail="Report is required")
+
+    if payload.frequency_value is None:
+        if payload.frequency_unit is not None or payload.frequency_days is None:
+            raise HTTPException(
+                status_code=422,
+                detail="Frequency value and unit are required",
+            )
+        frequency_value = payload.frequency_days
+        frequency_unit: Literal["days", "months"] = "days"
+    elif payload.frequency_unit is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Frequency value and unit are required",
+        )
+    else:
+        frequency_value = payload.frequency_value
+        frequency_unit = payload.frequency_unit
+
+    mobile = _normalise_text(payload.mobile)
+    filters = _validated_contractor_maintenance_filters(payload.filters, mobile)
 
     maintenance = ContractorMaintenance(
         category_id=category.id,
         condominio_id=condominio_id,
         tag=tag,
         report=report,
-        frequency_days=payload.frequency_days,
+        frequency_days=frequency_value,
+        frequency_value=frequency_value,
+        frequency_unit=frequency_unit,
         notes=_normalise_text(payload.notes) or "",
-        mobile=_normalise_text(payload.mobile),
+        mobile=mobile,
+        last_completed_at=payload.last_completed_at,
     )
     session.add(maintenance)
+    for field, value in filters:
+        session.add(
+            ContractorMaintenanceFilter(
+                maintenance_id=maintenance.id,
+                field=field,
+                value=value,
+            )
+        )
     session.commit()
     session.refresh(maintenance)
     return _contractor_maintenance_to_public(session, maintenance, category)

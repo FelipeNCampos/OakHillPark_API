@@ -499,8 +499,11 @@ def ensure_contractor_maintenance_schema(session: Session) -> None:
                     tag VARCHAR(100) NOT NULL,
                     report VARCHAR(255) NOT NULL,
                     frequency_days INTEGER NOT NULL,
+                    frequency_value INTEGER NOT NULL,
+                    frequency_unit VARCHAR(10) NOT NULL DEFAULT 'days',
                     notes VARCHAR(2000) NOT NULL DEFAULT '',
                     mobile VARCHAR(30),
+                    last_completed_at TIMESTAMPTZ,
                     created_at TIMESTAMPTZ NOT NULL,
                     updated_at TIMESTAMPTZ NOT NULL,
                     condominio_id UUID NOT NULL REFERENCES condominio (id) ON DELETE CASCADE,
@@ -525,6 +528,71 @@ def ensure_contractor_maintenance_schema(session: Session) -> None:
             text(
                 "CREATE INDEX IF NOT EXISTS ix_contractormaintenance_mobile "
                 "ON contractormaintenance (mobile)"
+            )
+        )
+        session.commit()
+
+    inspector = inspect(bind)
+    columns = {
+        column["name"] for column in inspector.get_columns("contractormaintenance")
+    }
+    if "frequency_unit" not in columns:
+        session.execute(
+            text(
+                "ALTER TABLE contractormaintenance "
+                "ADD COLUMN frequency_unit VARCHAR(10) NOT NULL DEFAULT 'days'"
+            )
+        )
+        session.commit()
+    if "frequency_value" not in columns:
+        session.execute(
+            text(
+                "ALTER TABLE contractormaintenance "
+                "ADD COLUMN frequency_value INTEGER"
+            )
+        )
+        session.execute(
+            text(
+                "UPDATE contractormaintenance "
+                "SET frequency_value = frequency_days "
+                "WHERE frequency_value IS NULL"
+            )
+        )
+        session.commit()
+    if "last_completed_at" not in columns:
+        session.execute(
+            text(
+                "ALTER TABLE contractormaintenance "
+                "ADD COLUMN last_completed_at TIMESTAMPTZ"
+            )
+        )
+        session.commit()
+
+    inspector = inspect(bind)
+    if not inspector.has_table("contractormaintenancefilter"):
+        session.execute(
+            text(
+                """
+                CREATE TABLE contractormaintenancefilter (
+                    id UUID PRIMARY KEY,
+                    field VARCHAR(30) NOT NULL,
+                    value VARCHAR(255) NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL,
+                    maintenance_id UUID NOT NULL REFERENCES contractormaintenance (id) ON DELETE CASCADE
+                )
+                """
+            )
+        )
+        session.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_contractormaintenancefilter_maintenance_id "
+                "ON contractormaintenancefilter (maintenance_id)"
+            )
+        )
+        session.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_contractormaintenancefilter_maintenance_field "
+                "ON contractormaintenancefilter (maintenance_id, field)"
             )
         )
         session.commit()

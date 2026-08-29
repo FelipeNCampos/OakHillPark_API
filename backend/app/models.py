@@ -407,9 +407,17 @@ class ContractorMaintenance(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     tag: str = Field(default="", max_length=100)
     report: str = Field(default="", max_length=255)
+    # Retained for compatibility with existing rows and integrations. New
+    # maintenance schedules use frequency_value and frequency_unit instead.
     frequency_days: int = Field(ge=1)
+    frequency_value: int = Field(default=1, ge=1)
+    frequency_unit: str = Field(default="days", max_length=10)
     notes: str = Field(default="", max_length=2000)
     mobile: str | None = Field(default=None, max_length=30)
+    last_completed_at: datetime | None = Field(
+        default=None,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
     created_at: datetime = Field(
         default_factory=get_datetime_utc,
         sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
@@ -423,6 +431,19 @@ class ContractorMaintenance(SQLModel, table=True):
     )
     category_id: uuid.UUID = Field(
         foreign_key="contractormaintenancecategory.id", nullable=False, ondelete="CASCADE"
+    )
+
+
+class ContractorMaintenanceFilter(SQLModel, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    field: str = Field(max_length=30)
+    value: str = Field(max_length=255)
+    created_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    maintenance_id: uuid.UUID = Field(
+        foreign_key="contractormaintenance.id", nullable=False, ondelete="CASCADE"
     )
 
 
@@ -1335,13 +1356,30 @@ class ContractorMaintenanceCategoriesPublic(SQLModel):
     count: int
 
 
+class ContractorMaintenanceFilterCreate(SQLModel):
+    field: Literal["company", "job_description", "mobile", "name"]
+    value: str = Field(min_length=1, max_length=255)
+
+
+class ContractorMaintenanceFilterPublic(SQLModel):
+    field: Literal["company", "job_description", "mobile", "name"]
+    value: str
+
+
 class ContractorMaintenanceCreate(SQLModel):
     category_id: uuid.UUID
-    tag: str = Field(min_length=1, max_length=100)
+    tag: str = Field(default="", max_length=100)
     report: str = Field(min_length=1, max_length=255)
-    frequency_days: int = Field(ge=1)
+    frequency_value: int | None = Field(default=None, ge=1)
+    frequency_unit: Literal["days", "months"] | None = None
+    # Deprecated input accepted for existing clients. New clients must send
+    # frequency_value together with frequency_unit.
+    frequency_days: int | None = Field(default=None, ge=1)
     notes: str = Field(default="", max_length=2000)
+    filters: list[ContractorMaintenanceFilterCreate] = Field(default_factory=list)
+    # Deprecated: clients should configure a mobile filter in filters instead.
     mobile: str | None = Field(default=None, max_length=30)
+    last_completed_at: datetime
 
 
 class ContractorMaintenancePublic(SQLModel):
@@ -1350,10 +1388,14 @@ class ContractorMaintenancePublic(SQLModel):
     category_name: str
     tag: str
     report: str
-    frequency_days: int
+    frequency_value: int
+    frequency_unit: Literal["days", "months"]
+    frequency_days: int | None
     notes: str
+    filters: list[ContractorMaintenanceFilterPublic]
     mobile: str | None
     last_completed_at: datetime | None
+    next_due_at: datetime | None
     is_overdue: bool
     status: Literal["pending", "soon", "ok"]
     created_at: datetime

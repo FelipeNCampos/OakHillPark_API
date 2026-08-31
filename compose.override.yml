@@ -1,11 +1,11 @@
 services:
   db:
     ports:
-      - "5432:5432"
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
 
   adminer:
     ports:
-      - "8080:8080"
+      - "${ADMINER_HOST_PORT:-8080}:8080"
     networks:
       - default
     labels:
@@ -17,7 +17,7 @@ services:
 
   backend:
     ports:
-      - "8000:8000"
+      - "${BACKEND_HOST_PORT:-8000}:8000"
     networks:
       - default
     labels:
@@ -25,10 +25,10 @@ services:
 
   frontend:
     ports:
-      - "5173:80"
+      - "${FRONTEND_HOST_PORT:-5173}:80"
     build:
       args:
-        - VITE_API_URL=http://localhost:8000
+        - VITE_API_URL=http://localhost:${BACKEND_HOST_PORT:-8000}
         - NODE_ENV=production
     networks:
       - default

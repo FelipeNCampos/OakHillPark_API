@@ -2580,8 +2580,7 @@ function ClientDashboard() {
 
   const isTabActive = (targetTab: string) =>
     activeTab === targetTab ||
-    activeTab === `${targetTab}-add` ||
-    (targetTab === "contractors" && activeTab === "contractor-maintenance")
+    activeTab === `${targetTab}-add`
 
   const menuGroups = [
     {
@@ -2622,6 +2621,7 @@ function ClientDashboard() {
     { label: "Reminders", id: "reminds" },
     { label: "Residents", id: "residents" },
     { label: "Contractors", id: "contractors" },
+    { label: "Maintenance", id: "contractor-maintenance" },
     { label: "Cleaner", id: "cleaner" },
     { label: "Caretaker", id: "caretaker" },
     { label: "Bins", id: "bins" },

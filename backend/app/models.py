@@ -1379,7 +1379,11 @@ class ContractorMaintenanceCreate(SQLModel):
     filters: list[ContractorMaintenanceFilterCreate] = Field(default_factory=list)
     # Deprecated: clients should configure a mobile filter in filters instead.
     mobile: str | None = Field(default=None, max_length=30)
-    last_completed_at: datetime
+    last_completed_at: datetime | None = None
+
+
+class ContractorMaintenanceUpdate(ContractorMaintenanceCreate):
+    """Full replacement payload for a contractor maintenance schedule."""
 
 
 class ContractorMaintenancePublic(SQLModel):

@@ -11,6 +11,9 @@ import { GlobalWorkerOptions } from "pdfjs-dist"
 import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url"
 import {
   CircleDollarSign,
+  ChevronDown,
+  ChevronsUpDown,
+  ChevronUp,
   Copy,
   Download,
   FileSpreadsheet,
@@ -22,7 +25,7 @@ import {
   X,
 } from "lucide-react"
 import QRCode from "qrcode"
-import type { ChangeEvent, KeyboardEvent } from "react"
+import type { ChangeEvent, KeyboardEvent, ReactNode } from "react"
 import {
   useDeferredValue,
   useEffect,
@@ -12698,20 +12701,33 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
   const [categoryName, setCategoryName] = useState("")
   const [categoryId, setCategoryId] = useState("")
   const [tag, setTag] = useState("")
-  const [report, setReport] = useState("")
+  const [description, setDescription] = useState("")
   const [frequencyValue, setFrequencyValue] = useState("30")
   const [frequencyUnit, setFrequencyUnit] = useState<"days" | "months">(
     "days",
   )
   const [lastCompletedAt, setLastCompletedAt] = useState("")
   const [notes, setNotes] = useState("")
-  const [filters, setFilters] = useState<ContractorMaintenanceFilter[]>([
-    { field: "company", value: "" },
-  ])
+  const [filters, setFilters] = useState<ContractorMaintenanceFilter[]>([])
   const [scheduleStatusFilter, setScheduleStatusFilter] = useState<
     "all" | "pending" | "soon" | "ok"
   >("all")
   const [scheduleCategoryFilter, setScheduleCategoryFilter] = useState("all")
+  const [selectedMaintenanceId, setSelectedMaintenanceId] = useState<
+    EntityId | null
+  >(null)
+  const [scheduleSort, setScheduleSort] = useState<{
+    key:
+      | "category"
+      | "tag"
+      | "description"
+      | "lastDone"
+      | "nextDone"
+      | "interval"
+      | "linkHooks"
+      | "notes"
+    direction: "asc" | "desc"
+  }>({ key: "nextDone", direction: "asc" })
 
   const categoriesQuery = useQuery<
     ApiListResponse<ContractorMaintenanceCategory>
@@ -12738,12 +12754,12 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
     setCategoryName("")
     setCategoryId("")
     setTag("")
-    setReport("")
+    setDescription("")
     setFrequencyValue("30")
     setFrequencyUnit("days")
     setLastCompletedAt("")
     setNotes("")
-    setFilters([{ field: "company", value: "" }])
+    setFilters([])
   }
 
   const createCategoryMutation = useMutation({
@@ -12802,34 +12818,36 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
       return
     }
     const frequency = Number(frequencyValue)
-    if (!categoryId || !report.trim() || !lastCompletedAt) {
-      showErrorToast("Fill category, report and last completed date")
+    if (!categoryId || !description.trim()) {
+      showErrorToast("Fill category and descriptions")
       return
     }
     if (!Number.isInteger(frequency) || frequency < 1) {
       showErrorToast("Interval must be at least one")
       return
     }
-    if (!filters.length || filters.some((filter) => !filter.value.trim())) {
-      showErrorToast("Add at least one completed link hook")
-      return
-    }
-    if (new Set(filters.map((filter) => filter.field)).size !== filters.length) {
+    const completedFilters = filters.filter((filter) => filter.value.trim())
+    if (
+      new Set(completedFilters.map((filter) => filter.field)).size !==
+      completedFilters.length
+    ) {
       showErrorToast("Use each link hook field only once")
       return
     }
     createMaintenanceMutation.mutate({
       category_id: categoryId,
       tag: tag.trim(),
-      report: report.trim(),
+      report: description.trim(),
       frequency_value: frequency,
       frequency_unit: frequencyUnit,
       notes: notes.trim(),
-      filters: filters.map((filter) => ({
+      filters: completedFilters.map((filter) => ({
         field: filter.field,
         value: filter.value.trim(),
       })),
-      last_completed_at: `${lastCompletedAt}T00:00:00.000Z`,
+      ...(lastCompletedAt
+        ? { last_completed_at: `${lastCompletedAt}T00:00:00.000Z` }
+        : {}),
     })
   }
 
@@ -12886,8 +12904,113 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
       (scheduleCategoryFilter === "all" ||
         String(item.category_id) === scheduleCategoryFilter),
   )
+  const sortedSchedules = [...filteredSchedules].sort((a, b) => {
+    const compareText = (first: string, second: string) =>
+      first.localeCompare(second, undefined, {
+        numeric: true,
+        sensitivity: "base",
+      })
+    const compareDate = (first?: string | null, second?: string | null) => {
+      if (!first) return second ? 1 : 0
+      if (!second) return -1
+      return new Date(first).getTime() - new Date(second).getTime()
+    }
+
+    let comparison = 0
+    switch (scheduleSort.key) {
+      case "category":
+        comparison = compareText(a.category_name, b.category_name)
+        break
+      case "tag":
+        comparison = compareText(a.tag, b.tag)
+        break
+      case "description":
+        comparison = compareText(a.report, b.report)
+        break
+      case "lastDone":
+        comparison = compareDate(a.last_completed_at, b.last_completed_at)
+        break
+      case "nextDone":
+        comparison = compareDate(a.next_due_at, b.next_due_at)
+        break
+      case "interval":
+        comparison = a.frequency_value - b.frequency_value
+        if (comparison === 0) {
+          comparison = compareText(a.frequency_unit, b.frequency_unit)
+        }
+        break
+      case "linkHooks":
+        comparison = compareText(
+          formatMaintenanceFilters(a),
+          formatMaintenanceFilters(b),
+        )
+        break
+      case "notes":
+        comparison = compareText(a.notes, b.notes)
+        break
+    }
+
+    if (comparison === 0) return compareText(String(a.id), String(b.id))
+    return scheduleSort.direction === "asc" ? comparison : -comparison
+  })
+  const toggleScheduleSort = (key: typeof scheduleSort.key) => {
+    setScheduleSort((current) => ({
+      key,
+      direction:
+        current.key === key && current.direction === "asc" ? "desc" : "asc",
+    }))
+  }
+  const ScheduleSortHeader = ({
+    column,
+    children,
+  }: {
+    column: typeof scheduleSort.key
+    children: ReactNode
+  }) => {
+    const isSorted = scheduleSort.key === column
+    const SortIcon = isSorted
+      ? scheduleSort.direction === "asc"
+        ? ChevronUp
+        : ChevronDown
+      : ChevronsUpDown
+
+    return (
+      <th
+        aria-sort={
+          isSorted
+            ? scheduleSort.direction === "asc"
+              ? "ascending"
+              : "descending"
+            : "none"
+        }
+        className="px-4 py-3"
+      >
+        <button
+          type="button"
+          onClick={() => toggleScheduleSort(column)}
+          className="inline-flex items-center gap-1 text-left hover:text-[#8c7569] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8c7569]"
+        >
+          {children}
+          <SortIcon aria-hidden="true" className="size-3.5" />
+        </button>
+      </th>
+    )
+  }
   const isSaving =
     createCategoryMutation.isPending || createMaintenanceMutation.isPending
+  const selectedMaintenance = selectedMaintenanceId
+    ? schedules.find((item) => item.id === selectedMaintenanceId)
+    : undefined
+
+  if (selectedMaintenance) {
+    return (
+      <ContractorMaintenanceDetail
+        maintenance={selectedMaintenance}
+        categories={categories}
+        onBack={() => setSelectedMaintenanceId(null)}
+      />
+    )
+  }
 
   return (
     <>
@@ -12980,14 +13103,26 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
                 <table className="min-w-full text-left text-sm">
                   <thead className="bg-[#f5f1ee] text-xs uppercase tracking-wide text-[#55311c]">
                     <tr>
-                      <th className="px-4 py-3">Category</th>
-                      <th className="px-4 py-3">Tag</th>
-                      <th className="px-4 py-3">Report</th>
-                      <th className="px-4 py-3">Last date</th>
-                      <th className="px-4 py-3">Next date</th>
-                      <th className="px-4 py-3">Interval</th>
-                      <th className="px-4 py-3">Link hooks</th>
-                      <th className="px-4 py-3">Notes</th>
+                      <ScheduleSortHeader column="category">
+                        Category
+                      </ScheduleSortHeader>
+                      <ScheduleSortHeader column="tag">Tag</ScheduleSortHeader>
+                      <ScheduleSortHeader column="description">
+                        Descriptions
+                      </ScheduleSortHeader>
+                      <ScheduleSortHeader column="lastDone">
+                        Last done
+                      </ScheduleSortHeader>
+                      <ScheduleSortHeader column="nextDone">
+                        Next done
+                      </ScheduleSortHeader>
+                      <ScheduleSortHeader column="interval">
+                        Interval
+                      </ScheduleSortHeader>
+                      <ScheduleSortHeader column="linkHooks">
+                        Link hooks
+                      </ScheduleSortHeader>
+                      <ScheduleSortHeader column="notes">Notes</ScheduleSortHeader>
                     </tr>
                   </thead>
                   <tbody>
@@ -12997,22 +13132,32 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
                           Loading maintenance schedule...
                         </td>
                       </tr>
-                    ) : filteredSchedules.length === 0 ? (
+                    ) : sortedSchedules.length === 0 ? (
                       <tr>
                         <td className="px-4 py-5 text-center" colSpan={8}>
                           No maintenance matches the selected filters.
                         </td>
                       </tr>
                     ) : (
-                      filteredSchedules.map((item) => (
+                      sortedSchedules.map((item) => (
                         <tr
                           key={item.id}
+                          role="button"
+                          tabIndex={0}
+                          aria-label={`Open details for ${item.report}`}
+                          onClick={() => setSelectedMaintenanceId(item.id)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault()
+                              setSelectedMaintenanceId(item.id)
+                            }
+                          }}
                           className={
                             item.status === "pending"
-                              ? "border-t border-red-200 bg-red-100 text-red-950"
+                              ? "cursor-pointer border-t border-red-200 bg-red-100 text-red-950 transition hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#8c7569]"
                               : item.status === "soon"
-                                ? "border-t border-amber-200 bg-amber-100 text-amber-950"
-                                : "border-t border-emerald-200 bg-emerald-100 text-emerald-950"
+                                ? "cursor-pointer border-t border-amber-200 bg-amber-100 text-amber-950 transition hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#8c7569]"
+                                : "cursor-pointer border-t border-emerald-200 bg-emerald-100 text-emerald-950 transition hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#8c7569]"
                           }
                         >
                           <td className="px-4 py-3 font-semibold">
@@ -13074,7 +13219,22 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
                       </tr>
                     ) : (
                       history.map((item) => (
-                        <tr key={item.id} className="border-t border-[#e5e0dc]">
+                        <tr
+                          key={item.id}
+                          role="button"
+                          tabIndex={0}
+                          aria-label={`Open details for ${item.report}`}
+                          onClick={() =>
+                            setSelectedMaintenanceId(item.maintenance_id)
+                          }
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault()
+                              setSelectedMaintenanceId(item.maintenance_id)
+                            }
+                          }}
+                          className="cursor-pointer border-t border-[#e5e0dc] transition hover:bg-[#f5f1ee] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#8c7569]"
+                        >
                           <td className="px-4 py-3">{item.category_name}</td>
                           <td className="px-4 py-3">{item.tag || "-"}</td>
                           <td className="px-4 py-3">{item.contractor_name}</td>
@@ -13188,15 +13348,15 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
               </div>
               <div className="md:col-span-2">
                 <label
-                  htmlFor="maintenance-report"
+                  htmlFor="maintenance-description"
                   className="mb-1 block text-sm font-semibold"
                 >
-                  Report
+                  Descriptions
                 </label>
                 <input
-                  id="maintenance-report"
-                  value={report}
-                  onChange={(event) => setReport(event.target.value)}
+                  id="maintenance-description"
+                  value={description}
+                  onChange={(event) => setDescription(event.target.value)}
                   className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2"
                 />
               </div>
@@ -13240,24 +13400,25 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
                   htmlFor="maintenance-last-completed-at"
                   className="mb-1 block text-sm font-semibold"
                 >
-                  Last completed date
+                  Last done (optional)
                 </label>
                 <input
                   id="maintenance-last-completed-at"
                   type="date"
                   value={lastCompletedAt}
                   onChange={(event) => setLastCompletedAt(event.target.value)}
-                  required
                   className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2"
                 />
               </div>
               <div className="md:col-span-2 rounded-lg border border-[#d9d0ca] p-3">
                 <div className="mb-3 flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-sm font-semibold">Link hooks</p>
+                    <p className="text-sm font-semibold">
+                      Link hooks (optional)
+                    </p>
                     <p className="text-xs text-[rgba(0,0,0,0.65)]">
-                      A contractor record is linked only when all hooks below
-                      match exactly.
+                      When provided, a contractor record is linked only when
+                      all hooks match exactly.
                     </p>
                   </div>
                   <button
@@ -13325,9 +13486,8 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
                             current.filter((_, itemIndex) => itemIndex !== index),
                           )
                         }
-                        disabled={filters.length === 1}
                         aria-label={`Remove link hook ${index + 1}`}
-                        className="rounded border border-[#8c7569] px-2 text-[#55311c] disabled:cursor-not-allowed disabled:opacity-40"
+                        className="rounded border border-[#8c7569] px-2 text-[#55311c]"
                       >
                         <X className="size-4" />
                       </button>
@@ -13374,6 +13534,356 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
         </DialogContent>
       </Dialog>
     </>
+  )
+}
+
+function ContractorMaintenanceDetail({
+  maintenance,
+  categories,
+  onBack,
+}: {
+  maintenance: ContractorMaintenanceSchedule
+  categories: ContractorMaintenanceCategory[]
+  onBack: () => void
+}) {
+  const queryClient = useQueryClient()
+  const { showErrorToast, showSuccessToast } = useCustomToast()
+  const [categoryId, setCategoryId] = useState(String(maintenance.category_id))
+  const [tag, setTag] = useState(maintenance.tag)
+  const [description, setDescription] = useState(maintenance.report)
+  const [frequencyValue, setFrequencyValue] = useState(
+    String(maintenance.frequency_value),
+  )
+  const [frequencyUnit, setFrequencyUnit] = useState<"days" | "months">(
+    maintenance.frequency_unit,
+  )
+  const [lastCompletedAt, setLastCompletedAt] = useState(
+    maintenance.last_completed_at?.slice(0, 10) || "",
+  )
+  const [notes, setNotes] = useState(maintenance.notes)
+  const [filters, setFilters] = useState<ContractorMaintenanceFilter[]>(
+    maintenance.filters,
+  )
+
+  useEffect(() => {
+    setCategoryId(String(maintenance.category_id))
+    setTag(maintenance.tag)
+    setDescription(maintenance.report)
+    setFrequencyValue(String(maintenance.frequency_value))
+    setFrequencyUnit(maintenance.frequency_unit)
+    setLastCompletedAt(maintenance.last_completed_at?.slice(0, 10) || "")
+    setNotes(maintenance.notes)
+    setFilters(maintenance.filters)
+  }, [maintenance])
+
+  const updateMaintenanceMutation = useMutation({
+    mutationFn: (payload: Record<string, unknown>) =>
+      apiCall(`/api/v1/contractor-access/maintenance/${maintenance.id}`, {
+        method: "PUT",
+        body: payload,
+      }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ["contractor-maintenance-schedule"],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["contractor-maintenance-history"],
+        }),
+      ])
+      showSuccessToast("Maintenance updated successfully")
+      onBack()
+    },
+    onError: (error: unknown) =>
+      showErrorToast(
+        error instanceof Error ? error.message : "Could not update maintenance",
+      ),
+  })
+
+  const handleSave = () => {
+    const frequency = Number(frequencyValue)
+    if (!categoryId || !description.trim()) {
+      showErrorToast("Fill category and descriptions")
+      return
+    }
+    if (!Number.isInteger(frequency) || frequency < 1) {
+      showErrorToast("Interval must be at least one")
+      return
+    }
+    const completedFilters = filters.filter((filter) => filter.value.trim())
+    if (
+      new Set(completedFilters.map((filter) => filter.field)).size !==
+      completedFilters.length
+    ) {
+      showErrorToast("Use each link hook field only once")
+      return
+    }
+
+    updateMaintenanceMutation.mutate({
+      category_id: categoryId,
+      tag: tag.trim(),
+      report: description.trim(),
+      frequency_value: frequency,
+      frequency_unit: frequencyUnit,
+      notes: notes.trim(),
+      filters: completedFilters.map((filter) => ({
+        field: filter.field,
+        value: filter.value.trim(),
+      })),
+      last_completed_at: lastCompletedAt
+        ? `${lastCompletedAt}T00:00:00.000Z`
+        : null,
+    })
+  }
+
+  return (
+    <div className="w-full">
+      <div className="rounded-lg bg-white p-6 shadow-md">
+        <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-wide text-[#8c7569]">
+              Maintenance details
+            </p>
+            <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
+              {maintenance.report}
+            </h2>
+            <p className="mt-1 text-sm text-[rgba(0,0,0,0.7)]">
+              Update the maintenance schedule and its contractor matching rules.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onBack}
+            disabled={updateMaintenanceMutation.isPending}
+            className="rounded-lg border border-[#8c7569] bg-white px-4 py-2 text-sm font-semibold text-[#55311c] transition-all hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Back to maintenance
+          </button>
+        </div>
+
+        <form
+          className="grid gap-4 md:grid-cols-2"
+          onSubmit={(event) => {
+            event.preventDefault()
+            handleSave()
+          }}
+        >
+          <div>
+            <label
+              htmlFor="maintenance-detail-category"
+              className="mb-1 block text-sm font-semibold"
+            >
+              Category name
+            </label>
+            <select
+              id="maintenance-detail-category"
+              value={categoryId}
+              onChange={(event) => setCategoryId(event.target.value)}
+              className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2"
+            >
+              <option value="">Select a category</option>
+              {categories.map((category) => (
+                <option key={category.id} value={String(category.id)}>
+                  {category.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label
+              htmlFor="maintenance-detail-tag"
+              className="mb-1 block text-sm font-semibold"
+            >
+              Tag (optional)
+            </label>
+            <input
+              id="maintenance-detail-tag"
+              value={tag}
+              onChange={(event) => setTag(event.target.value)}
+              className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2"
+            />
+          </div>
+          <div className="md:col-span-2">
+            <label
+              htmlFor="maintenance-detail-description"
+              className="mb-1 block text-sm font-semibold"
+            >
+              Descriptions
+            </label>
+            <input
+              id="maintenance-detail-description"
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2"
+            />
+          </div>
+          <div>
+            <label
+              htmlFor="maintenance-detail-frequency-value"
+              className="mb-1 block text-sm font-semibold"
+            >
+              Interval
+            </label>
+            <input
+              id="maintenance-detail-frequency-value"
+              type="number"
+              min="1"
+              value={frequencyValue}
+              onChange={(event) => setFrequencyValue(event.target.value)}
+              className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2"
+            />
+          </div>
+          <div>
+            <label
+              htmlFor="maintenance-detail-frequency-unit"
+              className="mb-1 block text-sm font-semibold"
+            >
+              Interval unit
+            </label>
+            <select
+              id="maintenance-detail-frequency-unit"
+              value={frequencyUnit}
+              onChange={(event) =>
+                setFrequencyUnit(event.target.value as "days" | "months")
+              }
+              className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2"
+            >
+              <option value="days">Days</option>
+              <option value="months">Months</option>
+            </select>
+          </div>
+          <div>
+            <label
+              htmlFor="maintenance-detail-last-completed-at"
+              className="mb-1 block text-sm font-semibold"
+            >
+              Last done (optional)
+            </label>
+            <input
+              id="maintenance-detail-last-completed-at"
+              type="date"
+              value={lastCompletedAt}
+              onChange={(event) => setLastCompletedAt(event.target.value)}
+              className="w-full rounded-lg border border-[#d9d0ca] px-3 py-2"
+            />
+          </div>
+          <div className="md:col-span-2 rounded-lg border border-[#d9d0ca] p-3">
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold">Link hooks (optional)</p>
+                <p className="text-xs text-[rgba(0,0,0,0.65)]">
+                  When provided, a contractor record is linked only when all
+                  hooks match exactly.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  setFilters((current) => [
+                    ...current,
+                    { field: "company", value: "" },
+                  ])
+                }
+                disabled={filters.length >= 4}
+                className="rounded border border-[#8c7569] px-3 py-1 text-xs font-semibold text-[#55311c] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                + Add hook
+              </button>
+            </div>
+            <div className="grid gap-3">
+              {filters.map((filter, index) => (
+                <div
+                  key={`${filter.field}-${index}`}
+                  className="grid gap-2 sm:grid-cols-[minmax(0,180px)_1fr_auto]"
+                >
+                  <select
+                    aria-label={`Link hook field ${index + 1}`}
+                    value={filter.field}
+                    onChange={(event) =>
+                      setFilters((current) =>
+                        current.map((item, itemIndex) =>
+                          itemIndex === index
+                            ? {
+                                ...item,
+                                field: event.target
+                                  .value as ContractorMaintenanceFilterField,
+                              }
+                            : item,
+                        ),
+                      )
+                    }
+                    className="rounded-lg border border-[#d9d0ca] px-3 py-2"
+                  >
+                    <option value="company">Company</option>
+                    <option value="job_description">Job description</option>
+                    <option value="mobile">Mobile</option>
+                    <option value="name">Name</option>
+                  </select>
+                  <input
+                    aria-label={`Link hook value ${index + 1}`}
+                    value={filter.value}
+                    onChange={(event) =>
+                      setFilters((current) =>
+                        current.map((item, itemIndex) =>
+                          itemIndex === index
+                            ? { ...item, value: event.target.value }
+                            : item,
+                        ),
+                      )
+                    }
+                    placeholder="Value to match"
+                    className="rounded-lg border border-[#d9d0ca] px-3 py-2"
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setFilters((current) =>
+                        current.filter((_, itemIndex) => itemIndex !== index),
+                      )
+                    }
+                    aria-label={`Remove link hook ${index + 1}`}
+                    className="rounded border border-[#8c7569] px-2 text-[#55311c]"
+                  >
+                    <X className="size-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="md:col-span-2">
+            <label
+              htmlFor="maintenance-detail-notes"
+              className="mb-1 block text-sm font-semibold"
+            >
+              Notes
+            </label>
+            <textarea
+              id="maintenance-detail-notes"
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+              className="min-h-24 w-full rounded-lg border border-[#d9d0ca] px-3 py-2"
+            />
+          </div>
+          <div className="flex justify-end gap-3 md:col-span-2">
+            <button
+              type="button"
+              onClick={onBack}
+              disabled={updateMaintenanceMutation.isPending}
+              className="rounded border border-[#8c7569] px-4 py-2 font-semibold text-[#55311c] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={updateMaintenanceMutation.isPending}
+              className="rounded bg-[#8c7569] px-4 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {updateMaintenanceMutation.isPending ? "Saving..." : "Save changes"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   )
 }
 

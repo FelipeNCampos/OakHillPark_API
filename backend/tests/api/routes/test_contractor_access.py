@@ -725,6 +725,103 @@ def test_contractor_maintenance_accepts_monthly_interval_and_optional_tag(
     assert maintenance["is_overdue"] is True
 
 
+def test_contractor_maintenance_allows_optional_hooks_and_completion_dates(
+    client: TestClient,
+    db: Session,
+) -> None:
+    condominio = _create_test_condominio(db)
+    manager_headers = _create_manager_headers(client, db, condominio.id)
+
+    category_response = client.post(
+        f"{settings.API_V1_STR}/contractor-access/maintenance/categories",
+        headers=manager_headers,
+        json={"name": "Routine"},
+    )
+    assert category_response.status_code == 201
+
+    maintenance_response = client.post(
+        f"{settings.API_V1_STR}/contractor-access/maintenance",
+        headers=manager_headers,
+        json={
+            "category_id": category_response.json()["id"],
+            "report": "Description without a hook or completion date",
+            "frequency_value": 30,
+            "frequency_unit": "days",
+        },
+    )
+    assert maintenance_response.status_code == 201
+
+    maintenance = maintenance_response.json()
+    assert maintenance["filters"] == []
+    assert maintenance["last_completed_at"] is None
+    assert maintenance["next_due_at"] is None
+    assert maintenance["is_overdue"] is False
+    assert maintenance["status"] == "pending"
+
+
+def test_manager_can_update_contractor_maintenance(
+    client: TestClient,
+    db: Session,
+) -> None:
+    condominio = _create_test_condominio(db)
+    manager_headers = _create_manager_headers(client, db, condominio.id)
+
+    initial_category_response = client.post(
+        f"{settings.API_V1_STR}/contractor-access/maintenance/categories",
+        headers=manager_headers,
+        json={"name": "Initial"},
+    )
+    updated_category_response = client.post(
+        f"{settings.API_V1_STR}/contractor-access/maintenance/categories",
+        headers=manager_headers,
+        json={"name": "Updated"},
+    )
+    assert initial_category_response.status_code == 201
+    assert updated_category_response.status_code == 201
+
+    maintenance_response = client.post(
+        f"{settings.API_V1_STR}/contractor-access/maintenance",
+        headers=manager_headers,
+        json={
+            "category_id": initial_category_response.json()["id"],
+            "report": "Initial inspection",
+            "frequency_value": 30,
+            "frequency_unit": "days",
+            "filters": [{"field": "company", "value": "Old contractor"}],
+        },
+    )
+    assert maintenance_response.status_code == 201
+
+    updated_response = client.put(
+        f"{settings.API_V1_STR}/contractor-access/maintenance/"
+        f"{maintenance_response.json()['id']}",
+        headers=manager_headers,
+        json={
+            "category_id": updated_category_response.json()["id"],
+            "tag": "Boiler",
+            "report": "Boiler inspection",
+            "frequency_value": 6,
+            "frequency_unit": "months",
+            "notes": "Certificate required",
+            "filters": [{"field": "name", "value": "Sam Contractor"}],
+            "last_completed_at": "2025-01-31T00:00:00Z",
+        },
+    )
+    assert updated_response.status_code == 200
+
+    updated = updated_response.json()
+    assert updated["category_name"] == "Updated"
+    assert updated["tag"] == "Boiler"
+    assert updated["report"] == "Boiler inspection"
+    assert updated["frequency_value"] == 6
+    assert updated["frequency_unit"] == "months"
+    assert updated["notes"] == "Certificate required"
+    assert updated["filters"] == [{"field": "name", "value": "Sam Contractor"}]
+    assert datetime.fromisoformat(updated["next_due_at"]).astimezone(
+        timezone.utc
+    ) == datetime(2025, 7, 31, tzinfo=timezone.utc)
+
+
 def test_contractor_maintenance_schedule_marks_overdue_after_frequency_days(
     client: TestClient,
     db: Session,

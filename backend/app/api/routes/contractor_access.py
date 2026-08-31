@@ -46,6 +46,7 @@ from app.models import (
     ContractorMaintenanceRecordPublic,
     ContractorMaintenanceRecordsPublic,
     ContractorMaintenancesPublic,
+    ContractorMaintenanceUpdate,
     ContractorOpenVisitPublic,
     ContractorOpenVisitsPublic,
     ContractorVisit,
@@ -688,12 +689,26 @@ def _validated_contractor_maintenance_filters(
             )
         filters.append(("mobile", legacy_mobile))
 
-    if not filters:
+    return filters
+
+
+def _validated_contractor_maintenance_frequency(
+    payload: ContractorMaintenanceCreate,
+) -> tuple[int, Literal["days", "months"]]:
+    if payload.frequency_value is None:
+        if payload.frequency_unit is not None or payload.frequency_days is None:
+            raise HTTPException(
+                status_code=422,
+                detail="Frequency value and unit are required",
+            )
+        return payload.frequency_days, "days"
+
+    if payload.frequency_unit is None:
         raise HTTPException(
             status_code=422,
-            detail="At least one maintenance filter is required",
+            detail="Frequency value and unit are required",
         )
-    return filters
+    return payload.frequency_value, payload.frequency_unit
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -1384,24 +1399,11 @@ def create_contractor_maintenance(
     tag = _normalise_text(payload.tag) or ""
     report = _normalise_text(payload.report)
     if not report:
-        raise HTTPException(status_code=422, detail="Report is required")
+        raise HTTPException(status_code=422, detail="Description is required")
 
-    if payload.frequency_value is None:
-        if payload.frequency_unit is not None or payload.frequency_days is None:
-            raise HTTPException(
-                status_code=422,
-                detail="Frequency value and unit are required",
-            )
-        frequency_value = payload.frequency_days
-        frequency_unit: Literal["days", "months"] = "days"
-    elif payload.frequency_unit is None:
-        raise HTTPException(
-            status_code=422,
-            detail="Frequency value and unit are required",
-        )
-    else:
-        frequency_value = payload.frequency_value
-        frequency_unit = payload.frequency_unit
+    frequency_value, frequency_unit = _validated_contractor_maintenance_frequency(
+        payload
+    )
 
     mobile = _normalise_text(payload.mobile)
     filters = _validated_contractor_maintenance_filters(payload.filters, mobile)
@@ -1419,6 +1421,64 @@ def create_contractor_maintenance(
         last_completed_at=payload.last_completed_at,
     )
     session.add(maintenance)
+    for field, value in filters:
+        session.add(
+            ContractorMaintenanceFilter(
+                maintenance_id=maintenance.id,
+                field=field,
+                value=value,
+            )
+        )
+    session.commit()
+    session.refresh(maintenance)
+    return _contractor_maintenance_to_public(session, maintenance, category)
+
+
+@router.put("/maintenance/{maintenance_id}", response_model=ContractorMaintenancePublic)
+def update_contractor_maintenance(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    maintenance_id: uuid.UUID,
+    payload: ContractorMaintenanceUpdate,
+) -> ContractorMaintenancePublic:
+    ensure_contractor_visit_schema(session)
+    ensure_contractor_maintenance_schema(session)
+    condominio_id = _require_manager_condominio(session, current_user)
+    maintenance = _require_contractor_maintenance(
+        session, condominio_id, maintenance_id
+    )
+    category = _require_contractor_maintenance_category(
+        session, condominio_id, payload.category_id
+    )
+    report = _normalise_text(payload.report)
+    if not report:
+        raise HTTPException(status_code=422, detail="Description is required")
+
+    frequency_value, frequency_unit = _validated_contractor_maintenance_frequency(
+        payload
+    )
+    mobile = _normalise_text(payload.mobile)
+    filters = _validated_contractor_maintenance_filters(payload.filters, mobile)
+
+    maintenance.category_id = category.id
+    maintenance.tag = _normalise_text(payload.tag) or ""
+    maintenance.report = report
+    maintenance.frequency_days = frequency_value
+    maintenance.frequency_value = frequency_value
+    maintenance.frequency_unit = frequency_unit
+    maintenance.notes = _normalise_text(payload.notes) or ""
+    maintenance.mobile = mobile
+    maintenance.last_completed_at = payload.last_completed_at
+    maintenance.updated_at = datetime.now(timezone.utc)
+
+    for maintenance_filter in _get_contractor_maintenance_filters(
+        session, maintenance.id
+    ):
+        session.delete(maintenance_filter)
+
+    session.add(maintenance)
+    session.flush()
     for field, value in filters:
         session.add(
             ContractorMaintenanceFilter(

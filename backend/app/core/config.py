@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     FRONTEND_HOST: str = "http://localhost:5173"
     ENVIRONMENT: Literal["local", "staging", "production"] = "local"
     CASH_FLOW_SHARE_TOKEN_ENCRYPTION_KEY: str | None = None
+    GOOGLE_CALENDAR_CLIENT_ID: str | None = None
+    GOOGLE_CALENDAR_CLIENT_SECRET: str | None = None
+    GOOGLE_CALENDAR_TOKEN_ENCRYPTION_KEY: str | None = None
+    GOOGLE_CALENDAR_REDIRECT_URI: str | None = None
+    GOOGLE_CALENDAR_SYNC_POLL_SECONDS: int = 15
 
     BACKEND_CORS_ORIGINS: Annotated[
         list[AnyUrl] | str, BeforeValidator(parse_cors)
@@ -73,6 +78,25 @@ class Settings(BaseSettings):
             environment=self.ENVIRONMENT,
             domain=self.DOMAIN,
             local_frontend_host=self.FRONTEND_HOST,
+        )
+
+    @property
+    def google_calendar_redirect_uri(self) -> str:
+        if self.GOOGLE_CALENDAR_REDIRECT_URI:
+            return self.GOOGLE_CALENDAR_REDIRECT_URI
+        if self.ENVIRONMENT == "local":
+            return f"http://localhost:8000{self.API_V1_STR}/calendar-integrations/google/callback"
+        return (
+            f"https://api.{self.DOMAIN.rstrip('/')}{self.API_V1_STR}"
+            "/calendar-integrations/google/callback"
+        )
+
+    @property
+    def google_calendar_enabled(self) -> bool:
+        return bool(
+            self.GOOGLE_CALENDAR_CLIENT_ID
+            and self.GOOGLE_CALENDAR_CLIENT_SECRET
+            and self.GOOGLE_CALENDAR_TOKEN_ENCRYPTION_KEY
         )
 
     PROJECT_NAME: str
@@ -176,6 +200,31 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "CASH_FLOW_SHARE_TOKEN_ENCRYPTION_KEY must be a Fernet key"
                 )
+
+        google_calendar_values = (
+            self.GOOGLE_CALENDAR_CLIENT_ID,
+            self.GOOGLE_CALENDAR_CLIENT_SECRET,
+            self.GOOGLE_CALENDAR_TOKEN_ENCRYPTION_KEY,
+        )
+        if self.ENVIRONMENT != "local" and not all(google_calendar_values):
+            raise ValueError(
+                "GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, and "
+                "GOOGLE_CALENDAR_TOKEN_ENCRYPTION_KEY must be configured outside local"
+            )
+        calendar_key = self.GOOGLE_CALENDAR_TOKEN_ENCRYPTION_KEY
+        if calendar_key:
+            try:
+                decoded_calendar_key = base64.urlsafe_b64decode(calendar_key.encode())
+            except (binascii.Error, ValueError) as exc:
+                raise ValueError(
+                    "GOOGLE_CALENDAR_TOKEN_ENCRYPTION_KEY must be a Fernet key"
+                ) from exc
+            if len(decoded_calendar_key) != 32:
+                raise ValueError(
+                    "GOOGLE_CALENDAR_TOKEN_ENCRYPTION_KEY must be a Fernet key"
+                )
+        if self.GOOGLE_CALENDAR_SYNC_POLL_SECONDS < 1:
+            raise ValueError("GOOGLE_CALENDAR_SYNC_POLL_SECONDS must be positive")
 
         return self
 

@@ -74,6 +74,98 @@ class UsersPublic(SQLModel):
     count: int
 
 
+class GoogleCalendarConnection(SQLModel, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(
+        foreign_key="user.id", nullable=False, ondelete="CASCADE", unique=True, index=True
+    )
+    calendar_id: str | None = Field(default=None, max_length=512)
+    refresh_token_encrypted: str | None = Field(default=None)
+    status: str = Field(default="active", max_length=40, index=True)
+    last_synced_at: datetime | None = Field(
+        default=None,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    last_error: str | None = Field(default=None, max_length=500)
+    created_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    updated_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+
+
+class GoogleCalendarOAuthState(SQLModel, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    state_hash: str = Field(max_length=64, unique=True, index=True)
+    user_id: uuid.UUID = Field(
+        foreign_key="user.id", nullable=False, ondelete="CASCADE", index=True
+    )
+    code_verifier: str = Field(max_length=160)
+    expires_at: datetime = Field(
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    used_at: datetime | None = Field(
+        default=None,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    created_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+
+
+class GoogleCalendarSyncJob(SQLModel, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    connection_id: uuid.UUID = Field(
+        foreign_key="googlecalendarconnection.id",
+        nullable=False,
+        ondelete="CASCADE",
+        index=True,
+    )
+    contractor_history_id: uuid.UUID | None = Field(default=None, index=True)
+    kind: str = Field(default="history", max_length=30)
+    dedupe_key: str = Field(max_length=200, unique=True, index=True)
+    status: str = Field(default="pending", max_length=30, index=True)
+    attempts: int = Field(default=0, ge=0)
+    next_attempt_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    locked_at: datetime | None = Field(
+        default=None,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    last_error: str | None = Field(default=None, max_length=500)
+    created_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    updated_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+
+
+class GoogleCalendarConnectPublic(SQLModel):
+    authorization_url: str
+
+
+class GoogleCalendarIntegrationStatusPublic(SQLModel):
+    connected: bool
+    status: str
+    calendar_name: str | None = None
+    last_synced_at: datetime | None = None
+    pending_jobs: int = 0
+    last_error: str | None = None
+
+
+class GoogleCalendarResyncPublic(SQLModel):
+    queued: int
+
+
 # Condo models
 class Condominio(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)

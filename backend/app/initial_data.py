@@ -1,16 +1,23 @@
-import logging
 import csv
+import json
+import logging
 import uuid
-from datetime import date
+from datetime import date, datetime, time, timezone
 from pathlib import Path
 
 from sqlmodel import Session, or_, select
 
 from app import crud
-from app.core.db import engine, init_db
+from app.core.db import (
+    engine,
+    ensure_contractor_maintenance_schema,
+    init_db,
+)
 from app.models import (
     Building,
     Condominio,
+    ContractorMaintenance,
+    ContractorMaintenanceCategory,
     FireAlarmScheduleRecord,
     Flat,
     Funcionario,
@@ -26,6 +33,7 @@ DEFAULT_MANAGER_PASSWORD = "Oakhill@8610"
 DEFAULT_MANAGER_NAME = "Luiz Fernandes"
 OAK_HILL_PARK_CONDOMINIO_ID = uuid.UUID("cef60679-a1e5-4815-9a81-7621cb5a5fa5")
 FIRE_ALARM_SEED_FILE = Path(__file__).resolve().parents[1] / "data" / "fire_alarm_schedule_seed.csv"
+MAINTENANCE_SEED_FILE = Path(__file__).resolve().parents[1] / "data" / "maintenance_seed.json"
 
 
 def ensure_northwood_flat_1a(session: Session, condominio: Condominio) -> None:
@@ -179,6 +187,7 @@ def ensure_default_manager_user(session: Session, condominio: Condominio) -> Non
 def create_initial_data() -> None:
     """Create initial data for the application."""
     with Session(engine) as session:
+        ensure_contractor_maintenance_schema(session)
         # Check if condominio already exists
         condominio = session.get(Condominio, OAK_HILL_PARK_CONDOMINIO_ID)
         if not condominio:
@@ -216,6 +225,7 @@ def create_initial_data() -> None:
             ensure_cleaner_building(session, condominio)
             ensure_caretaker_building(session, condominio)
             ensure_fire_alarm_schedule_seed(session)
+            ensure_maintenance_schedule_seed(session, condominio)
             ensure_default_manager_user(session, condominio)
             logger.info("Initial data already exists, ensured default staff are active")
             return
@@ -320,6 +330,7 @@ def create_initial_data() -> None:
         session.commit()
         logger.info("Initial data created successfully")
         ensure_fire_alarm_schedule_seed(session)
+        ensure_maintenance_schedule_seed(session, condominio)
         ensure_default_manager_user(session, condominio)
 
 
@@ -382,6 +393,132 @@ def ensure_fire_alarm_schedule_seed(session: Session) -> None:
     if created:
         session.commit()
         logger.info("Seeded %s fire alarm schedule records", created)
+
+
+def _seed_datetime(value: object) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed_date = date.fromisoformat(str(value))
+    except ValueError:
+        return None
+    return datetime.combine(parsed_date, time.min, tzinfo=timezone.utc)
+
+
+def _seed_frequency(item: dict[str, object]) -> tuple[int, str] | None:
+    frequency_months = item.get("frequencyMonths")
+    if frequency_months is not None:
+        try:
+            return max(int(frequency_months), 1), "months"
+        except (TypeError, ValueError):
+            return None
+
+    frequency_days = item.get("frequencyDays")
+    try:
+        return max(int(frequency_days), 1), "days"
+    except (TypeError, ValueError):
+        return None
+
+
+def ensure_maintenance_schedule_seed(
+    session: Session, condominio: Condominio
+) -> None:
+    """Seed the fictional maintenance schedule once without touching user data."""
+    if not MAINTENANCE_SEED_FILE.exists():
+        logger.warning("Maintenance seed file not found: %s", MAINTENANCE_SEED_FILE)
+        return
+
+    try:
+        with MAINTENANCE_SEED_FILE.open(encoding="utf-8") as file:
+            payload = json.load(file)
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("Could not read maintenance seed data: %s", exc)
+        return
+
+    if not isinstance(payload, list):
+        logger.warning("Maintenance seed data must contain a list of items")
+        return
+
+    categories: dict[str, ContractorMaintenanceCategory] = {}
+    created_ids: list[uuid.UUID] = []
+    created_categories = 0
+    for raw_item in payload:
+        if not isinstance(raw_item, dict):
+            continue
+        category_name = str(raw_item.get("category", "")).strip()
+        report = str(raw_item.get("maintenance", "")).strip()
+        frequency = _seed_frequency(raw_item)
+        if not category_name or not report or not frequency:
+            logger.warning("Skipping invalid maintenance seed item: %s", raw_item)
+            continue
+
+        category_key = category_name.casefold()
+        category = categories.get(category_key)
+        if not category:
+            category = session.exec(
+                select(ContractorMaintenanceCategory).where(
+                    ContractorMaintenanceCategory.condominio_id == condominio.id,
+                    ContractorMaintenanceCategory.name == category_name,
+                )
+            ).first()
+        if not category:
+            category = ContractorMaintenanceCategory(
+                name=category_name,
+                condominio_id=condominio.id,
+            )
+            session.add(category)
+            session.flush()
+            created_categories += 1
+        categories[category_key] = category
+
+        existing = session.exec(
+            select(ContractorMaintenance).where(
+                ContractorMaintenance.condominio_id == condominio.id,
+                ContractorMaintenance.category_id == category.id,
+                ContractorMaintenance.report == report,
+            )
+        ).first()
+        if existing:
+            continue
+
+        frequency_value, frequency_unit = frequency
+        notes = str(raw_item.get("notes", "")).strip()
+        source_frequency = str(raw_item.get("frequency", "")).strip()
+        disclaimer = "Mock seed data only; not a certificate or legal record."
+        note_parts = [part for part in (notes, disclaimer) if part]
+        if source_frequency:
+            note_parts.append(f"Source frequency: {source_frequency}.")
+
+        maintenance = ContractorMaintenance(
+            tag=str(raw_item.get("tag", "")).strip(),
+            report=report,
+            frequency_days=frequency_value,
+            frequency_value=frequency_value,
+            frequency_unit=frequency_unit,
+            notes="\n\n".join(note_parts),
+            last_completed_at=_seed_datetime(raw_item.get("lastDate")),
+            condominio_id=condominio.id,
+            category_id=category.id,
+        )
+        session.add(maintenance)
+        created_ids.append(maintenance.id)
+
+    if not created_ids:
+        return
+
+    session.flush()
+    from app.services.google_calendar import queue_maintenance_changes_for_condominio
+
+    queued = queue_maintenance_changes_for_condominio(
+        session, condominio.id, created_ids
+    )
+    session.commit()
+    logger.info(
+        "Seeded %s maintenance items and %s categories (%s Calendar jobs queued)",
+        len(created_ids),
+        created_categories,
+        queued,
+    )
 
 
 def main() -> None:

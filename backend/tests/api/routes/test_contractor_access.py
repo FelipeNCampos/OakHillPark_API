@@ -822,6 +822,83 @@ def test_manager_can_update_contractor_maintenance(
     ) == datetime(2025, 7, 31, tzinfo=timezone.utc)
 
 
+def test_manager_can_delete_contractor_maintenance(
+    client: TestClient,
+    db: Session,
+) -> None:
+    condominio = _create_test_condominio(db)
+    building = _create_test_building(db, condominio.id, name="Merlin")
+    manager_headers = _create_manager_headers(client, db, condominio.id)
+
+    category_response = client.post(
+        f"{settings.API_V1_STR}/contractor-access/maintenance/categories",
+        headers=manager_headers,
+        json={"name": "Routine"},
+    )
+    assert category_response.status_code == 201
+
+    maintenance_response = client.post(
+        f"{settings.API_V1_STR}/contractor-access/maintenance",
+        headers=manager_headers,
+        json={
+            "category_id": category_response.json()["id"],
+            "report": "Lift service",
+            "frequency_value": 6,
+            "frequency_unit": "months",
+            "filters": [{"field": "company", "value": "Lift Co"}],
+        },
+    )
+    assert maintenance_response.status_code == 201
+    maintenance_id = maintenance_response.json()["id"]
+
+    check_in_response = client.post(
+        f"{settings.API_V1_STR}/contractor-access/check-in",
+        json={
+            "condominio_id": str(condominio.id),
+            "name": "Alex Turner",
+            "company": "Lift Co",
+            "building_id": str(building.id),
+            "job_description": "Lift service",
+            "mobile": "07123456789",
+        },
+    )
+    assert check_in_response.status_code == 201
+
+    history_before_delete = client.get(
+        f"{settings.API_V1_STR}/contractor-access/maintenance/history",
+        headers=manager_headers,
+    )
+    assert history_before_delete.status_code == 200
+    assert history_before_delete.json()["count"] == 1
+
+    delete_response = client.delete(
+        f"{settings.API_V1_STR}/contractor-access/maintenance/{maintenance_id}",
+        headers=manager_headers,
+    )
+    assert delete_response.status_code == 200
+    assert delete_response.json() == {"message": "Maintenance deleted successfully"}
+
+    schedule_response = client.get(
+        f"{settings.API_V1_STR}/contractor-access/maintenance/schedule",
+        headers=manager_headers,
+    )
+    assert schedule_response.status_code == 200
+    assert schedule_response.json() == {"data": [], "count": 0}
+
+    history_after_delete = client.get(
+        f"{settings.API_V1_STR}/contractor-access/maintenance/history",
+        headers=manager_headers,
+    )
+    assert history_after_delete.status_code == 200
+    assert history_after_delete.json() == {"data": [], "count": 0}
+
+    repeated_delete_response = client.delete(
+        f"{settings.API_V1_STR}/contractor-access/maintenance/{maintenance_id}",
+        headers=manager_headers,
+    )
+    assert repeated_delete_response.status_code == 404
+
+
 def test_contractor_maintenance_schedule_marks_overdue_after_frequency_days(
     client: TestClient,
     db: Session,

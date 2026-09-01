@@ -13720,6 +13720,32 @@ function ContractorMaintenanceDetail({
       ),
   })
 
+  const deleteMaintenanceMutation = useMutation({
+    mutationFn: () =>
+      apiCall(`/api/v1/contractor-access/maintenance/${maintenance.id}`, {
+        method: "DELETE",
+      }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ["contractor-maintenance-schedule"],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["contractor-maintenance-history"],
+        }),
+      ])
+      showSuccessToast("Maintenance deleted successfully")
+      onBack()
+    },
+    onError: (error: unknown) =>
+      showErrorToast(
+        error instanceof Error ? error.message : "Could not delete maintenance",
+      ),
+  })
+
+  const isMutating =
+    updateMaintenanceMutation.isPending || deleteMaintenanceMutation.isPending
+
   const handleSave = () => {
     const frequency = Number(frequencyValue)
     if (!categoryId || !description.trim()) {
@@ -13756,6 +13782,15 @@ function ContractorMaintenanceDetail({
     })
   }
 
+  const handleDelete = () => {
+    const confirmed = window.confirm(
+      `Delete "${maintenance.report}"? This will permanently remove the maintenance schedule and its linked execution history.`,
+    )
+    if (confirmed) {
+      deleteMaintenanceMutation.mutate()
+    }
+  }
+
   return (
     <div className="w-full">
       <div className="rounded-lg bg-white p-6 shadow-md">
@@ -13774,7 +13809,7 @@ function ContractorMaintenanceDetail({
           <button
             type="button"
             onClick={onBack}
-            disabled={updateMaintenanceMutation.isPending}
+            disabled={isMutating}
             className="rounded-lg border border-[#8c7569] bg-white px-4 py-2 text-sm font-semibold text-[#55311c] transition-all hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-60"
           >
             Back to maintenance
@@ -13987,15 +14022,25 @@ function ContractorMaintenanceDetail({
           <div className="flex justify-end gap-3 md:col-span-2">
             <button
               type="button"
+              onClick={handleDelete}
+              disabled={isMutating}
+              className="mr-auto rounded border border-red-700 px-4 py-2 font-semibold text-red-700 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {deleteMaintenanceMutation.isPending
+                ? "Deleting..."
+                : "Delete maintenance"}
+            </button>
+            <button
+              type="button"
               onClick={onBack}
-              disabled={updateMaintenanceMutation.isPending}
+              disabled={isMutating}
               className="rounded border border-[#8c7569] px-4 py-2 font-semibold text-[#55311c] disabled:cursor-not-allowed disabled:opacity-60"
             >
               Cancel
             </button>
             <button
               type="submit"
-              disabled={updateMaintenanceMutation.isPending}
+              disabled={isMutating}
               className="rounded bg-[#8c7569] px-4 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
             >
               {updateMaintenanceMutation.isPending ? "Saving..." : "Save changes"}

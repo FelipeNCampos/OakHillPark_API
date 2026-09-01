@@ -1507,6 +1507,28 @@ def update_contractor_maintenance(
     return _contractor_maintenance_to_public(session, maintenance, category)
 
 
+@router.delete("/maintenance/{maintenance_id}")
+def delete_contractor_maintenance(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    maintenance_id: uuid.UUID,
+) -> dict[str, str]:
+    ensure_contractor_visit_schema(session)
+    ensure_contractor_maintenance_schema(session)
+    condominio_id = _require_manager_condominio(session, current_user)
+    maintenance = _require_contractor_maintenance(
+        session, condominio_id, maintenance_id
+    )
+
+    # Queue this before deleting the source record so the worker removes the
+    # deterministic event from every connected Google Calendar.
+    queue_maintenance_changes_for_condominio(session, condominio_id, [maintenance.id])
+    session.delete(maintenance)
+    session.commit()
+    return {"message": "Maintenance deleted successfully"}
+
+
 @router.get("/maintenance/schedule", response_model=ContractorMaintenancesPublic)
 def read_contractor_maintenance_schedule(
     session: SessionDep,

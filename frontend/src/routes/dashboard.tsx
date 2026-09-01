@@ -13782,7 +13782,7 @@ function ContractorMaintenanceDetail({
         </div>
 
         <form
-          className="grid gap-4 md:grid-cols-2"
+          className="grid gap-4 text-[#55311c] md:grid-cols-2 [&_input]:bg-white [&_input]:text-[#55311c] [&_input]:placeholder:text-[#8c7569] [&_select]:bg-white [&_select]:text-[#55311c] [&_textarea]:bg-white [&_textarea]:text-[#55311c] [&_textarea]:placeholder:text-[#8c7569]"
           onSubmit={(event) => {
             event.preventDefault()
             handleSave()

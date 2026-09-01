@@ -12941,11 +12941,24 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
       year: "numeric",
       timeZone: "UTC",
     })
+  const formatCalendarCellDate = (date: Date) =>
+    date.toLocaleDateString("en-GB", {
+      weekday: "short",
+      day: "2-digit",
+      month: "short",
+      timeZone: "UTC",
+    })
   const navigateScheduleMonth = (offset: number) => {
     setScheduleMonth((current) =>
       new Date(
         Date.UTC(current.getUTCFullYear(), current.getUTCMonth() + offset, 1),
       ),
+    )
+  }
+  const returnToCurrentScheduleMonth = () => {
+    const today = new Date()
+    setScheduleMonth(
+      new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1)),
     )
   }
   const isSaving =
@@ -13066,38 +13079,59 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
                 </div>
               ) : (
                 <div className="overflow-x-auto">
-                  <div className="min-w-[760px]">
-                    <div className="mb-4 flex items-center justify-between">
-                      <button
-                        type="button"
-                        aria-label="Previous month"
-                        onClick={() => navigateScheduleMonth(-1)}
-                        className="inline-flex size-9 items-center justify-center rounded-full border border-[#ded6d1] bg-white text-[#55311c] transition hover:bg-[#f5f1ee] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8c7569]"
-                      >
-                        <ChevronLeft aria-hidden="true" className="size-4" />
-                      </button>
-                      <h3 className="font-['Nunito',sans-serif] text-xl font-bold text-[#55311c]">
-                        {scheduleMonth.toLocaleDateString("en-GB", {
-                          month: "long",
-                          year: "numeric",
-                          timeZone: "UTC",
-                        })}
-                      </h3>
-                      <button
-                        type="button"
-                        aria-label="Next month"
-                        onClick={() => navigateScheduleMonth(1)}
-                        className="inline-flex size-9 items-center justify-center rounded-full border border-[#ded6d1] bg-white text-[#55311c] transition hover:bg-[#f5f1ee] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8c7569]"
-                      >
-                        <ChevronRight aria-hidden="true" className="size-4" />
-                      </button>
+                  <div className="min-w-[720px]">
+                    <div className="mb-4 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-[#e5e0dc] bg-gradient-to-r from-[#fcfbfa] to-[#f5f0ec] p-4 shadow-sm">
+                      <div>
+                        <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#8c7569]">
+                          Maintenance planner
+                        </p>
+                        <h3 className="mt-1 font-['Nunito',sans-serif] text-2xl font-bold text-[#55311c]">
+                          {scheduleMonth.toLocaleDateString("en-GB", {
+                            month: "long",
+                            year: "numeric",
+                            timeZone: "UTC",
+                          })}
+                        </h3>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={returnToCurrentScheduleMonth}
+                          className="rounded-lg border border-[#cfc2ba] bg-white px-3 py-2 text-xs font-bold text-[#55311c] transition hover:border-[#8c7569] hover:bg-[#f5f1ee] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8c7569]"
+                        >
+                          Today
+                        </button>
+                        <div className="flex overflow-hidden rounded-lg border border-[#ded6d1] bg-white shadow-sm">
+                          <button
+                            type="button"
+                            aria-label="Previous month"
+                            onClick={() => navigateScheduleMonth(-1)}
+                            className="inline-flex size-9 items-center justify-center text-[#55311c] transition hover:bg-[#f5f1ee] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#8c7569]"
+                          >
+                            <ChevronLeft aria-hidden="true" className="size-4" />
+                          </button>
+                          <button
+                            type="button"
+                            aria-label="Next month"
+                            onClick={() => navigateScheduleMonth(1)}
+                            className="inline-flex size-9 items-center justify-center border-l border-[#ded6d1] text-[#55311c] transition hover:bg-[#f5f1ee] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#8c7569]"
+                          >
+                            <ChevronRight aria-hidden="true" className="size-4" />
+                          </button>
+                        </div>
+                      </div>
                     </div>
 
-                    <div className="overflow-hidden rounded-xl border border-[#e5e0dc] bg-white shadow-sm">
-                      <div className="grid grid-cols-7 border-b border-[#e5e0dc] bg-[#fcfbfa] text-center text-xs font-semibold text-[#55311c]">
+                    <div className="overflow-hidden rounded-2xl border border-[#ded6d1] bg-white shadow-sm">
+                      <div className="grid grid-cols-7 border-b border-[#e5e0dc] bg-[#f7f3f0] text-center text-[11px] font-bold uppercase tracking-[0.12em] text-[#6f625a]">
                         {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(
-                          (day) => (
-                            <div key={day} className="py-3">
+                          (day, index) => (
+                            <div
+                              key={day}
+                              className={`py-3 ${
+                                index > 4 ? "bg-[#f1eae5] text-[#765d50]" : ""
+                              }`}
+                            >
                               {day}
                             </div>
                           ),
@@ -13111,12 +13145,15 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
                             date.getUTCMonth() === scheduleMonth.getUTCMonth()
                           const isToday = dateKey === todayDateKey
                           const hasMaintenance = dayItems.length > 0
+                          const isSelected =
+                            selectedScheduleDateKey === dateKey
 
                           return (
                             <button
                               key={dateKey}
                               type="button"
                               disabled={!hasMaintenance}
+                              aria-pressed={isSelected}
                               aria-label={
                                 hasMaintenance
                                   ? `View ${dayItems.length} maintenance ${
@@ -13125,51 +13162,57 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
                                   : undefined
                               }
                               onClick={() => setSelectedScheduleDateKey(dateKey)}
-                              className={`block min-h-36 w-full border-b border-r border-[#e5e0dc] p-2 text-left last:border-r-0 ${
+                              className={`group relative block min-h-40 w-full border-b border-r border-[#e5e0dc] p-2.5 text-left last:border-r-0 ${
                                 isCurrentMonth
                                   ? "bg-white"
-                                  : "bg-[#fbfaf9] text-[#9c928c]"
+                                  : "bg-[#fbfaf9] text-[#a59992]"
                               } ${
                                 hasMaintenance
-                                  ? "cursor-pointer transition hover:bg-[#f8f4f1] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#8c7569]"
+                                  ? "cursor-pointer transition duration-200 hover:z-10 hover:bg-[#fcf8f5] hover:shadow-[inset_0_0_0_1px_#c9b8ad] focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#8c7569]"
                                   : "cursor-default"
+                              } ${
+                                isSelected
+                                  ? "z-10 bg-[#f8f0eb] shadow-[inset_0_0_0_2px_#8c7569]"
+                                  : ""
                               }`}
                             >
-                              <span className="mb-2 flex items-center justify-between px-1 text-xs font-semibold">
-                                <span
+                              <span className="mb-3 flex items-start justify-between gap-2">
+                                <time
+                                  dateTime={dateKey}
                                   className={
                                     isToday
-                                      ? "inline-flex size-6 items-center justify-center rounded-full bg-[#8c7569] text-white"
-                                      : "inline-flex size-6 items-center justify-center"
+                                      ? "inline-flex rounded-lg bg-[#8c7569] px-2 py-1 text-xs font-bold text-white shadow-sm"
+                                      : "inline-flex rounded-lg border border-transparent px-2 py-1 text-xs font-bold text-[#55311c]"
                                   }
                                 >
-                                  {date.getUTCDate()}
-                                </span>
+                                  {formatCalendarCellDate(date)}
+                                </time>
                                 {hasMaintenance && (
-                                  <span className="rounded-full bg-[#f0ebe7] px-1.5 py-0.5 text-[10px] font-bold text-[#55311c]">
-                                    {dayItems.length}
+                                  <span className="inline-flex min-w-6 items-center justify-center rounded-full bg-[#55311c] px-1.5 py-1 text-[10px] font-bold text-white shadow-sm">
+                                    {dayItems.length}x
                                   </span>
                                 )}
                               </span>
-                              <span className="block space-y-1">
+                              <span className="block space-y-1.5">
                                 {dayItems.slice(0, 2).map((item) => (
                                   <span
                                     key={item.id}
                                     title={`${item.category_name}: ${item.report}`}
-                                    className={`block w-full truncate rounded px-1.5 py-1 text-left text-[11px] font-medium ${
+                                    className={`block w-full truncate rounded-md border px-2 py-1.5 text-left text-[11px] font-semibold shadow-sm ${
                                       item.status === "pending"
-                                        ? "bg-red-100 text-red-950"
+                                        ? "border-red-200 bg-red-50 text-red-950"
                                         : item.status === "soon"
-                                          ? "bg-amber-100 text-amber-950"
-                                          : "bg-[#dbeafe] text-[#1e3a8a]"
+                                          ? "border-amber-200 bg-amber-50 text-amber-950"
+                                          : "border-[#c7d8ee] bg-[#eef5ff] text-[#1e3a8a]"
                                     }`}
                                   >
                                     {item.tag ? `${item.tag} — ${item.report}` : item.report}
                                   </span>
                                 ))}
                                 {dayItems.length > 2 && (
-                                  <span className="block px-1.5 pt-0.5 text-[11px] font-semibold text-[#6f625a]">
-                                    View all {dayItems.length} items
+                                  <span className="block px-1 pt-0.5 text-[11px] font-bold text-[#6f625a] group-hover:text-[#55311c]">
+                                    + {dayItems.length - 2} more item
+                                    {dayItems.length - 2 === 1 ? "" : "s"}
                                   </span>
                                 )}
                               </span>
@@ -13187,10 +13230,21 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
                   </div>
                 </div>
               )}
-              <p className="mt-2 text-xs text-[rgba(0,0,0,0.65)]">
-                Dates with maintenance show a count. Select a date to view all
-                maintenance scheduled for that day.
-              </p>
+              <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-[rgba(0,0,0,0.65)]">
+                <p>
+                  Every cell shows its full date. Select a date with scheduled
+                  maintenance to view the complete list.
+                </p>
+                <span className="inline-flex items-center gap-1.5 font-semibold text-[#6f625a]">
+                  <span className="size-2 rounded-full bg-red-400" /> Overdue
+                </span>
+                <span className="inline-flex items-center gap-1.5 font-semibold text-[#6f625a]">
+                  <span className="size-2 rounded-full bg-amber-400" /> Soon
+                </span>
+                <span className="inline-flex items-center gap-1.5 font-semibold text-[#6f625a]">
+                  <span className="size-2 rounded-full bg-blue-400" /> Planned
+                </span>
+              </div>
             </TabsContent>
             <TabsContent value="history" className="mt-4">
               <div className="overflow-x-auto rounded-lg border border-[#e5e0dc]">

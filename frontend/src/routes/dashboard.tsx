@@ -12717,6 +12717,9 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
   const [selectedMaintenanceId, setSelectedMaintenanceId] = useState<
     EntityId | null
   >(null)
+  const [selectedScheduleDateKey, setSelectedScheduleDateKey] = useState<
+    string | null
+  >(null)
   const [scheduleMonth, setScheduleMonth] = useState(() => {
     const today = new Date()
     return new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1))
@@ -12858,22 +12861,6 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
         })
   }
 
-  const filterFieldLabels: Record<ContractorMaintenanceFilterField, string> = {
-    company: "Company",
-    job_description: "Job description",
-    mobile: "Mobile",
-    name: "Name",
-  }
-
-  const formatMaintenanceFilters = (item: ContractorMaintenanceSchedule) =>
-    item.filters.length
-      ? item.filters
-          .map(
-            (filter) => `${filterFieldLabels[filter.field]} = ${filter.value}`,
-          )
-          .join(" • ")
-      : "-"
-
   const categories = categoriesQuery.data?.data || []
   const schedules = scheduleQuery.data?.data || []
   const history = historyQuery.data?.data || []
@@ -12946,6 +12933,14 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
       2,
       "0",
     )}-${String(date.getUTCDate()).padStart(2, "0")}`
+  const formatCalendarDate = (date: Date) =>
+    date.toLocaleDateString("en-GB", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+      timeZone: "UTC",
+    })
   const navigateScheduleMonth = (offset: number) => {
     setScheduleMonth((current) =>
       new Date(
@@ -12958,6 +12953,14 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
   const selectedMaintenance = selectedMaintenanceId
     ? schedules.find((item) => item.id === selectedMaintenanceId)
     : undefined
+  const selectedScheduleDate = selectedScheduleDateKey
+    ? calendarDays.find(
+        (date) => formatCalendarDateKey(date) === selectedScheduleDateKey,
+      )
+    : undefined
+  const selectedScheduleDateItems = selectedScheduleDateKey
+    ? calendarItemsByDate.get(selectedScheduleDateKey) || []
+    : []
 
   if (selectedMaintenance) {
     return (
@@ -13107,17 +13110,32 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
                           const isCurrentMonth =
                             date.getUTCMonth() === scheduleMonth.getUTCMonth()
                           const isToday = dateKey === todayDateKey
+                          const hasMaintenance = dayItems.length > 0
 
                           return (
-                            <div
+                            <button
                               key={dateKey}
-                              className={`min-h-36 border-b border-r border-[#e5e0dc] p-1.5 last:border-r-0 ${
+                              type="button"
+                              disabled={!hasMaintenance}
+                              aria-label={
+                                hasMaintenance
+                                  ? `View ${dayItems.length} maintenance ${
+                                      dayItems.length === 1 ? "item" : "items"
+                                    } scheduled for ${formatCalendarDate(date)}`
+                                  : undefined
+                              }
+                              onClick={() => setSelectedScheduleDateKey(dateKey)}
+                              className={`block min-h-36 w-full border-b border-r border-[#e5e0dc] p-2 text-left last:border-r-0 ${
                                 isCurrentMonth
                                   ? "bg-white"
                                   : "bg-[#fbfaf9] text-[#9c928c]"
+                              } ${
+                                hasMaintenance
+                                  ? "cursor-pointer transition hover:bg-[#f8f4f1] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#8c7569]"
+                                  : "cursor-default"
                               }`}
                             >
-                              <div className="mb-1 flex h-6 items-center px-1 text-xs font-semibold">
+                              <span className="mb-2 flex items-center justify-between px-1 text-xs font-semibold">
                                 <span
                                   className={
                                     isToday
@@ -13127,22 +13145,18 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
                                 >
                                   {date.getUTCDate()}
                                 </span>
-                              </div>
-                              <div className="space-y-1">
-                                {dayItems.slice(0, 3).map((item) => (
-                                  <button
+                                {hasMaintenance && (
+                                  <span className="rounded-full bg-[#f0ebe7] px-1.5 py-0.5 text-[10px] font-bold text-[#55311c]">
+                                    {dayItems.length}
+                                  </span>
+                                )}
+                              </span>
+                              <span className="block space-y-1">
+                                {dayItems.slice(0, 2).map((item) => (
+                                  <span
                                     key={item.id}
-                                    type="button"
-                                    title={`${item.category_name}: ${item.report}${
-                                      item.filters.length
-                                        ? `\n${formatMaintenanceFilters(item)}`
-                                        : ""
-                                    }`}
-                                    aria-label={`Open details for ${item.report}`}
-                                    onClick={() =>
-                                      setSelectedMaintenanceId(item.id)
-                                    }
-                                    className={`block w-full truncate rounded px-1.5 py-0.5 text-left text-[11px] font-medium transition hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8c7569] ${
+                                    title={`${item.category_name}: ${item.report}`}
+                                    className={`block w-full truncate rounded px-1.5 py-1 text-left text-[11px] font-medium ${
                                       item.status === "pending"
                                         ? "bg-red-100 text-red-950"
                                         : item.status === "soon"
@@ -13151,15 +13165,15 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
                                     }`}
                                   >
                                     {item.tag ? `${item.tag} — ${item.report}` : item.report}
-                                  </button>
+                                  </span>
                                 ))}
-                                {dayItems.length > 3 && (
-                                  <div className="px-1.5 pt-0.5 text-[11px] font-semibold text-[#6f625a]">
-                                    + {dayItems.length - 3} items
-                                  </div>
+                                {dayItems.length > 2 && (
+                                  <span className="block px-1.5 pt-0.5 text-[11px] font-semibold text-[#6f625a]">
+                                    View all {dayItems.length} items
+                                  </span>
                                 )}
-                              </div>
-                            </div>
+                              </span>
+                            </button>
                           )
                         })}
                       </div>
@@ -13174,8 +13188,8 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
                 </div>
               )}
               <p className="mt-2 text-xs text-[rgba(0,0,0,0.65)]">
-                Each day shows up to three items. Additional maintenance is
-                grouped in the “+ items” line.
+                Dates with maintenance show a count. Select a date to view all
+                maintenance scheduled for that day.
               </p>
             </TabsContent>
             <TabsContent value="history" className="mt-4">
@@ -13240,6 +13254,72 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
           </Tabs>
         </div>
       </div>
+
+      <Dialog
+        open={Boolean(selectedScheduleDateKey)}
+        onOpenChange={(open) => {
+          if (!open) setSelectedScheduleDateKey(null)
+        }}
+      >
+        <DialogContent className="border-[#e5e0dc] bg-white text-[#55311c] sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>
+              Maintenance for{" "}
+              {selectedScheduleDate
+                ? formatCalendarDate(selectedScheduleDate)
+                : "selected date"}
+            </DialogTitle>
+            <DialogDescription>
+              {selectedScheduleDateItems.length === 1
+                ? "1 maintenance item is scheduled for this date."
+                : `${selectedScheduleDateItems.length} maintenance items are scheduled for this date.`}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid max-h-[60vh] gap-3 overflow-y-auto pr-1">
+            {selectedScheduleDateItems.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => {
+                  setSelectedScheduleDateKey(null)
+                  setSelectedMaintenanceId(item.id)
+                }}
+                className="rounded-xl border border-[#e5e0dc] p-4 text-left transition hover:border-[#8c7569] hover:bg-[#f8f4f1] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8c7569]"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <p className="font-semibold text-[#55311c]">
+                      {item.tag ? `${item.tag} — ${item.report}` : item.report}
+                    </p>
+                    <p className="mt-1 text-sm text-[rgba(0,0,0,0.7)]">
+                      {item.category_name}
+                    </p>
+                  </div>
+                  <span
+                    className={`rounded-full px-2 py-1 text-xs font-semibold ${
+                      item.status === "pending"
+                        ? "bg-red-100 text-red-950"
+                        : item.status === "soon"
+                          ? "bg-amber-100 text-amber-950"
+                          : "bg-[#dbeafe] text-[#1e3a8a]"
+                    }`}
+                  >
+                    {item.status}
+                  </span>
+                </div>
+                {item.notes && (
+                  <p className="mt-3 line-clamp-2 text-sm text-[rgba(0,0,0,0.7)]">
+                    {item.notes}
+                  </p>
+                )}
+                <p className="mt-3 text-xs font-semibold text-[#6f625a]">
+                  View maintenance details
+                </p>
+              </button>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={isAddTypeDialogOpen}

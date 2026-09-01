@@ -61,6 +61,10 @@ from app.models import (
     Morador,
     User,
 )
+from app.services.google_calendar import (
+    queue_histories_for_contractor_visit,
+    queue_history_changes_for_condominio,
+)
 from app.utils import send_sms_notification
 
 router = APIRouter(prefix="/contractor-access", tags=["contractor-access"])
@@ -1156,6 +1160,8 @@ def create_contractor_history(
     )
     history = _apply_history_next_schedule(history, visit=visit, payload=payload)
     session.add(history)
+    session.flush()
+    queue_history_changes_for_condominio(session, condominio_id, [history.id])
     session.commit()
     session.refresh(history)
     session.refresh(visit)
@@ -1214,6 +1220,8 @@ def update_contractor_history(
     history = _apply_history_next_schedule(history, visit=visit, payload=payload)
     history.updated_at = datetime.now(timezone.utc)
     session.add(history)
+    session.flush()
+    queue_history_changes_for_condominio(session, condominio_id, [history.id])
     session.commit()
     session.refresh(history)
     session.refresh(visit)
@@ -1237,6 +1245,7 @@ def delete_contractor_history(
     if not history or history.condominio_id != condominio_id:
         raise HTTPException(status_code=404, detail="Contractor history not found")
 
+    queue_history_changes_for_condominio(session, condominio_id, [history.id])
     session.delete(history)
     session.commit()
     return {"message": "Contractor history deleted successfully"}
@@ -1711,6 +1720,8 @@ def create_contractor_visit(
     )
     session.add(item)
     _create_maintenance_records_for_contractor_visit(session, item)
+    session.flush()
+    queue_histories_for_contractor_visit(session, item)
     session.commit()
     session.refresh(item)
 
@@ -1744,6 +1755,8 @@ def close_contractor_visit(
     item.out_at = check_out_at
     session.add(item)
     _complete_maintenance_records_for_contractor_visit(session, item)
+    session.flush()
+    queue_histories_for_contractor_visit(session, item)
     session.commit()
     session.refresh(item)
 
@@ -1805,6 +1818,8 @@ def update_contractor_visit(
         record.out_at = item.out_at
         session.add(record)
 
+    session.flush()
+    queue_histories_for_contractor_visit(session, item)
     session.commit()
     session.refresh(item)
     return _contractor_visit_to_admin_public(item)
@@ -1821,6 +1836,7 @@ def delete_contractor_visit(
     ensure_contractor_maintenance_schema(session)
     condominio_id = _require_manager_condominio(session, current_user)
     item = _require_contractor_visit_for_condominio(session, condominio_id, visit_id)
+    queue_histories_for_contractor_visit(session, item)
     session.delete(item)
     session.commit()
     return {"message": "Contractor record deleted successfully"}

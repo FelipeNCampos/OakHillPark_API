@@ -15,6 +15,7 @@ Mais do que registrar informacoes, o OakHill Park ajuda a administracao a tomar 
 - Controle de acesso para cleaners, caretakers e contractors.
 - Registro de entrada e saida de prestadores.
 - Historico completo de servicos, visitas e recorrencias de contratados.
+- Sincronizacao automatica de proximos servicos de contractors com Google Calendar.
 - Gestao de tarefas com acompanhamento entre gestor e caretaker.
 - Controle de horas trabalhadas e metas mensais do caretaker.
 - Controle de bins, coletas perdidas, coletas atrasadas e rotinas por edificio.

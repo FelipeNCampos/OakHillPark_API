@@ -23,6 +23,10 @@ from app.models import (
     UserUpdate,
     UserUpdateMe,
 )
+from app.services.google_calendar import (
+    deactivate_google_calendar_for_user,
+    is_google_calendar_manager,
+)
 from app.utils import generate_new_account_email, send_email
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -203,7 +207,13 @@ def update_user(
                 status_code=409, detail="User with this email already exists"
             )
 
+    previous_condominio_id = db_user.condominio_id
     db_user = crud.update_user(session=session, db_user=db_user, user_in=user_in)
+    if (
+        not is_google_calendar_manager(db_user)
+        or db_user.condominio_id != previous_condominio_id
+    ):
+        deactivate_google_calendar_for_user(session, db_user.id)
     return db_user
 
 

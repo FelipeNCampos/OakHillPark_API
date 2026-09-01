@@ -189,6 +189,31 @@ You can set several other environment variables:
 * `POSTGRES_DB`: The database name to use for this application. You can leave the default of `app`.
 * `SENTRY_DSN`: The DSN for Sentry, if you are using it.
 
+### Google Calendar integration
+
+When `ENVIRONMENT` is `staging` or `production`, these three values are required
+by the backend. Generate the encryption key with `Fernet.generate_key()` and
+keep it separate from `SECRET_KEY`:
+
+```bash
+export GOOGLE_CALENDAR_CLIENT_ID="...apps.googleusercontent.com"
+export GOOGLE_CALENDAR_CLIENT_SECRET="..."
+export GOOGLE_CALENDAR_TOKEN_ENCRYPTION_KEY="$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
+```
+
+In Google Cloud, enable the Google Calendar API and configure the OAuth consent
+screen. Register this exact authorized redirect URI (replace `DOMAIN`):
+
+```text
+https://api.DOMAIN/api/v1/calendar-integrations/google/callback
+```
+
+The integration requests only `calendar.app.created`. It creates a private
+secondary calendar named **Oak Hill Park** for each connected manager; the
+`calendar-sync-worker` Compose service processes updates even while nobody has
+the dashboard open. Public OAuth clients using user data may require Google
+verification before production use.
+
 ## GitHub Actions Environment Variables
 
 There are some environment variables only used by GitHub Actions that you can configure:

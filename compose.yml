@@ -118,6 +118,36 @@ services:
       - traefik.http.routers.oakhillpark-backend-https.tls=true
       - traefik.http.routers.oakhillpark-backend-https.tls.certresolver=le
 
+  calendar-sync-worker:
+    image: "${DOCKER_IMAGE_BACKEND?Variable not set}:${TAG-latest}"
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+        restart: true
+      prestart:
+        condition: service_completed_successfully
+    command: python -m app.services.google_calendar_worker
+    env_file:
+      - .env
+    environment:
+      - DOMAIN=${DOMAIN}
+      - FRONTEND_HOST=${FRONTEND_HOST?Variable not set}
+      - ENVIRONMENT=${ENVIRONMENT}
+      - BACKEND_CORS_ORIGINS=${BACKEND_CORS_ORIGINS}
+      - SECRET_KEY=${SECRET_KEY?Variable not set}
+      - FIRST_SUPERUSER=${FIRST_SUPERUSER?Variable not set}
+      - FIRST_SUPERUSER_PASSWORD=${FIRST_SUPERUSER_PASSWORD?Variable not set}
+      - POSTGRES_SERVER=db
+      - POSTGRES_PORT=${POSTGRES_PORT}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER?Variable not set}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD?Variable not set}
+    networks:
+      - default
+    labels:
+      - traefik.enable=false
+
   frontend:
     image: "${DOCKER_IMAGE_FRONTEND?Variable not set}:${TAG-latest}"
     restart: always

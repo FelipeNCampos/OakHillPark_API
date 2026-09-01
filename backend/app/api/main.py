@@ -4,8 +4,9 @@ from app.api.routes import (
     acess,
     bins,
     buildings,
-    cash_flow,
+    calendar_integrations,
     caretaker_invoices,
+    cash_flow,
     cleaner_invoices,
     condominios,
     contractor_access,
@@ -30,6 +31,7 @@ api_router.include_router(users.router)
 api_router.include_router(utils.router)
 api_router.include_router(condominios.router)
 api_router.include_router(buildings.router)
+api_router.include_router(calendar_integrations.router)
 api_router.include_router(flats.router)
 api_router.include_router(moradores.router)
 api_router.include_router(funcionarios.router)

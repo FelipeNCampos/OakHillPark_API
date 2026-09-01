@@ -11,9 +11,8 @@ import { GlobalWorkerOptions } from "pdfjs-dist"
 import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url"
 import {
   CircleDollarSign,
-  ChevronDown,
-  ChevronsUpDown,
-  ChevronUp,
+  ChevronLeft,
+  ChevronRight,
   Copy,
   Download,
   FileSpreadsheet,
@@ -25,7 +24,7 @@ import {
   X,
 } from "lucide-react"
 import QRCode from "qrcode"
-import type { ChangeEvent, KeyboardEvent, ReactNode } from "react"
+import type { ChangeEvent, KeyboardEvent } from "react"
 import {
   useDeferredValue,
   useEffect,
@@ -46,6 +45,7 @@ import {
   YAxis,
 } from "recharts"
 import { OpenAPI } from "@/client"
+import { GoogleCalendarIntegrationCard } from "@/components/GoogleCalendarIntegrationCard"
 import { TasksBoard } from "@/components/Tasks/TasksBoard"
 import { enforceHttpsUrl, resolveApiBase } from "@/config/api"
 import {
@@ -2933,6 +2933,7 @@ function OverviewContent({
     { label: "Reminders", tabId: "reminds" },
     { label: "Residents", tabId: "residents" },
     { label: "Contractors", tabId: "contractors" },
+    { label: "Maintenance", tabId: "contractor-maintenance" },
     { label: "Cleaner", tabId: "cleaner" },
     { label: "Caretaker", tabId: "caretaker" },
     { label: "Bins", tabId: "bins" },
@@ -12716,18 +12717,10 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
   const [selectedMaintenanceId, setSelectedMaintenanceId] = useState<
     EntityId | null
   >(null)
-  const [scheduleSort, setScheduleSort] = useState<{
-    key:
-      | "category"
-      | "tag"
-      | "description"
-      | "lastDone"
-      | "nextDone"
-      | "interval"
-      | "linkHooks"
-      | "notes"
-    direction: "asc" | "desc"
-  }>({ key: "nextDone", direction: "asc" })
+  const [scheduleMonth, setScheduleMonth] = useState(() => {
+    const today = new Date()
+    return new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1))
+  })
 
   const categoriesQuery = useQuery<
     ApiListResponse<ContractorMaintenanceCategory>
@@ -12865,19 +12858,6 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
         })
   }
 
-  const formatDate = (value?: string | null) => {
-    if (!value) return "-"
-    const date = new Date(value)
-    return Number.isNaN(date.getTime())
-      ? "-"
-      : date.toLocaleDateString("en-GB", {
-          day: "2-digit",
-          month: "2-digit",
-          year: "numeric",
-          timeZone: "UTC",
-        })
-  }
-
   const filterFieldLabels: Record<ContractorMaintenanceFilterField, string> = {
     company: "Company",
     job_description: "Job description",
@@ -12904,96 +12884,73 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
       (scheduleCategoryFilter === "all" ||
         String(item.category_id) === scheduleCategoryFilter),
   )
-  const sortedSchedules = [...filteredSchedules].sort((a, b) => {
-    const compareText = (first: string, second: string) =>
-      first.localeCompare(second, undefined, {
-        numeric: true,
-        sensitivity: "base",
+  const calendarDays = useMemo(() => {
+    const year = scheduleMonth.getUTCFullYear()
+    const month = scheduleMonth.getUTCMonth()
+    const firstDayOfMonth = new Date(Date.UTC(year, month, 1))
+    const lastDayOfMonth = new Date(Date.UTC(year, month + 1, 0))
+    const mondayFirstOffset = (firstDayOfMonth.getUTCDay() + 6) % 7
+    const cellsCount = Math.ceil(
+      (mondayFirstOffset + lastDayOfMonth.getUTCDate()) / 7,
+    ) * 7
+    const gridStart = new Date(firstDayOfMonth)
+    gridStart.setUTCDate(gridStart.getUTCDate() - mondayFirstOffset)
+
+    return Array.from({ length: cellsCount }, (_, index) => {
+      const date = new Date(gridStart)
+      date.setUTCDate(gridStart.getUTCDate() + index)
+      return date
+    })
+  }, [scheduleMonth])
+  const calendarItemsByDate = useMemo(() => {
+    const itemsByDate = new Map<string, ContractorMaintenanceSchedule[]>()
+    const toDateKey = (date: Date) =>
+      `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(
+        2,
+        "0",
+      )}-${String(date.getUTCDate()).padStart(2, "0")}`
+
+    filteredSchedules.forEach((item) => {
+      if (!item.next_due_at) return
+      const dueDate = new Date(item.next_due_at)
+      if (Number.isNaN(dueDate.getTime())) return
+      const dateKey = toDateKey(dueDate)
+      const items = itemsByDate.get(dateKey) || []
+      items.push(item)
+      itemsByDate.set(dateKey, items)
+    })
+
+    itemsByDate.forEach((items) => {
+      items.sort((first, second) => {
+        const dateDifference =
+          new Date(first.next_due_at || 0).getTime() -
+          new Date(second.next_due_at || 0).getTime()
+        if (dateDifference !== 0) return dateDifference
+        return first.report.localeCompare(second.report, undefined, {
+          sensitivity: "base",
+        })
       })
-    const compareDate = (first?: string | null, second?: string | null) => {
-      if (!first) return second ? 1 : 0
-      if (!second) return -1
-      return new Date(first).getTime() - new Date(second).getTime()
-    }
+    })
 
-    let comparison = 0
-    switch (scheduleSort.key) {
-      case "category":
-        comparison = compareText(a.category_name, b.category_name)
-        break
-      case "tag":
-        comparison = compareText(a.tag, b.tag)
-        break
-      case "description":
-        comparison = compareText(a.report, b.report)
-        break
-      case "lastDone":
-        comparison = compareDate(a.last_completed_at, b.last_completed_at)
-        break
-      case "nextDone":
-        comparison = compareDate(a.next_due_at, b.next_due_at)
-        break
-      case "interval":
-        comparison = a.frequency_value - b.frequency_value
-        if (comparison === 0) {
-          comparison = compareText(a.frequency_unit, b.frequency_unit)
-        }
-        break
-      case "linkHooks":
-        comparison = compareText(
-          formatMaintenanceFilters(a),
-          formatMaintenanceFilters(b),
-        )
-        break
-      case "notes":
-        comparison = compareText(a.notes, b.notes)
-        break
-    }
-
-    if (comparison === 0) return compareText(String(a.id), String(b.id))
-    return scheduleSort.direction === "asc" ? comparison : -comparison
-  })
-  const toggleScheduleSort = (key: typeof scheduleSort.key) => {
-    setScheduleSort((current) => ({
-      key,
-      direction:
-        current.key === key && current.direction === "asc" ? "desc" : "asc",
-    }))
-  }
-  const ScheduleSortHeader = ({
-    column,
-    children,
-  }: {
-    column: typeof scheduleSort.key
-    children: ReactNode
-  }) => {
-    const isSorted = scheduleSort.key === column
-    const SortIcon = isSorted
-      ? scheduleSort.direction === "asc"
-        ? ChevronUp
-        : ChevronDown
-      : ChevronsUpDown
-
-    return (
-      <th
-        aria-sort={
-          isSorted
-            ? scheduleSort.direction === "asc"
-              ? "ascending"
-              : "descending"
-            : "none"
-        }
-        className="px-4 py-3"
-      >
-        <button
-          type="button"
-          onClick={() => toggleScheduleSort(column)}
-          className="inline-flex items-center gap-1 text-left hover:text-[#8c7569] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8c7569]"
-        >
-          {children}
-          <SortIcon aria-hidden="true" className="size-3.5" />
-        </button>
-      </th>
+    return itemsByDate
+  }, [filteredSchedules])
+  const todayDateKey = (() => {
+    const today = new Date()
+    return `${today.getUTCFullYear()}-${String(today.getUTCMonth() + 1).padStart(
+      2,
+      "0",
+    )}-${String(today.getUTCDate()).padStart(2, "0")}`
+  })()
+  const formatCalendarDateKey = (date: Date) =>
+    `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(
+      2,
+      "0",
+    )}-${String(date.getUTCDate()).padStart(2, "0")}`
+  const navigateScheduleMonth = (offset: number) => {
+    setScheduleMonth((current) =>
+      new Date(
+        Date.UTC(current.getUTCFullYear(), current.getUTCMonth() + offset, 1),
+      ),
     )
   }
   const isSaving =
@@ -13015,6 +12972,7 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
   return (
     <>
       <div className="w-full space-y-6">
+        <GoogleCalendarIntegrationCard />
         <div className="rounded-lg bg-white p-6 shadow-md">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
@@ -13099,97 +13057,125 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
                   </select>
                 </label>
               </div>
-              <div className="overflow-x-auto rounded-lg border border-[#e5e0dc]">
-                <table className="min-w-full text-left text-sm">
-                  <thead className="bg-[#f5f1ee] text-xs uppercase tracking-wide text-[#55311c]">
-                    <tr>
-                      <ScheduleSortHeader column="category">
-                        Category
-                      </ScheduleSortHeader>
-                      <ScheduleSortHeader column="tag">Tag</ScheduleSortHeader>
-                      <ScheduleSortHeader column="description">
-                        Descriptions
-                      </ScheduleSortHeader>
-                      <ScheduleSortHeader column="lastDone">
-                        Last done
-                      </ScheduleSortHeader>
-                      <ScheduleSortHeader column="nextDone">
-                        Next done
-                      </ScheduleSortHeader>
-                      <ScheduleSortHeader column="interval">
-                        Interval
-                      </ScheduleSortHeader>
-                      <ScheduleSortHeader column="linkHooks">
-                        Link hooks
-                      </ScheduleSortHeader>
-                      <ScheduleSortHeader column="notes">Notes</ScheduleSortHeader>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {scheduleQuery.isLoading ? (
-                      <tr>
-                        <td className="px-4 py-5 text-center" colSpan={8}>
-                          Loading maintenance schedule...
-                        </td>
-                      </tr>
-                    ) : sortedSchedules.length === 0 ? (
-                      <tr>
-                        <td className="px-4 py-5 text-center" colSpan={8}>
-                          No maintenance matches the selected filters.
-                        </td>
-                      </tr>
-                    ) : (
-                      sortedSchedules.map((item) => (
-                        <tr
-                          key={item.id}
-                          role="button"
-                          tabIndex={0}
-                          aria-label={`Open details for ${item.report}`}
-                          onClick={() => setSelectedMaintenanceId(item.id)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter" || event.key === " ") {
-                              event.preventDefault()
-                              setSelectedMaintenanceId(item.id)
-                            }
-                          }}
-                          className={
-                            item.status === "pending"
-                              ? "cursor-pointer border-t border-red-200 bg-red-100 text-red-950 transition hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#8c7569]"
-                              : item.status === "soon"
-                                ? "cursor-pointer border-t border-amber-200 bg-amber-100 text-amber-950 transition hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#8c7569]"
-                                : "cursor-pointer border-t border-emerald-200 bg-emerald-100 text-emerald-950 transition hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#8c7569]"
-                          }
-                        >
-                          <td className="px-4 py-3 font-semibold">
-                            {item.category_name}
-                          </td>
-                          <td className="px-4 py-3">{item.tag || "-"}</td>
-                          <td className="px-4 py-3">{item.report}</td>
-                          <td className="px-4 py-3">
-                            {formatDate(item.last_completed_at)}
-                          </td>
-                          <td className="px-4 py-3">
-                            {formatDate(item.next_due_at)}
-                          </td>
-                          <td className="px-4 py-3">
-                            {item.frequency_value}{" "}
-                            {item.frequency_unit === "days"
-                              ? "day(s)"
-                              : "month(s)"}
-                          </td>
-                          <td className="px-4 py-3">
-                            {formatMaintenanceFilters(item)}
-                          </td>
-                          <td className="px-4 py-3">{item.notes || "-"}</td>
-                        </tr>
-                      ))
+              {scheduleQuery.isLoading ? (
+                <div className="rounded-xl border border-[#e5e0dc] py-12 text-center text-sm text-[rgba(0,0,0,0.65)]">
+                  Loading maintenance schedule...
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <div className="min-w-[760px]">
+                    <div className="mb-4 flex items-center justify-between">
+                      <button
+                        type="button"
+                        aria-label="Previous month"
+                        onClick={() => navigateScheduleMonth(-1)}
+                        className="inline-flex size-9 items-center justify-center rounded-full border border-[#ded6d1] bg-white text-[#55311c] transition hover:bg-[#f5f1ee] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8c7569]"
+                      >
+                        <ChevronLeft aria-hidden="true" className="size-4" />
+                      </button>
+                      <h3 className="font-['Nunito',sans-serif] text-xl font-bold text-[#55311c]">
+                        {scheduleMonth.toLocaleDateString("en-GB", {
+                          month: "long",
+                          year: "numeric",
+                          timeZone: "UTC",
+                        })}
+                      </h3>
+                      <button
+                        type="button"
+                        aria-label="Next month"
+                        onClick={() => navigateScheduleMonth(1)}
+                        className="inline-flex size-9 items-center justify-center rounded-full border border-[#ded6d1] bg-white text-[#55311c] transition hover:bg-[#f5f1ee] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8c7569]"
+                      >
+                        <ChevronRight aria-hidden="true" className="size-4" />
+                      </button>
+                    </div>
+
+                    <div className="overflow-hidden rounded-xl border border-[#e5e0dc] bg-white shadow-sm">
+                      <div className="grid grid-cols-7 border-b border-[#e5e0dc] bg-[#fcfbfa] text-center text-xs font-semibold text-[#55311c]">
+                        {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(
+                          (day) => (
+                            <div key={day} className="py-3">
+                              {day}
+                            </div>
+                          ),
+                        )}
+                      </div>
+                      <div className="grid grid-cols-7">
+                        {calendarDays.map((date) => {
+                          const dateKey = formatCalendarDateKey(date)
+                          const dayItems = calendarItemsByDate.get(dateKey) || []
+                          const isCurrentMonth =
+                            date.getUTCMonth() === scheduleMonth.getUTCMonth()
+                          const isToday = dateKey === todayDateKey
+
+                          return (
+                            <div
+                              key={dateKey}
+                              className={`min-h-36 border-b border-r border-[#e5e0dc] p-1.5 last:border-r-0 ${
+                                isCurrentMonth
+                                  ? "bg-white"
+                                  : "bg-[#fbfaf9] text-[#9c928c]"
+                              }`}
+                            >
+                              <div className="mb-1 flex h-6 items-center px-1 text-xs font-semibold">
+                                <span
+                                  className={
+                                    isToday
+                                      ? "inline-flex size-6 items-center justify-center rounded-full bg-[#8c7569] text-white"
+                                      : "inline-flex size-6 items-center justify-center"
+                                  }
+                                >
+                                  {date.getUTCDate()}
+                                </span>
+                              </div>
+                              <div className="space-y-1">
+                                {dayItems.slice(0, 3).map((item) => (
+                                  <button
+                                    key={item.id}
+                                    type="button"
+                                    title={`${item.category_name}: ${item.report}${
+                                      item.filters.length
+                                        ? `\n${formatMaintenanceFilters(item)}`
+                                        : ""
+                                    }`}
+                                    aria-label={`Open details for ${item.report}`}
+                                    onClick={() =>
+                                      setSelectedMaintenanceId(item.id)
+                                    }
+                                    className={`block w-full truncate rounded px-1.5 py-0.5 text-left text-[11px] font-medium transition hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8c7569] ${
+                                      item.status === "pending"
+                                        ? "bg-red-100 text-red-950"
+                                        : item.status === "soon"
+                                          ? "bg-amber-100 text-amber-950"
+                                          : "bg-[#dbeafe] text-[#1e3a8a]"
+                                    }`}
+                                  >
+                                    {item.tag ? `${item.tag} — ${item.report}` : item.report}
+                                  </button>
+                                ))}
+                                {dayItems.length > 3 && (
+                                  <div className="px-1.5 pt-0.5 text-[11px] font-semibold text-[#6f625a]">
+                                    + {dayItems.length - 3} items
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                    {filteredSchedules.filter((item) => item.next_due_at).length ===
+                      0 && (
+                      <p className="mt-3 text-center text-sm text-[rgba(0,0,0,0.65)]">
+                        No scheduled maintenance matches the selected filters.
+                      </p>
                     )}
-                  </tbody>
-                </table>
-              </div>
+                  </div>
+                </div>
+              )}
               <p className="mt-2 text-xs text-[rgba(0,0,0,0.65)]">
-                Green is on schedule. Yellow is due within 7 days. Red is
-                pending or overdue.
+                Each day shows up to three items. Additional maintenance is
+                grouped in the “+ items” line.
               </p>
             </TabsContent>
             <TabsContent value="history" className="mt-4">

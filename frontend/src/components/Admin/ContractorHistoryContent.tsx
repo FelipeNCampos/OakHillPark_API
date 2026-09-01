@@ -7,6 +7,7 @@ import {
 import { useDeferredValue, useEffect, useMemo, useState } from "react"
 
 import { OpenAPI } from "@/client"
+import { GoogleCalendarIntegrationCard } from "@/components/GoogleCalendarIntegrationCard"
 import { enforceHttpsUrl, resolveApiBase } from "@/config/api"
 import {
   Dialog,
@@ -858,6 +859,7 @@ export function ContractorHistoryContent() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
+      <GoogleCalendarIntegrationCard />
       <div className="rounded-lg bg-white p-6 shadow-md">
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>

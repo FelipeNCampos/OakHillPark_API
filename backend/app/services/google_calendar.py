@@ -621,8 +621,7 @@ def queue_full_google_calendar_resync(
         maintenance = session.get(ContractorMaintenance, maintenance_id)
         if not maintenance:
             continue
-        next_due_at = _maintenance_next_due_at(session, maintenance)
-        if next_due_at and _as_utc(next_due_at) >= now:
+        if _maintenance_next_due_at(session, maintenance):
             queued += int(_queue_maintenance_job(session, connection.id, maintenance_id))
     return queued
 
@@ -902,7 +901,9 @@ def _sync_maintenance_event(
         if maintenance and maintenance.condominio_id == condominio_id
         else None
     )
-    should_exist = bool(next_due_at and _as_utc(next_due_at) >= utc_now())
+    # Keep overdue maintenance visible as a past event. It remains a useful
+    # record until a completed visit calculates the next scheduled date.
+    should_exist = next_due_at is not None
     with httpx.Client(timeout=20.0) as client:
         if not should_exist:
             response = _google_request(

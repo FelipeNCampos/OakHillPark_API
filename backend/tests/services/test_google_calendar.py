@@ -186,6 +186,9 @@ def test_google_maintenance_event_mapping_uses_next_due_date(db: Session) -> Non
         condominio_id=condominio.id,
         name="Fire safety",
     )
+    db.add(category)
+    db.commit()
+    db.refresh(category)
     maintenance = ContractorMaintenance(
         condominio_id=condominio.id,
         category_id=category.id,
@@ -197,7 +200,6 @@ def test_google_maintenance_event_mapping_uses_next_due_date(db: Session) -> Non
         notes="Check pressure gauge",
         last_completed_at=datetime(2026, 6, 15, 9, 0, tzinfo=timezone.utc),
     )
-    db.add(category)
     db.add(maintenance)
     db.commit()
     db.refresh(maintenance)
@@ -213,7 +215,7 @@ def test_google_maintenance_event_mapping_uses_next_due_date(db: Session) -> Non
     assert "Frequency: 3 months" in event["description"]
 
 
-def test_first_google_resync_enqueues_existing_future_maintenance(
+def test_first_google_resync_enqueues_existing_overdue_maintenance(
     db: Session,
     client: TestClient,
     google_calendar_settings: str,
@@ -226,6 +228,9 @@ def test_first_google_resync_enqueues_existing_future_maintenance(
         condominio_id=condominio.id,
         name="Elevators",
     )
+    db.add(category)
+    db.commit()
+    db.refresh(category)
     maintenance = ContractorMaintenance(
         condominio_id=condominio.id,
         category_id=category.id,
@@ -233,10 +238,9 @@ def test_first_google_resync_enqueues_existing_future_maintenance(
         frequency_days=30,
         frequency_value=30,
         frequency_unit="days",
-        last_completed_at=datetime.now(timezone.utc) - timedelta(days=1),
+        last_completed_at=datetime.now(timezone.utc) - timedelta(days=31),
     )
     db.add(connection)
-    db.add(category)
     db.add(maintenance)
     db.commit()
     db.refresh(connection)

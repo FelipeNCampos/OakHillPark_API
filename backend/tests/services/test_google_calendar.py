@@ -16,6 +16,8 @@ from app.models import (
     CondominioCreate,
     ContractorHistory,
     ContractorHistoryCategory,
+    ContractorMaintenance,
+    ContractorMaintenanceCategory,
     ContractorVisit,
     GoogleCalendarConnection,
     GoogleCalendarOAuthState,
@@ -27,11 +29,13 @@ from app.services.google_calendar import (
     GoogleCalendarOAuthStateError,
     GoogleCalendarTransientError,
     _build_event,
+    _build_maintenance_event,
     begin_google_calendar_oauth,
     consume_google_calendar_oauth_state,
     decrypt_google_refresh_token,
     encrypt_google_refresh_token,
     process_google_calendar_job,
+    queue_full_google_calendar_resync,
 )
 from tests.utils.user import user_authentication_headers
 from tests.utils.utils import random_email, random_lower_string
@@ -176,6 +180,83 @@ def test_google_event_mapping_uses_next_service_and_previous_visit_duration() ->
     assert "Phone: +447700900001" in event["description"]
 
 
+def test_google_maintenance_event_mapping_uses_next_due_date(db: Session) -> None:
+    condominio = _create_condominio(db)
+    category = ContractorMaintenanceCategory(
+        condominio_id=condominio.id,
+        name="Fire safety",
+    )
+    maintenance = ContractorMaintenance(
+        condominio_id=condominio.id,
+        category_id=category.id,
+        tag="EXT-01",
+        report="Fire extinguisher inspection",
+        frequency_days=3,
+        frequency_value=3,
+        frequency_unit="months",
+        notes="Check pressure gauge",
+        last_completed_at=datetime(2026, 6, 15, 9, 0, tzinfo=timezone.utc),
+    )
+    db.add(category)
+    db.add(maintenance)
+    db.commit()
+    db.refresh(maintenance)
+
+    event = _build_maintenance_event(db, maintenance, category)
+
+    assert event["id"] == f"ohm{maintenance.id.hex}"
+    assert event["summary"] == "Fire safety: Fire extinguisher inspection"
+    assert event["start"]["dateTime"] == "2026-09-15T09:00:00+00:00"
+    assert event["end"]["dateTime"] == "2026-09-15T10:00:00+00:00"
+    assert event["location"] == "Oak Hill Park"
+    assert "Tag: EXT-01" in event["description"]
+    assert "Frequency: 3 months" in event["description"]
+
+
+def test_first_google_resync_enqueues_existing_future_maintenance(
+    db: Session,
+    client: TestClient,
+    google_calendar_settings: str,
+) -> None:
+    assert google_calendar_settings == "calendar-client-id"
+    condominio = _create_condominio(db)
+    user, _ = _create_manager(client, db, condominio.id)
+    connection = _active_connection(user.id)
+    category = ContractorMaintenanceCategory(
+        condominio_id=condominio.id,
+        name="Elevators",
+    )
+    maintenance = ContractorMaintenance(
+        condominio_id=condominio.id,
+        category_id=category.id,
+        report="Quarterly elevator inspection",
+        frequency_days=30,
+        frequency_value=30,
+        frequency_unit="days",
+        last_completed_at=datetime.now(timezone.utc) - timedelta(days=1),
+    )
+    db.add(connection)
+    db.add(category)
+    db.add(maintenance)
+    db.commit()
+    db.refresh(connection)
+    db.refresh(maintenance)
+
+    queued = queue_full_google_calendar_resync(db, connection, condominio.id)
+    db.commit()
+
+    job = db.exec(
+        select(GoogleCalendarSyncJob).where(
+            GoogleCalendarSyncJob.connection_id == connection.id,
+            GoogleCalendarSyncJob.contractor_maintenance_id == maintenance.id,
+        )
+    ).first()
+    assert queued == 1
+    assert job is not None
+    assert job.kind == "maintenance"
+    assert job.status == "pending"
+
+
 def test_google_calendar_routes_require_manager(
     client: TestClient,
     db: Session,
@@ -262,6 +343,31 @@ def test_calendar_worker_completes_and_retries_persistent_jobs(
     db.refresh(completed_job)
     assert completed_job.status == "completed"
     assert connection.last_synced_at is not None
+
+    maintenance_job = GoogleCalendarSyncJob(
+        connection_id=connection.id,
+        contractor_maintenance_id=uuid.uuid4(),
+        kind="maintenance",
+        dedupe_key=f"google-maintenance-{uuid.uuid4()}",
+        status="processing",
+        locked_at=datetime.now(timezone.utc),
+    )
+    db.add(maintenance_job)
+    db.commit()
+    with (
+        patch(
+            "app.services.google_calendar._refresh_google_access_token",
+            return_value="access-token",
+        ),
+        patch(
+            "app.services.google_calendar._sync_maintenance_event",
+            return_value=False,
+        ) as sync_maintenance,
+    ):
+        process_google_calendar_job(db, maintenance_job)
+    db.refresh(maintenance_job)
+    assert maintenance_job.status == "completed"
+    sync_maintenance.assert_called_once()
 
     retry_job = GoogleCalendarSyncJob(
         connection_id=connection.id,

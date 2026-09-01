@@ -6,6 +6,7 @@ send to Google small and makes the worker straightforward to exercise in tests.
 """
 
 import base64
+import calendar
 import hashlib
 import secrets
 import uuid
@@ -21,6 +22,10 @@ from app.core.config import settings
 from app.models import (
     ContractorHistory,
     ContractorHistoryCategory,
+    ContractorMaintenance,
+    ContractorMaintenanceCategory,
+    ContractorMaintenanceFilter,
+    ContractorMaintenanceRecord,
     ContractorVisit,
     GoogleCalendarConnection,
     GoogleCalendarOAuthState,
@@ -348,6 +353,106 @@ def _build_event(
     }
 
 
+def _maintenance_event_id(maintenance_id: uuid.UUID) -> str:
+    return f"ohm{maintenance_id.hex}"
+
+
+def _add_months(value: datetime, months: int) -> datetime:
+    month_index = value.month - 1 + months
+    year = value.year + month_index // 12
+    month = month_index % 12 + 1
+    day = min(value.day, calendar.monthrange(year, month)[1])
+    return value.replace(year=year, month=month, day=day)
+
+
+def _maintenance_last_completed_at(
+    session: Session, maintenance: ContractorMaintenance
+) -> datetime | None:
+    record_last_completed_at = session.exec(
+        select(ContractorMaintenanceRecord.out_at)
+        .where(
+            ContractorMaintenanceRecord.maintenance_id == maintenance.id,
+            ContractorMaintenanceRecord.out_at.is_not(None),
+        )
+        .order_by(ContractorMaintenanceRecord.out_at.desc())
+        .limit(1)
+    ).first()
+    last_completed_at = maintenance.last_completed_at
+    if record_last_completed_at and (
+        last_completed_at is None
+        or _as_utc(record_last_completed_at) > _as_utc(last_completed_at)
+    ):
+        return record_last_completed_at
+    return last_completed_at
+
+
+def _maintenance_next_due_at(
+    session: Session, maintenance: ContractorMaintenance
+) -> datetime | None:
+    last_completed_at = _maintenance_last_completed_at(session, maintenance)
+    if not last_completed_at:
+        return None
+    frequency_value = max(
+        maintenance.frequency_value or maintenance.frequency_days or 1, 1
+    )
+    if maintenance.frequency_unit == "months":
+        return _add_months(_as_utc(last_completed_at), frequency_value)
+    return _as_utc(last_completed_at) + timedelta(days=frequency_value)
+
+
+def _build_maintenance_event(
+    session: Session,
+    maintenance: ContractorMaintenance,
+    category: ContractorMaintenanceCategory,
+) -> dict[str, Any]:
+    next_due_at = _maintenance_next_due_at(session, maintenance)
+    if not next_due_at:
+        raise GoogleCalendarPermanentError("Maintenance schedule has no due date")
+    category_name = category.name.strip() or "Maintenance"
+    service = maintenance.report.strip() or "Scheduled maintenance"
+    filters = session.exec(
+        select(ContractorMaintenanceFilter)
+        .where(ContractorMaintenanceFilter.maintenance_id == maintenance.id)
+        .order_by(ContractorMaintenanceFilter.field.asc())
+    ).all()
+    filter_description = ", ".join(
+        f"{item.field.replace('_', ' ').title()}: {item.value}"
+        for item in filters
+    )
+    frequency_value = max(
+        maintenance.frequency_value or maintenance.frequency_days or 1, 1
+    )
+    description = [
+        f"Service: {service}",
+        f"Category: {category_name}",
+        f"Frequency: {frequency_value} {maintenance.frequency_unit}",
+    ]
+    if maintenance.tag:
+        description.append(f"Tag: {maintenance.tag}")
+    if filter_description:
+        description.append(f"Contractor criteria: {filter_description}")
+    if maintenance.notes:
+        description.append(f"Notes: {maintenance.notes}")
+    return {
+        "id": _maintenance_event_id(maintenance.id),
+        "summary": f"{category_name}: {service}",
+        "description": "\n".join(description),
+        "location": "Oak Hill Park",
+        "start": {"dateTime": next_due_at.isoformat(), "timeZone": "UTC"},
+        "end": {
+            "dateTime": (next_due_at + ONE_HOUR).isoformat(),
+            "timeZone": "UTC",
+        },
+        "reminders": {"useDefault": True},
+        "extendedProperties": {
+            "private": {
+                "oakhillpark_managed": "true",
+                "oakhillpark_maintenance_id": str(maintenance.id),
+            }
+        },
+    }
+
+
 def _active_connections_for_condominio(
     session: Session, condominio_id: uuid.UUID
 ) -> list[GoogleCalendarConnection]:
@@ -394,6 +499,38 @@ def _queue_history_job(
     return True
 
 
+def _queue_maintenance_job(
+    session: Session,
+    connection_id: uuid.UUID,
+    maintenance_id: uuid.UUID,
+) -> bool:
+    dedupe_key = f"maintenance:{connection_id}:{maintenance_id}"
+    existing = session.exec(
+        select(GoogleCalendarSyncJob).where(
+            GoogleCalendarSyncJob.dedupe_key == dedupe_key
+        )
+    ).first()
+    now = utc_now()
+    if existing:
+        existing.status = "pending"
+        existing.attempts = 0
+        existing.next_attempt_at = now
+        existing.locked_at = None
+        existing.last_error = None
+        existing.updated_at = now
+        session.add(existing)
+        return False
+    session.add(
+        GoogleCalendarSyncJob(
+            connection_id=connection_id,
+            contractor_maintenance_id=maintenance_id,
+            kind="maintenance",
+            dedupe_key=dedupe_key,
+        )
+    )
+    return True
+
+
 def queue_history_changes_for_condominio(
     session: Session,
     condominio_id: uuid.UUID,
@@ -411,6 +548,35 @@ def queue_history_changes_for_condominio(
         for history_id in set(history_ids):
             queued += int(_queue_history_job(session, connection.id, history_id))
     return queued
+
+
+def queue_maintenance_changes_for_condominio(
+    session: Session,
+    condominio_id: uuid.UUID,
+    maintenance_ids: list[uuid.UUID],
+) -> int:
+    """Queue an idempotent maintenance update for every connected manager."""
+    if not maintenance_ids:
+        return 0
+    queued = 0
+    for connection in _active_connections_for_condominio(session, condominio_id):
+        for maintenance_id in set(maintenance_ids):
+            queued += int(_queue_maintenance_job(session, connection.id, maintenance_id))
+    return queued
+
+
+def queue_maintenances_for_contractor_visit(
+    session: Session, visit: ContractorVisit
+) -> int:
+    maintenance_ids = session.exec(
+        select(ContractorMaintenanceRecord.maintenance_id).where(
+            ContractorMaintenanceRecord.contractor_visit_id == visit.id,
+            ContractorMaintenanceRecord.condominio_id == visit.condominio_id,
+        )
+    ).all()
+    return queue_maintenance_changes_for_condominio(
+        session, visit.condominio_id, maintenance_ids
+    )
 
 
 def queue_histories_for_contractor_visit(
@@ -446,6 +612,18 @@ def queue_full_google_calendar_resync(
     queued = 0
     for history_id in history_ids:
         queued += int(_queue_history_job(session, connection.id, history_id))
+    maintenance_ids = session.exec(
+        select(ContractorMaintenance.id).where(
+            ContractorMaintenance.condominio_id == condominio_id,
+        )
+    ).all()
+    for maintenance_id in maintenance_ids:
+        maintenance = session.get(ContractorMaintenance, maintenance_id)
+        if not maintenance:
+            continue
+        next_due_at = _maintenance_next_due_at(session, maintenance)
+        if next_due_at and _as_utc(next_due_at) >= now:
+            queued += int(_queue_maintenance_job(session, connection.id, maintenance_id))
     return queued
 
 
@@ -696,6 +874,97 @@ def _sync_history_event(
     return False
 
 
+def _sync_maintenance_event(
+    session: Session,
+    connection: GoogleCalendarConnection,
+    maintenance_id: uuid.UUID,
+    access_token: str,
+) -> bool:
+    """Synchronize one Maintenance schedule and recreate its calendar if needed."""
+    user = session.get(User, connection.user_id)
+    if not user or not is_google_calendar_manager(user):
+        raise GoogleCalendarReconnectRequired(
+            "Google Calendar access is no longer allowed"
+        )
+    condominio_id = _resolve_user_condominio_id(session, user)
+    if not condominio_id:
+        raise GoogleCalendarPermanentError("No condominio is configured for this user")
+    calendar_id = connection.calendar_id
+    if not calendar_id:
+        _replace_deleted_google_calendar(
+            session, connection, condominio_id, access_token
+        )
+        return True
+
+    maintenance = session.get(ContractorMaintenance, maintenance_id)
+    next_due_at = (
+        _maintenance_next_due_at(session, maintenance)
+        if maintenance and maintenance.condominio_id == condominio_id
+        else None
+    )
+    should_exist = bool(next_due_at and _as_utc(next_due_at) >= utc_now())
+    with httpx.Client(timeout=20.0) as client:
+        if not should_exist:
+            response = _google_request(
+                client,
+                "DELETE",
+                f"/calendars/{calendar_id}/events/{_maintenance_event_id(maintenance_id)}",
+                access_token,
+            )
+            if response.status_code == 404 and not _calendar_exists(
+                client, calendar_id, access_token
+            ):
+                _replace_deleted_google_calendar(
+                    session, connection, condominio_id, access_token
+                )
+                return True
+            if response.status_code not in {204, 404}:
+                raise GoogleCalendarPermanentError(
+                    "Google could not delete the maintenance calendar event"
+                )
+            return False
+
+        category = session.get(ContractorMaintenanceCategory, maintenance.category_id)
+        if not category or category.condominio_id != condominio_id:
+            response = _google_request(
+                client,
+                "DELETE",
+                f"/calendars/{calendar_id}/events/{_maintenance_event_id(maintenance_id)}",
+                access_token,
+            )
+            if response.status_code not in {204, 404}:
+                raise GoogleCalendarPermanentError(
+                    "Google could not delete the maintenance calendar event"
+                )
+            return False
+        event = _build_maintenance_event(session, maintenance, category)
+        response = _google_request(
+            client,
+            "PUT",
+            f"/calendars/{calendar_id}/events/{_maintenance_event_id(maintenance_id)}",
+            access_token,
+            json=event,
+        )
+        if response.status_code == 404:
+            response = _google_request(
+                client,
+                "POST",
+                f"/calendars/{calendar_id}/events",
+                access_token,
+                json=event,
+            )
+            if response.status_code == 404:
+                _replace_deleted_google_calendar(
+                    session, connection, condominio_id, access_token
+                )
+                return True
+        if response.status_code >= 400:
+            raise GoogleCalendarPermanentError(
+                "Google could not update the maintenance calendar event"
+            )
+    return False
+
+
 def _retry_delay(attempts: int) -> timedelta:
     # The first retry is one minute, doubling up to one day.
     minutes = min(2 ** max(attempts - 1, 0), 24 * 60)
@@ -713,12 +982,17 @@ def process_google_calendar_job(session: Session, job: GoogleCalendarSyncJob) ->
         session.commit()
         return
     try:
-        if not job.contractor_history_id:
-            raise GoogleCalendarPermanentError("Google Calendar job is invalid")
         access_token = _refresh_google_access_token(connection)
-        calendar_recreated = _sync_history_event(
-            session, connection, job.contractor_history_id, access_token
-        )
+        if job.contractor_history_id:
+            calendar_recreated = _sync_history_event(
+                session, connection, job.contractor_history_id, access_token
+            )
+        elif job.contractor_maintenance_id:
+            calendar_recreated = _sync_maintenance_event(
+                session, connection, job.contractor_maintenance_id, access_token
+            )
+        else:
+            raise GoogleCalendarPermanentError("Google Calendar job is invalid")
     except GoogleCalendarTransientError as exc:
         now = utc_now()
         job.attempts += 1

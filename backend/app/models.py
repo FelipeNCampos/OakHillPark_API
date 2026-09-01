@@ -126,6 +126,7 @@ class GoogleCalendarSyncJob(SQLModel, table=True):
         index=True,
     )
     contractor_history_id: uuid.UUID | None = Field(default=None, index=True)
+    contractor_maintenance_id: uuid.UUID | None = Field(default=None, index=True)
     kind: str = Field(default="history", max_length=30)
     dedupe_key: str = Field(max_length=200, unique=True, index=True)
     status: str = Field(default="pending", max_length=30, index=True)

@@ -64,6 +64,8 @@ from app.models import (
 from app.services.google_calendar import (
     queue_histories_for_contractor_visit,
     queue_history_changes_for_condominio,
+    queue_maintenance_changes_for_condominio,
+    queue_maintenances_for_contractor_visit,
 )
 from app.utils import send_sms_notification
 
@@ -881,7 +883,7 @@ def _create_maintenance_records_for_contractor_visit(
 
 def _complete_maintenance_records_for_contractor_visit(
     session: SessionDep, visit: ContractorVisit
-) -> None:
+) -> list[uuid.UUID]:
     records = session.exec(
         select(ContractorMaintenanceRecord).where(
             ContractorMaintenanceRecord.contractor_visit_id == visit.id,
@@ -891,6 +893,7 @@ def _complete_maintenance_records_for_contractor_visit(
     for record in records:
         record.out_at = visit.out_at
         session.add(record)
+    return [record.maintenance_id for record in records]
 
 
 @router.get("/", response_model=ContractorVisitsPublic)
@@ -1438,6 +1441,8 @@ def create_contractor_maintenance(
                 value=value,
             )
         )
+    session.flush()
+    queue_maintenance_changes_for_condominio(session, condominio_id, [maintenance.id])
     session.commit()
     session.refresh(maintenance)
     return _contractor_maintenance_to_public(session, maintenance, category)
@@ -1496,6 +1501,7 @@ def update_contractor_maintenance(
                 value=value,
             )
         )
+    queue_maintenance_changes_for_condominio(session, condominio_id, [maintenance.id])
     session.commit()
     session.refresh(maintenance)
     return _contractor_maintenance_to_public(session, maintenance, category)
@@ -1612,6 +1618,8 @@ def create_contractor_maintenance_record(
         out_at=visit.out_at,
     )
     session.add(record)
+    session.flush()
+    queue_maintenance_changes_for_condominio(session, condominio_id, [maintenance.id])
     session.commit()
     session.refresh(record)
     return _contractor_maintenance_record_to_public(
@@ -1754,9 +1762,12 @@ def close_contractor_visit(
 
     item.out_at = check_out_at
     session.add(item)
-    _complete_maintenance_records_for_contractor_visit(session, item)
+    maintenance_ids = _complete_maintenance_records_for_contractor_visit(session, item)
     session.flush()
     queue_histories_for_contractor_visit(session, item)
+    queue_maintenance_changes_for_condominio(
+        session, item.condominio_id, maintenance_ids
+    )
     session.commit()
     session.refresh(item)
 
@@ -1820,6 +1831,11 @@ def update_contractor_visit(
 
     session.flush()
     queue_histories_for_contractor_visit(session, item)
+    queue_maintenance_changes_for_condominio(
+        session,
+        condominio_id,
+        [record.maintenance_id for record in maintenance_records],
+    )
     session.commit()
     session.refresh(item)
     return _contractor_visit_to_admin_public(item)
@@ -1837,6 +1853,7 @@ def delete_contractor_visit(
     condominio_id = _require_manager_condominio(session, current_user)
     item = _require_contractor_visit_for_condominio(session, condominio_id, visit_id)
     queue_histories_for_contractor_visit(session, item)
+    queue_maintenances_for_contractor_visit(session, item)
     session.delete(item)
     session.commit()
     return {"message": "Contractor record deleted successfully"}

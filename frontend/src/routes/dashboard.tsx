@@ -765,24 +765,34 @@ type FlatResidentRow = {
 }
 
 type FlatResidentsPreview = {
-  owner_1?: Morador
-  owner_2?: Morador
-  tenant?: Morador
-  agent?: Morador
+  owner_1?: FlatResidentPreview
+  owner_2?: FlatResidentPreview
+  tenant?: FlatResidentPreview
+  agent?: FlatResidentPreview
 }
 
+type FlatResidentPreview = Pick<
+  Morador,
+  "id" | "cargo" | "flat_id" | "nome" | "mobile"
+>
+
+type ResidentDetailSlotKey = "owner_1" | "owner_2" | "tenant"
+
 type FlatResidentPreviewEntry = {
-  key: keyof FlatResidentsPreview
+  key: ResidentDetailSlotKey
   label: string
-  resident: Morador
+  cargo: number
+  resident?: FlatResidentPreview
 }
 
 type ResidentEditContext = {
   editTitle: string
   flatResidents?: FlatResidentsPreview
+  flatId?: EntityId
 }
 
 interface MoradorDetail {
+  id: EntityId
   nome: string
   email?: string | null
   tenant_nome_2?: string | null
@@ -7987,30 +7997,30 @@ function FlatReadingsTable({
     if (hasNormal) headers.push("Normal", "Normal used", "Normal %")
     if (hasGas) headers.push("Gas", "Gas used", "Gas %")
 
-    const rows = filteredRows.map((row, index) => {
+    const rows = filteredRows.map((row) => {
       const values: (string | number)[] = [
-        index === 0 ? "All" : row.days || "-",
+        row.days || "-",
         formatDateToBr(row.date),
       ]
       if (hasLow) {
         values.push(row.low ?? "-")
-        values.push(index === 0 ? "All" : (row.lowUsed ?? "-"))
-        values.push(index === 0 ? "no data" : (row.lowPercent ?? "-"))
+        values.push(row.lowUsed ?? "-")
+        values.push(row.lowPercent ?? "-")
       }
       if (hasNormal) {
         values.push(row.normal ?? "-")
-        values.push(index === 0 ? "All" : (row.normalUsed ?? "-"))
-        values.push(index === 0 ? "no data" : (row.normalPercent ?? "-"))
+        values.push(row.normalUsed ?? "-")
+        values.push(row.normalPercent ?? "-")
       }
       if (hasGas) {
         values.push(row.gas ?? "-")
-        values.push(index === 0 ? "All" : (row.gasUsed ?? "-"))
-        values.push(index === 0 ? "no data" : (row.gasPercent ?? "-"))
+        values.push(row.gasUsed ?? "-")
+        values.push(row.gasPercent ?? "-")
       }
       if (hasGarage) {
         values.push(row.garage ?? "-")
-        values.push(index === 0 ? "All" : (row.garageUsed ?? "-"))
-        values.push(index === 0 ? "no data" : (row.garagePercent ?? "-"))
+        values.push(row.garageUsed ?? "-")
+        values.push(row.garagePercent ?? "-")
       }
       return values
     })
@@ -8148,7 +8158,7 @@ function FlatReadingsTable({
                 {formatDateToBr(row.date)}
               </p>
               <p className="text-xs text-[rgba(0,0,0,0.7)]">
-                {index === 0 ? "All" : `Days: ${row.days || "-"}`}
+                Days: {row.days || "-"}
               </p>
             </div>
             <div className="space-y-2 text-xs text-[#55311c]">
@@ -8156,10 +8166,10 @@ function FlatReadingsTable({
                 <div className="rounded-md bg-[#f7f2ee] p-2">
                   <p className="font-semibold">Low: {row.low ?? "-"}</p>
                   <p className="mt-1">
-                    Used: {index === 0 ? "All" : (row.lowUsed ?? "-")}
+                    Used: {row.lowUsed ?? "-"}
                   </p>
                   <p className={`mt-1 ${getPercentColor(row.lowPercent)}`}>
-                    %: {index === 0 ? "no data" : (row.lowPercent ?? "-")}
+                    %: {row.lowPercent ?? "-"}
                   </p>
                 </div>
               )}
@@ -8167,10 +8177,10 @@ function FlatReadingsTable({
                 <div className="rounded-md bg-[#f7f2ee] p-2">
                   <p className="font-semibold">Normal: {row.normal ?? "-"}</p>
                   <p className="mt-1">
-                    Used: {index === 0 ? "All" : (row.normalUsed ?? "-")}
+                    Used: {row.normalUsed ?? "-"}
                   </p>
                   <p className={`mt-1 ${getPercentColor(row.normalPercent)}`}>
-                    %: {index === 0 ? "no data" : (row.normalPercent ?? "-")}
+                    %: {row.normalPercent ?? "-"}
                   </p>
                 </div>
               )}
@@ -8178,10 +8188,10 @@ function FlatReadingsTable({
                 <div className="rounded-md bg-[#f7f2ee] p-2">
                   <p className="font-semibold">Gas: {row.gas ?? "-"}</p>
                   <p className="mt-1">
-                    Used: {index === 0 ? "All" : (row.gasUsed ?? "-")}
+                    Used: {row.gasUsed ?? "-"}
                   </p>
                   <p className={`mt-1 ${getPercentColor(row.gasPercent)}`}>
-                    %: {index === 0 ? "no data" : (row.gasPercent ?? "-")}
+                    %: {row.gasPercent ?? "-"}
                   </p>
                 </div>
               )}
@@ -8250,14 +8260,14 @@ function FlatReadingsTable({
           </tr>
         </thead>
         <tbody>
-          {processedData.map((row, index) => (
+          {processedData.map((row) => (
             <tr
               key={row.date}
               onClick={() => handleOpenEdit(row)}
               className="cursor-pointer hover:bg-gray-50"
             >
               <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-700">
-                {index === 0 ? "All" : row.days}
+                {row.days || "-"}
               </td>
               <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-700">
                 {(() => {
@@ -8272,12 +8282,12 @@ function FlatReadingsTable({
                     {row.low ?? "-"}
                   </td>
                   <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-700">
-                    {index === 0 ? "All" : (row.lowUsed ?? "-")}
+                    {row.lowUsed ?? "-"}
                   </td>
                   <td
                     className={`border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-700 ${getPercentColor(row.lowPercent)}`}
                   >
-                    {index === 0 ? "no data" : (row.lowPercent ?? "-")}
+                    {row.lowPercent ?? "-"}
                   </td>
                 </>
               )}
@@ -8287,12 +8297,12 @@ function FlatReadingsTable({
                     {row.normal ?? "-"}
                   </td>
                   <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-700">
-                    {index === 0 ? "All" : (row.normalUsed ?? "-")}
+                    {row.normalUsed ?? "-"}
                   </td>
                   <td
                     className={`border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-700 ${getPercentColor(row.normalPercent)}`}
                   >
-                    {index === 0 ? "no data" : (row.normalPercent ?? "-")}
+                    {row.normalPercent ?? "-"}
                   </td>
                 </>
               )}
@@ -8302,12 +8312,12 @@ function FlatReadingsTable({
                     {row.gas ?? "-"}
                   </td>
                   <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-700">
-                    {index === 0 ? "All" : (row.gasUsed ?? "-")}
+                    {row.gasUsed ?? "-"}
                   </td>
                   <td
                     className={`border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-700 ${getPercentColor(row.gasPercent)}`}
                   >
-                    {index === 0 ? "no data" : (row.gasPercent ?? "-")}
+                    {row.gasPercent ?? "-"}
                   </td>
                 </>
               )}
@@ -8317,12 +8327,12 @@ function FlatReadingsTable({
                     {row.garage ?? "-"}
                   </td>
                   <td className="border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-700">
-                    {index === 0 ? "All" : (row.garageUsed ?? "-")}
+                    {row.garageUsed ?? "-"}
                   </td>
                   <td
                     className={`border border-gray-400 px-3 py-2 font-['Nunito',sans-serif] text-sm text-gray-700 ${getPercentColor(row.garagePercent)}`}
                   >
-                    {index === 0 ? "no data" : (row.garagePercent ?? "-")}
+                    {row.garagePercent ?? "-"}
                   </td>
                 </>
               )}
@@ -12705,6 +12715,8 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
   const [maintenanceStatusFilter, setMaintenanceStatusFilter] = useState<
     "all" | "pending" | "soon" | "ok"
   >("all")
+  const [maintenanceCategoryFilter, setMaintenanceCategoryFilter] =
+    useState("all")
   const [maintenanceSort, setMaintenanceSort] = useState<{
     field:
       | "report"
@@ -12887,7 +12899,10 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
         const matchesStatus =
           maintenanceStatusFilter === "all" ||
           item.status === maintenanceStatusFilter
-        if (!matchesStatus) return false
+        const matchesCategory =
+          maintenanceCategoryFilter === "all" ||
+          String(item.category_id) === maintenanceCategoryFilter
+        if (!matchesStatus || !matchesCategory) return false
         if (!searchTerm) return true
 
         return [
@@ -12929,7 +12944,13 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
         if (result === 0) result = compareText(first.report, second.report)
         return maintenanceSort.direction === "asc" ? result : -result
       })
-  }, [maintenanceSearch, maintenanceSort, maintenanceStatusFilter, schedules])
+  }, [
+    maintenanceCategoryFilter,
+    maintenanceSearch,
+    maintenanceSort,
+    maintenanceStatusFilter,
+    schedules,
+  ])
   const toggleMaintenanceSort = (field: typeof maintenanceSort.field) => {
     setMaintenanceSort((current) => ({
       field,
@@ -13319,8 +13340,8 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
               </div>
             </TabsContent>
             <TabsContent value="maintenances" className="mt-4">
-              <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                <label className="grid flex-1 gap-1 text-sm font-semibold text-[#55311c]">
+              <div className="mb-4 flex items-end gap-3 overflow-x-auto pb-1">
+                <label className="grid min-w-48 flex-1 gap-1 text-sm font-semibold text-[#55311c]">
                   Search
                   <input
                     type="search"
@@ -13330,7 +13351,7 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
                     className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm font-normal text-[#55311c] placeholder:text-[#8c7569]"
                   />
                 </label>
-                <label className="grid gap-1 text-sm font-semibold text-[#55311c] sm:w-52">
+                <label className="grid w-40 shrink-0 gap-1 text-sm font-semibold text-[#55311c]">
                   Status
                   <select
                     value={maintenanceStatusFilter}
@@ -13345,6 +13366,23 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
                     <option value="pending">Pending</option>
                     <option value="soon">Soon</option>
                     <option value="ok">OK</option>
+                  </select>
+                </label>
+                <label className="grid w-44 shrink-0 gap-1 text-sm font-semibold text-[#55311c]">
+                  Category
+                  <select
+                    value={maintenanceCategoryFilter}
+                    onChange={(event) =>
+                      setMaintenanceCategoryFilter(event.target.value)
+                    }
+                    className="rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm font-normal text-[#55311c]"
+                  >
+                    <option value="all">All categories</option>
+                    {categories.map((category) => (
+                      <option key={category.id} value={String(category.id)}>
+                        {category.name}
+                      </option>
+                    ))}
                   </select>
                 </label>
               </div>
@@ -24849,8 +24887,32 @@ function ResidentsContent() {
     residentId: EntityId,
     context?: ResidentEditContext,
   ) => {
+    const targetResident = Residents.find(
+      (resident) => String(resident.id) === String(residentId),
+    )
+    const flatId = targetResident?.flat_id ?? context?.flatId
+    const residentsInFlat = flatId
+      ? Residents.filter(
+          (resident) => String(resident.flat_id) === String(flatId),
+        )
+      : []
+    const flatResidents: FlatResidentsPreview | undefined = flatId
+      ? {
+          owner_1: residentsInFlat.find((resident) => resident.cargo === 0),
+          owner_2: residentsInFlat.find((resident) => resident.cargo === 1),
+          tenant: residentsInFlat.find((resident) => resident.cargo === 2),
+          agent: residentsInFlat.find((resident) => resident.cargo === 3),
+        }
+      : context?.flatResidents
+
     setEditingId(residentId)
-    setEditContext(context || null)
+    setEditContext({
+      editTitle:
+        context?.editTitle ??
+        `Edit ${getResidentRoleEditToken(targetResident?.cargo ?? -1)}`,
+      flatResidents,
+      flatId,
+    })
     setShowForm(true)
   }
 
@@ -25396,67 +25458,81 @@ function AddResidentForm({
   )
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [flats, setFlats] = useState<Array<{ id: string; label: string }>>([])
-  const flatResidentsPreview = editContext?.flatResidents
+  const [flatResidentsPreview, setFlatResidentsPreview] =
+    useState<FlatResidentsPreview>(editContext?.flatResidents ?? {})
+  const [activeSlotKey, setActiveSlotKey] =
+    useState<ResidentDetailSlotKey | null>(() => {
+      const slots: ResidentDetailSlotKey[] = ["owner_1", "owner_2", "tenant"]
+      return (
+        slots.find(
+          (slot) =>
+            String(editContext?.flatResidents?.[slot]?.id) ===
+            String(editingId),
+        ) ?? null
+      )
+    })
+  const fixedFlatId = editContext?.flatId ? String(editContext.flatId) : ""
   const flatResidentEntries = useMemo<FlatResidentPreviewEntry[]>(
     () =>
       [
-        flatResidentsPreview?.owner_1
-          ? {
-              key: "owner_1",
-              label: "Owner 1",
-              resident: flatResidentsPreview.owner_1,
-            }
-          : null,
-        flatResidentsPreview?.owner_2
-          ? {
-              key: "owner_2",
-              label: "Owner 2",
-              resident: flatResidentsPreview.owner_2,
-            }
-          : null,
-        flatResidentsPreview?.tenant
-          ? {
-              key: "tenant",
-              label: "Tenant",
-              resident: flatResidentsPreview.tenant,
-            }
-          : null,
-        flatResidentsPreview?.agent
-          ? {
-              key: "agent",
-              label: "Agent",
-              resident: flatResidentsPreview.agent,
-            }
-          : null,
-      ].filter((entry): entry is FlatResidentPreviewEntry => entry !== null),
+        {
+          key: "owner_1",
+          label: "Owner 1",
+          cargo: 0,
+          resident: flatResidentsPreview.owner_1,
+        },
+        {
+          key: "owner_2",
+          label: "Owner 2",
+          cargo: 1,
+          resident: flatResidentsPreview.owner_2,
+        },
+        {
+          key: "tenant",
+          label: "Tenant",
+          cargo: 2,
+          resident: flatResidentsPreview.tenant,
+        },
+      ],
     [flatResidentsPreview],
   )
-  const hasFlatResidentsPreview = Boolean(
-    flatResidentsPreview?.owner_1 ||
-      flatResidentsPreview?.owner_2 ||
-      flatResidentsPreview?.tenant ||
-      flatResidentsPreview?.agent,
+  const activeSlot = flatResidentEntries.find(
+    (entry) => entry.key === activeSlotKey,
   )
   const activePreviewResident =
-    flatResidentEntries.find(
-      (entry) => String(entry.resident.id) === String(activeEditingId),
-    )?.resident ?? null
-  const shouldShowCarFields = activeEditingId
-    ? activePreviewResident?.cargo === 0
-    : formData.cargo === 0
-  const shouldShowTenantSecondaryFields = activeEditingId
-    ? activePreviewResident?.cargo === 2
-    : formData.cargo === 2
-  const activeEditTitle = activePreviewResident
-    ? `Edit ${getResidentRoleEditToken(activePreviewResident.cargo)}`
-    : (editContext?.editTitle ?? "Edit resident")
+    activeSlot?.resident ?? null
+  const activeResidentRole =
+    activePreviewResident?.cargo ?? activeSlot?.cargo ?? formData.cargo
+  const shouldShowCarFields = activeResidentRole === 0
+  const shouldShowTenantSecondaryFields = activeResidentRole === 2
+  const isFixedResidentDetails = Boolean(activeSlot && fixedFlatId)
+  const activeEditTitle = activeSlot
+    ? `${activePreviewResident ? "Edit" : "Create"} ${activeSlot.label}`
+    : activePreviewResident
+      ? `Edit ${getResidentRoleEditToken(activePreviewResident.cargo)}`
+      : (editContext?.editTitle ?? "Edit resident")
+
+  const getBlankResidentFormData = (cargo: number, flatId: string) => ({
+    ...getDefaultResidentFormData(),
+    cargo,
+    flat_id: flatId,
+  })
 
   useEffect(() => {
+    const slots: ResidentDetailSlotKey[] = ["owner_1", "owner_2", "tenant"]
+    const selectedSlot =
+      slots.find(
+        (slot) =>
+          String(editContext?.flatResidents?.[slot]?.id) === String(editingId),
+      ) ?? null
+
+    setFlatResidentsPreview(editContext?.flatResidents ?? {})
+    setActiveSlotKey(selectedSlot)
     setActiveEditingId(editingId)
     if (!editingId) {
       setFormData(getDefaultResidentFormData())
     }
-  }, [editingId])
+  }, [editingId, editContext])
 
   const { data: buildingsData } = useQuery<ApiListResponse<Building>>({
     queryKey: ["buildings"],
@@ -25472,6 +25548,15 @@ function AddResidentForm({
       showSuccessToast("Resident deleted successfully!")
       await queryClient.invalidateQueries({ queryKey: ["Residents"] })
       await queryClient.invalidateQueries({ queryKey: ["buildings"] })
+      if (activeSlot) {
+        setFlatResidentsPreview((current) => ({
+          ...current,
+          [activeSlot.key]: undefined,
+        }))
+        setActiveEditingId(null)
+        setFormData(getBlankResidentFormData(activeSlot.cargo, fixedFlatId))
+        return
+      }
       onBack()
     },
     onError: (error) => {
@@ -25481,22 +25566,36 @@ function AddResidentForm({
     },
   })
 
-  // Load editing morador data if editingId is set
+  // Load editing resident data, or prepare the selected empty role for creation.
   useEffect(() => {
-    if (activeEditingId) {
-      const loadMorador = async () => {
-        try {
-          const response = await fetch(
-            enforceHttpsUrl(
-              `${resolveApiBase(OpenAPI.BASE)}/api/v1/moradores/${activeEditingId}`,
-            ),
-            {
-              headers: {
-                Authorization: `Bearer ${localStorage.getItem("access_token")}`,
-              },
+    let cancelled = false
+
+    if (!activeEditingId) {
+      setFormData(
+        getBlankResidentFormData(activeSlot?.cargo ?? 0, fixedFlatId),
+      )
+      return () => {
+        cancelled = true
+      }
+    }
+
+    const loadMorador = async () => {
+      try {
+        const response = await fetch(
+          enforceHttpsUrl(
+            `${resolveApiBase(OpenAPI.BASE)}/api/v1/moradores/${activeEditingId}`,
+          ),
+          {
+            headers: {
+              Authorization: `Bearer ${localStorage.getItem("access_token")}`,
             },
-          )
-          const morador = (await response.json()) as MoradorDetail
+          },
+        )
+        if (!response.ok) {
+          throw new Error("Failed to load resident")
+        }
+        const morador = (await response.json()) as MoradorDetail
+        if (!cancelled) {
           setFormData({
             nome: morador.nome,
             email: morador.email || "",
@@ -25511,13 +25610,17 @@ function AddResidentForm({
             car2: morador.car2 || "",
             flat_id: String(morador.flat_id),
           })
-        } catch (error) {
-          console.error("Error loading resident:", error)
         }
+      } catch (error) {
+        if (!cancelled) console.error("Error loading resident:", error)
       }
-      loadMorador()
     }
-  }, [activeEditingId])
+    loadMorador()
+
+    return () => {
+      cancelled = true
+    }
+  }, [activeEditingId, activeSlot?.cargo, fixedFlatId])
 
   // Build flats list from buildings
   useEffect(() => {
@@ -25626,6 +25729,8 @@ function AddResidentForm({
         throw new Error("Failed to save resident")
       }
 
+      const savedResident = (await response.json()) as MoradorDetail
+
       showSuccessToast(
         activeEditingId
           ? "Resident updated successfully!"
@@ -25633,6 +25738,23 @@ function AddResidentForm({
       )
       await queryClient.invalidateQueries({ queryKey: ["Residents"] })
       await queryClient.invalidateQueries({ queryKey: ["buildings"] })
+
+      if (activeSlot) {
+        const residentPreview: FlatResidentPreview = {
+          id: savedResident.id,
+          cargo: savedResident.cargo,
+          flat_id: savedResident.flat_id,
+          nome: savedResident.nome,
+          mobile: savedResident.mobile,
+        }
+        setFlatResidentsPreview((current) => ({
+          ...current,
+          [activeSlot.key]: residentPreview,
+        }))
+        setActiveEditingId(savedResident.id)
+        return
+      }
+
       onBack()
     } catch (error) {
       console.error("Error submitting form:", error)
@@ -25647,7 +25769,9 @@ function AddResidentForm({
       <div className="rounded-lg bg-white p-8 shadow-md">
         <div className="mb-6 flex items-center justify-between">
           <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
-            {activeEditingId ? activeEditTitle : "New Resident"}
+            {isFixedResidentDetails || activeEditingId
+              ? activeEditTitle
+              : "New Resident"}
           </h2>
           <button
             onClick={onBack}
@@ -25658,23 +25782,25 @@ function AddResidentForm({
           </button>
         </div>
 
-        {activeEditingId && hasFlatResidentsPreview && (
+        {isFixedResidentDetails && (
           <div className="mb-6 rounded-lg border border-[#e5e0dc] bg-[#f9f7f5] p-4">
             <h3 className="text-sm font-semibold text-[#55311c]">
               Residents in this flat
             </h3>
             <p className="mt-1 text-xs text-[rgba(85,49,28,0.75)]">
-              Select which resident from this flat you want to edit.
+              Select a role to edit it or create its resident record.
             </p>
-            <div className="mt-3 grid gap-2 text-sm text-[#55311c] sm:grid-cols-2">
+            <div className="mt-3 grid gap-2 text-sm text-[#55311c] sm:grid-cols-3">
               {flatResidentEntries.map((entry) => {
-                const isActive =
-                  String(entry.resident.id) === String(activeEditingId)
+                const isActive = entry.key === activeSlotKey
                 return (
                   <button
                     key={entry.key}
                     type="button"
-                    onClick={() => setActiveEditingId(entry.resident.id)}
+                    onClick={() => {
+                      setActiveSlotKey(entry.key)
+                      setActiveEditingId(entry.resident?.id ?? null)
+                    }}
                     className={`rounded-lg border px-3 py-2 text-left transition-all duration-200 ${
                       isActive
                         ? "border-[#55311c] bg-[#55311c] text-white"
@@ -25684,9 +25810,11 @@ function AddResidentForm({
                     <div className="text-xs font-semibold uppercase tracking-wide opacity-80">
                       {entry.label}
                     </div>
-                    <div className="font-semibold">{entry.resident.nome}</div>
+                    <div className="font-semibold">
+                      {entry.resident?.nome || "No resident"}
+                    </div>
                     <div className="text-xs opacity-80">
-                      {entry.resident.mobile || "No phone"}
+                      {entry.resident?.mobile || "Empty fields"}
                     </div>
                   </button>
                 )
@@ -25843,29 +25971,31 @@ function AddResidentForm({
               </label>
             </div>
 
-            <div>
-              <label
-                className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
-                htmlFor="resident-flat"
-              >
-                Flat *
-              </label>
-              <select
-                id="resident-flat"
-                name="flat_id"
-                value={formData.flat_id}
-                onChange={handleInputChange}
-                required
-                className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
-              >
-                <option value="">Select a flat</option>
-                {flats.map((flat) => (
-                  <option key={flat.id} value={flat.id}>
-                    {flat.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {!isFixedResidentDetails && (
+              <div>
+                <label
+                  className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                  htmlFor="resident-flat"
+                >
+                  Flat *
+                </label>
+                <select
+                  id="resident-flat"
+                  name="flat_id"
+                  value={formData.flat_id}
+                  onChange={handleInputChange}
+                  required
+                  className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+                >
+                  <option value="">Select a flat</option>
+                  {flats.map((flat) => (
+                    <option key={flat.id} value={flat.id}>
+                      {flat.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             {shouldShowCarFields && (
               <>
@@ -25907,7 +26037,7 @@ function AddResidentForm({
               </>
             )}
 
-            {!activeEditingId && (
+            {!activeEditingId && !activeSlot && (
               <div>
                 <label
                   className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"

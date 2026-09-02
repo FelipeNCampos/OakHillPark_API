@@ -80,8 +80,20 @@ test("building and flat reading rows open the editor without an Actions column",
             tipo: 2,
             valor: 40,
           },
+          {
+            id: "flat-previous-low-reading-id",
+            data: "2026-07-10T00:00:00",
+            tipo: 1,
+            valor: 10,
+          },
+          {
+            id: "flat-previous-normal-reading-id",
+            data: "2026-07-10T00:00:00",
+            tipo: 2,
+            valor: 30,
+          },
         ],
-        count: 2,
+        count: 4,
       },
     })
   })
@@ -110,7 +122,12 @@ test("building and flat reading rows open the editor without an Actions column",
   await expect(main.getByRole("columnheader", { name: "Actions" })).toHaveCount(
     0,
   )
-  await main.getByRole("row", { name: /All.*20\/07\/2026.*20.*40/ }).click()
+  const latestFlatRow = main.locator("tbody tr").first()
+  await expect(latestFlatRow).toHaveText(
+    /10\s*20\/07\/2026\s*20\s*10\s*-\s*40\s*10\s*-/,
+  )
+  await expect(latestFlatRow).not.toContainText("All")
+  await latestFlatRow.click()
   await expect(
     page.getByRole("heading", { name: "Edit readings" }),
   ).toBeVisible()

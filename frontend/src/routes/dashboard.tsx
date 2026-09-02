@@ -131,19 +131,6 @@ interface ContractorMaintenanceSchedule {
   status: "pending" | "soon" | "ok"
 }
 
-interface ContractorMaintenanceHistoryRecord {
-  id: EntityId
-  maintenance_id: EntityId
-  category_name: string
-  tag: string
-  report: string
-  contractor_visit_id: EntityId
-  contractor_name: string
-  contractor_mobile: string
-  in_at: string
-  out_at?: string | null
-}
-
 const QR_SPECIAL_CLEANER_BUILDING_NAMES = new Set(["general", "cleaner"])
 const READING_HIDDEN_BUILDING_NAMES = new Set([
   "cleaner",
@@ -12714,6 +12701,21 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
     "all" | "pending" | "soon" | "ok"
   >("all")
   const [scheduleCategoryFilter, setScheduleCategoryFilter] = useState("all")
+  const [maintenanceSearch, setMaintenanceSearch] = useState("")
+  const [maintenanceStatusFilter, setMaintenanceStatusFilter] = useState<
+    "all" | "pending" | "soon" | "ok"
+  >("all")
+  const [maintenanceSort, setMaintenanceSort] = useState<{
+    field:
+      | "report"
+      | "category_name"
+      | "tag"
+      | "frequency"
+      | "last_completed_at"
+      | "next_due_at"
+      | "status"
+    direction: "asc" | "desc"
+  }>({ field: "report", direction: "asc" })
   const [selectedMaintenanceId, setSelectedMaintenanceId] = useState<
     EntityId | null
   >(null)
@@ -12736,13 +12738,6 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
   >({
     queryKey: ["contractor-maintenance-schedule"],
     queryFn: () => apiCall("/api/v1/contractor-access/maintenance/schedule"),
-  })
-  const historyQuery = useQuery<
-    ApiListResponse<ContractorMaintenanceHistoryRecord>
-  >({
-    queryKey: ["contractor-maintenance-history"],
-    queryFn: () =>
-      apiCall("/api/v1/contractor-access/maintenance/history", { limit: 100 }),
   })
 
   const resetAddForm = () => {
@@ -12785,14 +12780,9 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
         body: payload,
       }),
     onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({
-          queryKey: ["contractor-maintenance-schedule"],
-        }),
-        queryClient.invalidateQueries({
-          queryKey: ["contractor-maintenance-history"],
-        }),
-      ])
+      await queryClient.invalidateQueries({
+        queryKey: ["contractor-maintenance-schedule"],
+      })
       showSuccessToast("Maintenance created successfully")
       setIsAddTypeDialogOpen(false)
       resetAddForm()
@@ -12863,7 +12853,6 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
 
   const categories = categoriesQuery.data?.data || []
   const schedules = scheduleQuery.data?.data || []
-  const history = historyQuery.data?.data || []
   const filteredSchedules = schedules.filter(
     (item) =>
       (scheduleStatusFilter === "all" ||
@@ -12871,6 +12860,89 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
       (scheduleCategoryFilter === "all" ||
         String(item.category_id) === scheduleCategoryFilter),
   )
+  const filteredAndSortedMaintenances = useMemo(() => {
+    const searchTerm = maintenanceSearch.trim().toLocaleLowerCase()
+    const statusOrder: Record<ContractorMaintenanceSchedule["status"], number> = {
+      pending: 0,
+      soon: 1,
+      ok: 2,
+    }
+    const compareText = (first: string, second: string) =>
+      first.localeCompare(second, undefined, {
+        sensitivity: "base",
+        numeric: true,
+      })
+    const compareDates = (
+      first?: string | null,
+      second?: string | null,
+    ) => {
+      if (!first && !second) return 0
+      if (!first) return 1
+      if (!second) return -1
+      return new Date(first).getTime() - new Date(second).getTime()
+    }
+
+    return schedules
+      .filter((item) => {
+        const matchesStatus =
+          maintenanceStatusFilter === "all" ||
+          item.status === maintenanceStatusFilter
+        if (!matchesStatus) return false
+        if (!searchTerm) return true
+
+        return [
+          item.report,
+          item.category_name,
+          item.tag,
+          item.notes,
+          item.frequency_unit,
+          String(item.frequency_value),
+        ].some((value) => value.toLocaleLowerCase().includes(searchTerm))
+      })
+      .sort((first, second) => {
+        let result = 0
+        switch (maintenanceSort.field) {
+          case "category_name":
+            result = compareText(first.category_name, second.category_name)
+            break
+          case "tag":
+            result = compareText(first.tag, second.tag)
+            break
+          case "frequency":
+            result =
+              first.frequency_value - second.frequency_value ||
+              compareText(first.frequency_unit, second.frequency_unit)
+            break
+          case "last_completed_at":
+            result = compareDates(first.last_completed_at, second.last_completed_at)
+            break
+          case "next_due_at":
+            result = compareDates(first.next_due_at, second.next_due_at)
+            break
+          case "status":
+            result = statusOrder[first.status] - statusOrder[second.status]
+            break
+          case "report":
+            result = compareText(first.report, second.report)
+            break
+        }
+        if (result === 0) result = compareText(first.report, second.report)
+        return maintenanceSort.direction === "asc" ? result : -result
+      })
+  }, [maintenanceSearch, maintenanceSort, maintenanceStatusFilter, schedules])
+  const toggleMaintenanceSort = (field: typeof maintenanceSort.field) => {
+    setMaintenanceSort((current) => ({
+      field,
+      direction:
+        current.field === field && current.direction === "asc" ? "desc" : "asc",
+    }))
+  }
+  const maintenanceSortIndicator = (field: typeof maintenanceSort.field) =>
+    maintenanceSort.field === field
+      ? maintenanceSort.direction === "asc"
+        ? " ▲"
+        : " ▼"
+      : ""
   const calendarDays = useMemo(() => {
     const year = scheduleMonth.getUTCFullYear()
     const month = scheduleMonth.getUTCMonth()
@@ -13030,10 +13102,10 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
                 Schedule
               </TabsTrigger>
               <TabsTrigger
-                value="history"
+                value="maintenances"
                 className="text-[#55311c] data-[state=active]:!bg-[#8c7569] data-[state=active]:!text-white"
               >
-                History
+                Maintenance list
               </TabsTrigger>
             </TabsList>
             <TabsContent value="schedule" className="mt-4">
@@ -13246,57 +13318,135 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
                 </span>
               </div>
             </TabsContent>
-            <TabsContent value="history" className="mt-4">
+            <TabsContent value="maintenances" className="mt-4">
+              <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                <label className="grid flex-1 gap-1 text-sm font-semibold text-[#55311c]">
+                  Search
+                  <input
+                    type="search"
+                    value={maintenanceSearch}
+                    onChange={(event) => setMaintenanceSearch(event.target.value)}
+                    placeholder="Search maintenance, category, tag or notes"
+                    className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm font-normal text-[#55311c] placeholder:text-[#8c7569]"
+                  />
+                </label>
+                <label className="grid gap-1 text-sm font-semibold text-[#55311c] sm:w-52">
+                  Status
+                  <select
+                    value={maintenanceStatusFilter}
+                    onChange={(event) =>
+                      setMaintenanceStatusFilter(
+                        event.target.value as "all" | "pending" | "soon" | "ok",
+                      )
+                    }
+                    className="rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm font-normal text-[#55311c]"
+                  >
+                    <option value="all">All statuses</option>
+                    <option value="pending">Pending</option>
+                    <option value="soon">Soon</option>
+                    <option value="ok">OK</option>
+                  </select>
+                </label>
+              </div>
+              <p className="mb-3 text-sm text-[rgba(0,0,0,0.65)]">
+                {filteredAndSortedMaintenances.length} of {schedules.length}{" "}
+                maintenance item(s). Use Edit to update an item.
+              </p>
               <div className="overflow-x-auto rounded-lg border border-[#e5e0dc]">
-                <table className="min-w-full text-left text-sm">
+                <table className="min-w-[1100px] w-full text-left text-sm">
                   <thead className="bg-[#f5f1ee] text-xs uppercase tracking-wide text-[#55311c]">
                     <tr>
-                      <th className="px-4 py-3">Category</th>
-                      <th className="px-4 py-3">Tag</th>
-                      <th className="px-4 py-3">Contractor</th>
-                      <th className="px-4 py-3">Time IN</th>
-                      <th className="px-4 py-3">Time OUT</th>
+                      {[
+                        ["report", "Maintenance"],
+                        ["category_name", "Category"],
+                        ["tag", "Tag"],
+                        ["frequency", "Frequency"],
+                        ["last_completed_at", "Last done"],
+                        ["next_due_at", "Next due"],
+                        ["status", "Status"],
+                      ].map(([field, label]) => (
+                        <th
+                          key={field}
+                          className="px-4 py-3"
+                          aria-sort={
+                            maintenanceSort.field === field
+                              ? maintenanceSort.direction === "asc"
+                                ? "ascending"
+                                : "descending"
+                              : "none"
+                          }
+                        >
+                          <button
+                            type="button"
+                            onClick={() =>
+                              toggleMaintenanceSort(
+                                field as typeof maintenanceSort.field,
+                              )
+                            }
+                            className="inline-flex items-center font-semibold transition hover:text-[#8c7569] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8c7569]"
+                          >
+                            {label}
+                            {maintenanceSortIndicator(
+                              field as typeof maintenanceSort.field,
+                            )}
+                          </button>
+                        </th>
+                      ))}
+                      <th className="px-4 py-3">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {historyQuery.isLoading ? (
+                    {scheduleQuery.isLoading ? (
                       <tr>
-                        <td className="px-4 py-5 text-center" colSpan={5}>
-                          Loading maintenance history...
+                        <td className="px-4 py-5 text-center" colSpan={8}>
+                          Loading maintenances...
                         </td>
                       </tr>
-                    ) : history.length === 0 ? (
+                    ) : filteredAndSortedMaintenances.length === 0 ? (
                       <tr>
-                        <td className="px-4 py-5 text-center" colSpan={5}>
-                          No maintenance records yet.
+                        <td className="px-4 py-5 text-center" colSpan={8}>
+                          No maintenance matches the selected filters.
                         </td>
                       </tr>
                     ) : (
-                      history.map((item) => (
+                      filteredAndSortedMaintenances.map((item) => (
                         <tr
                           key={item.id}
-                          role="button"
-                          tabIndex={0}
-                          aria-label={`Open details for ${item.report}`}
-                          onClick={() =>
-                            setSelectedMaintenanceId(item.maintenance_id)
-                          }
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter" || event.key === " ") {
-                              event.preventDefault()
-                              setSelectedMaintenanceId(item.maintenance_id)
-                            }
-                          }}
-                          className="cursor-pointer border-t border-[#e5e0dc] transition hover:bg-[#f5f1ee] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#8c7569]"
+                          className="border-t border-[#e5e0dc] transition hover:bg-[#f5f1ee]"
                         >
+                          <td className="px-4 py-3 font-semibold">{item.report}</td>
                           <td className="px-4 py-3">{item.category_name}</td>
                           <td className="px-4 py-3">{item.tag || "-"}</td>
-                          <td className="px-4 py-3">{item.contractor_name}</td>
                           <td className="px-4 py-3">
-                            {formatDateTime(item.in_at)}
+                            Every {item.frequency_value} {item.frequency_unit}
                           </td>
                           <td className="px-4 py-3">
-                            {formatDateTime(item.out_at)}
+                            {formatDateTime(item.last_completed_at)}
+                          </td>
+                          <td className="px-4 py-3">
+                            {formatDateTime(item.next_due_at)}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span
+                              className={`rounded-full px-2 py-1 text-xs font-semibold ${
+                                item.status === "pending"
+                                  ? "bg-red-100 text-red-950"
+                                  : item.status === "soon"
+                                    ? "bg-amber-100 text-amber-950"
+                                    : "bg-[#dbeafe] text-[#1e3a8a]"
+                              }`}
+                            >
+                              {item.status}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedMaintenanceId(item.id)}
+                              className="rounded border border-[#8c7569] px-3 py-1.5 text-xs font-semibold text-[#55311c] transition hover:bg-[#f0ebe7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8c7569]"
+                            >
+                              Edit
+                            </button>
                           </td>
                         </tr>
                       ))
@@ -13726,14 +13876,9 @@ function ContractorMaintenanceDetail({
         method: "DELETE",
       }),
     onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({
-          queryKey: ["contractor-maintenance-schedule"],
-        }),
-        queryClient.invalidateQueries({
-          queryKey: ["contractor-maintenance-history"],
-        }),
-      ])
+      await queryClient.invalidateQueries({
+        queryKey: ["contractor-maintenance-schedule"],
+      })
       showSuccessToast("Maintenance deleted successfully")
       onBack()
     },

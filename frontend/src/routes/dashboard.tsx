@@ -13353,7 +13353,7 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
                 maintenance item(s). Use Edit to update an item.
               </p>
               <div className="overflow-x-auto rounded-lg border border-[#e5e0dc]">
-                <table className="min-w-[1100px] w-full text-left text-sm">
+                <table className="min-w-[1100px] w-full text-left text-sm text-[#55311c]">
                   <thead className="bg-[#f5f1ee] text-xs uppercase tracking-wide text-[#55311c]">
                     <tr>
                       {[

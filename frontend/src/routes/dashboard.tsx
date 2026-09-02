@@ -13350,10 +13350,10 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
               </div>
               <p className="mb-3 text-sm text-[rgba(0,0,0,0.65)]">
                 {filteredAndSortedMaintenances.length} of {schedules.length}{" "}
-                maintenance item(s). Use Edit to update an item.
+                maintenance item(s). Select a row to view or update an item.
               </p>
               <div className="overflow-x-auto rounded-lg border border-[#e5e0dc]">
-                <table className="min-w-[1100px] w-full text-left text-sm text-[#55311c]">
+                <table className="min-w-[1000px] w-full text-left text-sm text-[#55311c]">
                   <thead className="bg-[#f5f1ee] text-xs uppercase tracking-wide text-[#55311c]">
                     <tr>
                       {[
@@ -13392,19 +13392,18 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
                           </button>
                         </th>
                       ))}
-                      <th className="px-4 py-3">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {scheduleQuery.isLoading ? (
                       <tr>
-                        <td className="px-4 py-5 text-center" colSpan={8}>
+                        <td className="px-4 py-5 text-center" colSpan={7}>
                           Loading maintenances...
                         </td>
                       </tr>
                     ) : filteredAndSortedMaintenances.length === 0 ? (
                       <tr>
-                        <td className="px-4 py-5 text-center" colSpan={8}>
+                        <td className="px-4 py-5 text-center" colSpan={7}>
                           No maintenance matches the selected filters.
                         </td>
                       </tr>
@@ -13412,7 +13411,17 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
                       filteredAndSortedMaintenances.map((item) => (
                         <tr
                           key={item.id}
-                          className="border-t border-[#e5e0dc] transition hover:bg-[#f5f1ee]"
+                          role="button"
+                          tabIndex={0}
+                          aria-label={`Open details for ${item.report}`}
+                          onClick={() => setSelectedMaintenanceId(item.id)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault()
+                              setSelectedMaintenanceId(item.id)
+                            }
+                          }}
+                          className="cursor-pointer border-t border-[#e5e0dc] transition hover:bg-[#f5f1ee] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#8c7569]"
                         >
                           <td className="px-4 py-3 font-semibold">{item.report}</td>
                           <td className="px-4 py-3">{item.category_name}</td>
@@ -13438,15 +13447,6 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
                             >
                               {item.status}
                             </span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <button
-                              type="button"
-                              onClick={() => setSelectedMaintenanceId(item.id)}
-                              className="rounded border border-[#8c7569] px-3 py-1.5 text-xs font-semibold text-[#55311c] transition hover:bg-[#f0ebe7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8c7569]"
-                            >
-                              Edit
-                            </button>
                           </td>
                         </tr>
                       ))

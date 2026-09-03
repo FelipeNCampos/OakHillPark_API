@@ -13273,7 +13273,6 @@ function ContractorMaintenanceContent() {
           "Category",
           "Tag",
           "Contractor",
-          "IN",
           "Completion",
         ],
         rows:
@@ -13283,15 +13282,11 @@ function ContractorMaintenanceContent() {
                 record.category_name,
                 record.tag || "-",
                 record.contractor_name || "-",
-                record.source === "contractor_visit"
-                  ? formatDateTime(record.in_at)
-                  : "-",
                 formatDateTime(record.out_at),
               ])
             : [
                 [
                   "No maintenance history matches the selected filters.",
-                  "-",
                   "-",
                   "-",
                   "-",
@@ -13343,7 +13338,7 @@ function ContractorMaintenanceContent() {
     setMaintenanceReportSearch(maintenanceSearch)
     setMaintenanceReportStatusFilter(maintenanceStatusFilter)
     setMaintenanceReportCategoryFilter(maintenanceCategoryFilter)
-    setMaintenanceReportSort(maintenanceSort)
+    setMaintenanceReportSort({ field: "status", direction: "asc" })
     setMaintenanceHistoryReportSearch(maintenanceHistorySearch)
     setMaintenanceHistoryReportCategoryFilter(maintenanceHistoryCategoryFilter)
     setMaintenanceHistoryReportDateFrom("")

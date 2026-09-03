@@ -197,26 +197,39 @@ export function GoogleCalendarIntegrationCard() {
           )}
           {status?.connected && (
             <>
-              <button
-                type="button"
-                onClick={() => resyncMutation.mutate()}
-                disabled={isBusy}
-                title="Resync Google Calendar"
-                aria-label="Resync Google Calendar"
-                className="flex max-w-full items-center gap-2 rounded-lg border border-[#8c7569] py-1 pl-3 pr-1 text-sm font-semibold text-[#55311c] transition-all hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <span
-                  className="max-w-52 truncate sm:max-w-64"
-                  title={status.account_email || undefined}
+              <div className="flex max-w-full items-center gap-2 rounded-lg border border-[#8c7569] py-1 pl-3 pr-1 text-sm font-semibold text-[#55311c]">
+                {status.account_email ? (
+                  <span
+                    className="max-w-52 truncate sm:max-w-64"
+                    title={status.account_email}
+                  >
+                    {status.account_email}
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => connectMutation.mutate()}
+                    disabled={isBusy}
+                    className="max-w-52 truncate text-left hover:underline disabled:cursor-not-allowed disabled:opacity-60 sm:max-w-64"
+                  >
+                    {connectMutation.isPending
+                      ? "Redirecting..."
+                      : "Reconnect to show Gmail"}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => resyncMutation.mutate()}
+                  disabled={isBusy}
+                  title="Resync Google Calendar"
+                  aria-label="Resync Google Calendar"
+                  className="grid size-8 place-items-center rounded-md transition-colors hover:bg-[#e9e1db] disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {status.account_email || "Reconnect to show Gmail"}
-                </span>
-                <span className="grid size-8 place-items-center rounded-md hover:bg-[#e9e1db]">
                   <RefreshCw
                     className={resyncMutation.isPending ? "size-4 animate-spin" : "size-4"}
                   />
-                </span>
-              </button>
+                </button>
+              </div>
               <button
                 type="button"
                 onClick={() => {

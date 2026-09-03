@@ -1644,6 +1644,54 @@ def read_contractor_maintenance_history(
     )
 
 
+@router.delete("/maintenance/history/{record_id}")
+def delete_contractor_maintenance_history_record(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    record_id: uuid.UUID,
+    source: Literal["contractor_visit", "manual"],
+) -> dict[str, str]:
+    """Remove one completed-maintenance entry without removing its schedule."""
+    ensure_contractor_visit_schema(session)
+    ensure_contractor_maintenance_schema(session)
+    condominio_id = _require_manager_condominio(session, current_user)
+
+    if source == "manual":
+        maintenance = _require_contractor_maintenance(
+            session, condominio_id, record_id
+        )
+        if maintenance.last_completed_at is None:
+            raise HTTPException(
+                status_code=404, detail="Maintenance history record not found"
+            )
+
+        maintenance.last_completed_at = None
+        maintenance.updated_at = datetime.now(timezone.utc)
+        session.add(maintenance)
+        maintenance_id = maintenance.id
+    else:
+        record = session.exec(
+            select(ContractorMaintenanceRecord).where(
+                ContractorMaintenanceRecord.id == record_id,
+                ContractorMaintenanceRecord.condominio_id == condominio_id,
+            )
+        ).first()
+        if not record:
+            raise HTTPException(
+                status_code=404, detail="Maintenance history record not found"
+            )
+
+        maintenance_id = record.maintenance_id
+        session.delete(record)
+
+    queue_maintenance_changes_for_condominio(
+        session, condominio_id, [maintenance_id]
+    )
+    session.commit()
+    return {"message": "Maintenance history record deleted successfully"}
+
+
 @router.post(
     "/maintenance/records",
     response_model=ContractorMaintenanceRecordPublic,

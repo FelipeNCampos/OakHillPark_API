@@ -12855,6 +12855,10 @@ function ContractorMaintenanceContent() {
   const [maintenanceHistorySearch, setMaintenanceHistorySearch] = useState("")
   const [maintenanceHistoryCategoryFilter, setMaintenanceHistoryCategoryFilter] =
     useState("all")
+  const [revealedMaintenanceHistoryRecordId, setRevealedMaintenanceHistoryRecordId] =
+    useState<EntityId | null>(null)
+  const [maintenanceHistoryRecordPendingDelete, setMaintenanceHistoryRecordPendingDelete] =
+    useState<ContractorMaintenanceHistoryRecord | null>(null)
   const [maintenanceSort, setMaintenanceSort] =
     useState<ContractorMaintenanceSort>({
       field: "report",
@@ -12961,6 +12965,33 @@ function ContractorMaintenanceContent() {
     onError: (error: unknown) =>
       showErrorToast(
         error instanceof Error ? error.message : "Could not create maintenance",
+      ),
+  })
+
+  const deleteMaintenanceHistoryRecordMutation = useMutation({
+    mutationFn: (record: ContractorMaintenanceHistoryRecord) =>
+      apiCall(
+        `/api/v1/contractor-access/maintenance/history/${record.id}?source=${record.source}`,
+        { method: "DELETE" },
+      ),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ["contractor-maintenance-history"],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["contractor-maintenance-schedule"],
+        }),
+      ])
+      setMaintenanceHistoryRecordPendingDelete(null)
+      setRevealedMaintenanceHistoryRecordId(null)
+      showSuccessToast("Maintenance history record deleted successfully")
+    },
+    onError: (error: unknown) =>
+      showErrorToast(
+        error instanceof Error
+          ? error.message
+          : "Could not delete maintenance history record",
       ),
   })
 
@@ -13803,82 +13834,144 @@ function ContractorMaintenanceContent() {
               </div>
               <p className="mb-3 text-sm text-[rgba(0,0,0,0.65)]">
                 {filteredMaintenanceHistory.length} of {maintenanceHistory.length}{" "}
-                maintenance history record(s).
+                maintenance history record(s). Select a record to reveal its
+                delete action.
               </p>
-              <div className="overflow-x-auto rounded-lg border border-[#e5e0dc]">
-                <table className="min-w-[950px] w-full text-left text-sm text-[#55311c]">
-                  <thead className="bg-[#f5f1ee] text-xs uppercase tracking-wide text-[#55311c]">
-                    <tr>
-                      <th className="px-4 py-3">Maintenance</th>
-                      <th className="px-4 py-3">Category</th>
-                      <th className="px-4 py-3">Tag</th>
-                      <th className="px-4 py-3">Contractor</th>
-                      <th className="px-4 py-3">Time IN</th>
-                      <th className="px-4 py-3">Time OUT / Last done</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {maintenanceHistoryQuery.isLoading ? (
-                      <tr>
-                        <td className="px-4 py-5 text-center" colSpan={6}>
-                          Loading maintenance history...
-                        </td>
-                      </tr>
-                    ) : filteredMaintenanceHistory.length === 0 ? (
-                      <tr>
-                        <td className="px-4 py-5 text-center" colSpan={6}>
-                          No maintenance history matches the selected filters.
-                        </td>
-                      </tr>
-                    ) : (
-                      filteredMaintenanceHistory.map((record) => (
-                        <tr
-                          key={record.id}
-                          role="button"
-                          tabIndex={0}
-                          aria-label={`Open details for ${record.report}`}
+              <div className="space-y-2">
+                {maintenanceHistoryQuery.isLoading ? (
+                  <div className="rounded-lg border border-[#e5e0dc] px-4 py-5 text-center text-sm text-[#55311c]">
+                    Loading maintenance history...
+                  </div>
+                ) : filteredMaintenanceHistory.length === 0 ? (
+                  <div className="rounded-lg border border-[#e5e0dc] px-4 py-5 text-center text-sm text-[#55311c]">
+                    No maintenance history matches the selected filters.
+                  </div>
+                ) : (
+                  filteredMaintenanceHistory.map((record) => {
+                    const isDeleteActionRevealed =
+                      String(revealedMaintenanceHistoryRecordId) ===
+                      String(record.id)
+
+                    return (
+                      <div
+                        key={record.id}
+                        className="relative overflow-hidden rounded-lg"
+                      >
+                        <button
+                          type="button"
+                          aria-label={`Delete ${record.report} from maintenance history`}
                           onClick={() =>
-                            setSelectedMaintenanceId(record.maintenance_id)
+                            setMaintenanceHistoryRecordPendingDelete(record)
                           }
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter" || event.key === " ") {
-                              event.preventDefault()
-                              setSelectedMaintenanceId(record.maintenance_id)
-                            }
-                          }}
-                          className="cursor-pointer border-t border-[#e5e0dc] transition hover:bg-[#f5f1ee] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#8c7569]"
+                          disabled={deleteMaintenanceHistoryRecordMutation.isPending}
+                          className="absolute inset-y-0 right-0 flex w-20 items-center justify-center bg-red-700 text-white transition-colors hover:bg-red-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-red-900 disabled:cursor-not-allowed disabled:opacity-60"
                         >
-                          <td className="px-4 py-3 font-semibold">
-                            {record.report}
-                          </td>
-                          <td className="px-4 py-3">{record.category_name}</td>
-                          <td className="px-4 py-3">{record.tag || "-"}</td>
-                          <td className="px-4 py-3">
-                            <span className="block">{record.contractor_name}</span>
-                            {record.source === "manual" ? (
-                              <span className="mt-0.5 block text-xs text-[rgba(0,0,0,0.65)]">
-                                Last done entered manually
+                          <Trash2 className="size-5" aria-hidden="true" />
+                          <span className="sr-only">Delete record</span>
+                        </button>
+                        <button
+                          type="button"
+                          aria-expanded={isDeleteActionRevealed}
+                          aria-label={`${isDeleteActionRevealed ? "Hide" : "Show"} delete action for ${record.report}`}
+                          onClick={() =>
+                            setRevealedMaintenanceHistoryRecordId((current) =>
+                              String(current) === String(record.id)
+                                ? null
+                                : record.id,
+                            )
+                          }
+                          className={`relative z-10 grid w-full gap-3 rounded-lg border border-[#e5e0dc] bg-white p-4 text-left text-sm text-[#55311c] shadow-sm transition-transform duration-200 ease-out hover:bg-[#f5f1ee] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#8c7569] sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center ${
+                            isDeleteActionRevealed ? "-translate-x-20" : ""
+                          }`}
+                        >
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                              <span className="font-semibold">
+                                {record.report}
                               </span>
-                            ) : record.contractor_mobile ? (
-                              <span className="mt-0.5 block text-xs text-[rgba(0,0,0,0.65)]">
-                                {record.contractor_mobile}
+                              <span className="text-xs text-[rgba(0,0,0,0.65)]">
+                                {record.category_name}
+                                {record.tag ? ` - ${record.tag}` : ""}
                               </span>
-                            ) : null}
-                          </td>
-                          <td className="px-4 py-3">
-                            {formatDateTime(record.in_at)}
-                          </td>
-                          <td className="px-4 py-3">
-                            {formatDateTime(record.out_at)}
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
+                            </div>
+                            <span className="mt-1 block text-[rgba(0,0,0,0.65)]">
+                              {record.contractor_name}
+                              {record.source === "manual"
+                                ? " - Last done entered manually"
+                                : record.contractor_mobile
+                                  ? ` - ${record.contractor_mobile}`
+                                  : ""}
+                            </span>
+                          </div>
+                          <div className="grid gap-1 text-xs text-[rgba(0,0,0,0.65)] sm:text-right">
+                            {record.source === "contractor_visit" && (
+                              <span>IN: {formatDateTime(record.in_at)}</span>
+                            )}
+                            <span>
+                              {record.source === "manual"
+                                ? "Last done"
+                                : "OUT"}
+                              : {formatDateTime(record.out_at)}
+                            </span>
+                          </div>
+                        </button>
+                      </div>
+                    )
+                  })
+                )}
               </div>
             </TabsContent>
           </Tabs>
+
+          <Dialog
+            open={Boolean(maintenanceHistoryRecordPendingDelete)}
+            onOpenChange={(open) => {
+              if (!open && !deleteMaintenanceHistoryRecordMutation.isPending) {
+                setMaintenanceHistoryRecordPendingDelete(null)
+              }
+            }}
+          >
+            <DialogContent
+              showCloseButton={!deleteMaintenanceHistoryRecordMutation.isPending}
+              className="border-[#e5e0dc] bg-white text-[#55311c]"
+            >
+              <DialogHeader>
+                <DialogTitle>Delete maintenance history record?</DialogTitle>
+                <DialogDescription>
+                  {maintenanceHistoryRecordPendingDelete?.source === "manual"
+                    ? "This will clear the manually entered Last done date."
+                    : "This will remove this maintenance completion from the history, but keep the contractor visit and maintenance schedule."}
+                  {" "}This action cannot be undone.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <button
+                  type="button"
+                  onClick={() => setMaintenanceHistoryRecordPendingDelete(null)}
+                  disabled={deleteMaintenanceHistoryRecordMutation.isPending}
+                  className="rounded border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-colors hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (maintenanceHistoryRecordPendingDelete) {
+                      deleteMaintenanceHistoryRecordMutation.mutate(
+                        maintenanceHistoryRecordPendingDelete,
+                      )
+                    }
+                  }}
+                  disabled={deleteMaintenanceHistoryRecordMutation.isPending}
+                  className="rounded bg-red-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {deleteMaintenanceHistoryRecordMutation.isPending
+                    ? "Deleting..."
+                    : "Delete record"}
+                </button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
 

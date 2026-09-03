@@ -725,6 +725,51 @@ def test_contractor_maintenance_accepts_monthly_interval_and_optional_tag(
     assert maintenance["is_overdue"] is True
 
 
+def test_contractor_maintenance_history_includes_manual_last_done_date(
+    client: TestClient,
+    db: Session,
+) -> None:
+    condominio = _create_test_condominio(db)
+    manager_headers = _create_manager_headers(client, db, condominio.id)
+
+    category_response = client.post(
+        f"{settings.API_V1_STR}/contractor-access/maintenance/categories",
+        headers=manager_headers,
+        json={"name": "Compliance"},
+    )
+    assert category_response.status_code == 201
+
+    last_completed_at = datetime(2025, 1, 31, 9, 0, tzinfo=timezone.utc)
+    maintenance_response = client.post(
+        f"{settings.API_V1_STR}/contractor-access/maintenance",
+        headers=manager_headers,
+        json={
+            "category_id": category_response.json()["id"],
+            "report": "Annual certificate review",
+            "frequency_value": 12,
+            "frequency_unit": "months",
+            "last_completed_at": last_completed_at.isoformat(),
+        },
+    )
+    assert maintenance_response.status_code == 201
+
+    history_response = client.get(
+        f"{settings.API_V1_STR}/contractor-access/maintenance/history",
+        headers=manager_headers,
+    )
+    assert history_response.status_code == 200
+    assert history_response.json()["count"] == 1
+    record = history_response.json()["data"][0]
+    assert record["maintenance_id"] == maintenance_response.json()["id"]
+    assert record["source"] == "manual"
+    assert record["contractor_visit_id"] is None
+    assert record["contractor_name"] == "Manual entry"
+    assert record["in_at"] is None
+    assert datetime.fromisoformat(
+        record["out_at"].replace("Z", "+00:00")
+    ).astimezone(timezone.utc) == last_completed_at
+
+
 def test_contractor_maintenance_allows_optional_hooks_and_completion_dates(
     client: TestClient,
     db: Session,

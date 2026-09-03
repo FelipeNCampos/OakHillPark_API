@@ -137,10 +137,11 @@ interface ContractorMaintenanceHistoryRecord {
   category_name: string
   tag: string
   report: string
-  contractor_visit_id: EntityId
+  source: "contractor_visit" | "manual"
+  contractor_visit_id?: EntityId | null
   contractor_name: string
   contractor_mobile: string
-  in_at: string
+  in_at?: string | null
   out_at?: string | null
 }
 
@@ -875,6 +876,7 @@ type ResidentTypeFilter = "owner_1" | "owner_2" | "tenant" | "agent" | "all"
 
 type FlatResidentRow = {
   key: string
+  flat_id: EntityId
   building_nome: string
   flat_numero: number
   flat_label?: string | null
@@ -901,7 +903,7 @@ type FlatResidentPreview = Pick<
   "id" | "cargo" | "flat_id" | "nome" | "mobile"
 >
 
-type ResidentDetailSlotKey = "owner_1" | "owner_2" | "tenant"
+type ResidentDetailSlotKey = "owner_1" | "owner_2" | "tenant" | "agent"
 
 type FlatResidentPreviewEntry = {
   key: ResidentDetailSlotKey
@@ -966,6 +968,17 @@ const formatFlatLabel = (
   flatNumber?: number | null,
   flatLabel?: string | null,
 ) => `Flat ${formatFlatNumber(flatNumber, flatLabel)}`
+
+const matchesResidentSearch = (morador: Morador, normalizedSearch: string) =>
+  [
+    morador.nome,
+    morador.email,
+    morador.tenant_nome_2,
+    morador.tenant_email_2,
+    morador.mobile?.toString(),
+    morador.building_nome,
+    formatFlatNumber(morador.flat_numero, morador.flat_label),
+  ].some((value) => value?.toLowerCase().includes(normalizedSearch))
 
 const compareReadingFlats = (
   a: Pick<Flat, "numero" | "label">,
@@ -2804,11 +2817,7 @@ function ClientDashboard() {
           />
         )
       case "contractor-maintenance":
-        return (
-          <ContractorMaintenanceContent
-            onBack={() => setActiveTab("contractors")}
-          />
-        )
+        return <ContractorMaintenanceContent />
       case "tasks":
         return <TasksBoard mode="manager" />
       case "reminds":
@@ -12816,7 +12825,7 @@ function CaretakerRecordCreateDialog({
   )
 }
 
-function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
+function ContractorMaintenanceContent() {
   const queryClient = useQueryClient()
   const { showErrorToast, showSuccessToast } = useCustomToast()
   const [isAddTypeDialogOpen, setIsAddTypeDialogOpen] = useState(false)
@@ -12937,9 +12946,14 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
         body: payload,
       }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({
-        queryKey: ["contractor-maintenance-schedule"],
-      })
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ["contractor-maintenance-schedule"],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["contractor-maintenance-history"],
+        }),
+      ])
       showSuccessToast("Maintenance created successfully")
       setIsAddTypeDialogOpen(false)
       resetAddForm()
@@ -13104,7 +13118,7 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
     `Search: ${maintenanceReportSearch.trim() || "All"}`,
     `Status: ${
       maintenanceReportStatusFilter === "all"
-        ? "All statuses"
+        ? "All status"
         : maintenanceReportStatusFilter
     }`,
     `Category: ${maintenanceReportCategoryLabel}`,
@@ -13350,10 +13364,10 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={onBack}
+                onClick={openMaintenanceReport}
                 className="rounded-lg border border-[#8c7569] bg-white px-4 py-2 text-sm font-semibold text-[#55311c] transition-all hover:bg-[#f0ebe7]"
               >
-                Back to contractors
+                Report
               </button>
               <button
                 type="button"
@@ -13651,13 +13665,6 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
                   {filteredAndSortedMaintenances.length} of {schedules.length}{" "}
                   maintenance item(s). Select a row to view or update an item.
                 </p>
-                <button
-                  type="button"
-                  onClick={openMaintenanceReport}
-                  className="rounded-lg bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#55311c] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8c7569]"
-                >
-                  Report
-                </button>
               </div>
               <div className="overflow-x-auto rounded-lg border border-[#e5e0dc]">
                 <table className="min-w-[1000px] w-full text-left text-sm text-[#55311c]">
@@ -13807,7 +13814,7 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
                       <th className="px-4 py-3">Tag</th>
                       <th className="px-4 py-3">Contractor</th>
                       <th className="px-4 py-3">Time IN</th>
-                      <th className="px-4 py-3">Time OUT</th>
+                      <th className="px-4 py-3">Time OUT / Last done</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -13848,11 +13855,15 @@ function ContractorMaintenanceContent({ onBack }: { onBack: () => void }) {
                           <td className="px-4 py-3">{record.tag || "-"}</td>
                           <td className="px-4 py-3">
                             <span className="block">{record.contractor_name}</span>
-                            {record.contractor_mobile && (
+                            {record.source === "manual" ? (
+                              <span className="mt-0.5 block text-xs text-[rgba(0,0,0,0.65)]">
+                                Last done entered manually
+                              </span>
+                            ) : record.contractor_mobile ? (
                               <span className="mt-0.5 block text-xs text-[rgba(0,0,0,0.65)]">
                                 {record.contractor_mobile}
                               </span>
-                            )}
+                            ) : null}
                           </td>
                           <td className="px-4 py-3">
                             {formatDateTime(record.in_at)}
@@ -14450,11 +14461,16 @@ function ContractorMaintenanceDetail({
     mutationFn: () =>
       apiCall(`/api/v1/contractor-access/maintenance/${maintenance.id}`, {
         method: "DELETE",
-      }),
+    }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({
-        queryKey: ["contractor-maintenance-schedule"],
-      })
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ["contractor-maintenance-schedule"],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["contractor-maintenance-history"],
+        }),
+      ])
       showSuccessToast("Maintenance deleted successfully")
       onBack()
     },
@@ -24924,6 +24940,7 @@ function CaretakerRegister() {
 
 function ResidentsContent() {
   const [showForm, setShowForm] = useState(false)
+  const [showFlatForm, setShowFlatForm] = useState(false)
   const [editingId, setEditingId] = useState<EntityId | null>(null)
   const [editContext, setEditContext] = useState<ResidentEditContext | null>(
     null,
@@ -24932,7 +24949,7 @@ function ResidentsContent() {
   const [selectedBuilding, setSelectedBuilding] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState("")
   const [residentTypeFilter, setResidentTypeFilter] =
-    useState<ResidentTypeFilter>("owner_1")
+    useState<ResidentTypeFilter>("all")
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
 
@@ -24941,7 +24958,7 @@ function ResidentsContent() {
   const { data: ResidentsData, isLoading } = useQuery<
     ApiListResponse<Morador> & { count?: number }
   >({
-    queryKey: ["Residents", selectedBuilding, searchTerm],
+    queryKey: ["Residents"],
     placeholderData: keepPreviousData,
     queryFn: async () => {
       const pageLimit = 100
@@ -24953,9 +24970,6 @@ function ResidentsContent() {
         const params = new URLSearchParams()
         params.append("skip", String(skip))
         params.append("limit", String(pageLimit))
-        if (searchTerm) params.append("search", searchTerm)
-        if (selectedBuilding && !searchTerm)
-          params.append("building", selectedBuilding)
 
         const page = (await apiCall(
           `/api/v1/moradores/?${params.toString()}`,
@@ -25014,9 +25028,26 @@ function ResidentsContent() {
     }
   }, [residentFilterBuildings, selectedBuilding])
 
+  const flatIds = useMemo(() => {
+    const ids = new Set<string>()
+
+    buildings.forEach((building) => {
+      const flats = building.flats || []
+      flats.forEach((flat) => ids.add(String(flat.id)))
+    })
+
+    return ids
+  }, [buildings])
+
+  const residentsForCurrentCondominio = useMemo(
+    () =>
+      Residents.filter((resident) => flatIds.has(String(resident.flat_id))),
+    [Residents, flatIds],
+  )
+
   const sortedResidents = useMemo(
     () =>
-      [...Residents].sort((a, b) => {
+      [...residentsForCurrentCondominio].sort((a, b) => {
         const buildingCompare = compareReadingBuildingNames(
           a.building_nome,
           b.building_nome,
@@ -25030,7 +25061,7 @@ function ResidentsContent() {
         if (flatLabelCompare !== 0) return flatLabelCompare
         return a.nome.localeCompare(b.nome)
       }),
-    [Residents],
+    [residentsForCurrentCondominio],
   )
 
   const RoleFilterMap: Record<Exclude<ResidentTypeFilter, "all">, number> = {
@@ -25040,51 +25071,83 @@ function ResidentsContent() {
     agent: 3,
   }
 
+  const residentsMatchingFilters = useMemo(() => {
+    const normalizedSearch = searchTerm.trim().toLowerCase()
+
+    return sortedResidents.filter((morador) => {
+      if (selectedBuilding && morador.building_nome !== selectedBuilding) {
+        return false
+      }
+      return !normalizedSearch || matchesResidentSearch(morador, normalizedSearch)
+    })
+  }, [searchTerm, selectedBuilding, sortedResidents])
+
   const filteredResidents = useMemo(() => {
-    if (residentTypeFilter === "all") return sortedResidents
-    return sortedResidents.filter(
+    if (residentTypeFilter === "all") return residentsMatchingFilters
+    return residentsMatchingFilters.filter(
       (morador) => morador.cargo === RoleFilterMap[residentTypeFilter],
     )
-  }, [sortedResidents, residentTypeFilter, RoleFilterMap])
+  }, [residentsMatchingFilters, residentTypeFilter, RoleFilterMap])
 
   const groupedFlatRows = useMemo<FlatResidentRow[]>(() => {
-    if (residentTypeFilter !== "all") return []
-
-    const groups = new Map<string, FlatResidentRow>()
-
-    filteredResidents.forEach((morador) => {
-      const key = `${morador.building_nome}::${morador.flat_numero}::${morador.flat_id}`
-      const current = groups.get(key) ?? {
-        key,
-        building_nome: morador.building_nome,
-        flat_numero: morador.flat_numero,
-        flat_label: morador.flat_label,
-        reading_types: morador.reading_types,
-        car1: morador.car1,
-        car2: morador.car2,
-        car3: morador.car3,
-        edit_target_id: null,
-      }
-
-      if (morador.cargo === 0 && !current.owner_1) current.owner_1 = morador
-      if (morador.cargo === 1 && !current.owner_2) current.owner_2 = morador
-      if (morador.cargo === 2 && !current.tenant) current.tenant = morador
-      if (morador.cargo === 3 && !current.agent) current.agent = morador
-      current.reading_types = morador.reading_types
-      current.car1 = current.car1 ?? morador.car1
-      current.car2 = current.car2 ?? morador.car2
-      current.car3 = current.car3 ?? morador.car3
-      current.edit_target_id =
-        current.owner_1?.id ??
-        current.owner_2?.id ??
-        current.tenant?.id ??
-        current.agent?.id ??
-        null
-
-      groups.set(key, current)
+    const residentsByFlatId = new Map<string, Morador[]>()
+    residentsForCurrentCondominio.forEach((morador) => {
+      const flatId = String(morador.flat_id)
+      const residents = residentsByFlatId.get(flatId) ?? []
+      residents.push(morador)
+      residentsByFlatId.set(flatId, residents)
     })
 
-    return [...groups.values()].sort((a, b) => {
+    const normalizedSearch = searchTerm.trim().toLowerCase()
+    const rows: FlatResidentRow[] = []
+
+    buildings.forEach((building) => {
+      if (selectedBuilding && building.nome !== selectedBuilding) return
+
+      const flats = building.flats || []
+      flats.forEach((flat) => {
+        const residents = residentsByFlatId.get(String(flat.id)) ?? []
+        const flatMatchesSearch = [
+          building.nome,
+          formatFlatNumber(flat.numero, flat.label),
+          flat.label,
+        ].some((value) => value?.toLowerCase().includes(normalizedSearch))
+        const residentMatchesSearch = residents.some((morador) =>
+          matchesResidentSearch(morador, normalizedSearch),
+        )
+
+        if (normalizedSearch && !flatMatchesSearch && !residentMatchesSearch) {
+          return
+        }
+
+        const owner_1 = residents.find((morador) => morador.cargo === 0)
+        const owner_2 = residents.find((morador) => morador.cargo === 1)
+        const tenant = residents.find((morador) => morador.cargo === 2)
+        const agent = residents.find((morador) => morador.cargo === 3)
+        const carSource = residents.find(
+          (morador) => morador.car1 || morador.car2 || morador.car3,
+        )
+
+        rows.push({
+          key: `${building.nome}::${flat.numero}::${flat.id}`,
+          flat_id: flat.id,
+          building_nome: building.nome,
+          flat_numero: flat.numero,
+          flat_label: flat.label,
+          reading_types: flat.reading_types,
+          car1: carSource?.car1,
+          car2: carSource?.car2,
+          car3: carSource?.car3,
+          owner_1,
+          owner_2,
+          tenant,
+          agent,
+          edit_target_id: owner_1?.id ?? owner_2?.id ?? tenant?.id ?? agent?.id ?? null,
+        })
+      })
+    })
+
+    return rows.sort((a, b) => {
       const buildingCompare = compareReadingBuildingNames(
         a.building_nome,
         b.building_nome,
@@ -25093,7 +25156,7 @@ function ResidentsContent() {
       if (a.flat_numero !== b.flat_numero) return a.flat_numero - b.flat_numero
       return (a.flat_label || "").localeCompare(b.flat_label || "")
     })
-  }, [filteredResidents, residentTypeFilter])
+  }, [buildings, residentsForCurrentCondominio, searchTerm, selectedBuilding])
 
   const isAllTypeView = residentTypeFilter === "all"
   const totalCount = isAllTypeView
@@ -25367,8 +25430,11 @@ function ResidentsContent() {
     )
   }
 
-  const renderResidentIdentity = (morador?: Morador) => {
-    if (!morador) return "-"
+  const renderResidentIdentity = (
+    morador?: Morador,
+    emptyLabel = "-",
+  ) => {
+    if (!morador) return emptyLabel
     const hasSecondaryTenantIdentity =
       morador.cargo === 2 &&
       (morador.tenant_nome_2?.trim() || morador.tenant_email_2?.trim())
@@ -25422,7 +25488,7 @@ function ResidentsContent() {
   }
 
   const openResidentEdit = (
-    residentId: EntityId,
+    residentId: EntityId | null,
     context?: ResidentEditContext,
   ) => {
     const targetResident = Residents.find(
@@ -25447,7 +25513,9 @@ function ResidentsContent() {
     setEditContext({
       editTitle:
         context?.editTitle ??
-        `Edit ${getResidentRoleEditToken(targetResident?.cargo ?? -1)}`,
+        (targetResident
+          ? `Edit ${getResidentRoleEditToken(targetResident.cargo)}`
+          : "Manage residents"),
       flatResidents,
       flatId,
     })
@@ -25478,6 +25546,10 @@ function ResidentsContent() {
     )
   }
 
+  if (showFlatForm) {
+    return <AddFlatForm onBack={() => setShowFlatForm(false)} />
+  }
+
   return (
     <div className="mx-auto max-w-[110rem]">
       <div className="rounded-lg bg-white p-8 shadow-md">
@@ -25486,11 +25558,7 @@ function ResidentsContent() {
             Residents
           </h2>
           <button
-            onClick={() => {
-              setEditingId(null)
-              setEditContext(null)
-              setShowForm(true)
-            }}
+            onClick={() => setShowFlatForm(true)}
             className="flex items-center gap-2 rounded-lg bg-[#8c7569] px-4 py-2 font-['Nunito',sans-serif] text-sm font-semibold text-white transition-all duration-300 hover:bg-[#55311c]"
             type="button"
           >
@@ -25500,7 +25568,7 @@ function ResidentsContent() {
               stroke="currentColor"
               viewBox="0 0 24 24"
             >
-              <title>Add resident</title>
+              <title>Add flat</title>
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -25508,7 +25576,7 @@ function ResidentsContent() {
                 d="M12 4v16m8-8H4"
               />
             </svg>
-            New Resident
+            New Flat
           </button>
         </div>
 
@@ -25634,7 +25702,6 @@ function ResidentsContent() {
                           key={row.key}
                           className="cursor-pointer hover:bg-[#f5f1ee]"
                           onClick={() => {
-                            if (row.edit_target_id === null) return
                             const targetResident =
                               row.owner_1 ??
                               row.owner_2 ??
@@ -25649,6 +25716,7 @@ function ResidentsContent() {
                                 tenant: row.tenant,
                                 agent: row.agent,
                               },
+                              flatId: row.flat_id,
                             })
                           }}
                         >
@@ -25663,7 +25731,10 @@ function ResidentsContent() {
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
                             <div className="min-w-0">
-                              {renderResidentIdentity(row.owner_1)}
+                              {renderResidentIdentity(
+                                row.owner_1,
+                                "No resident",
+                              )}
                               {renderReadingTypeToggles(row.owner_1)}
                             </div>
                           </td>
@@ -25677,7 +25748,10 @@ function ResidentsContent() {
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
                             <div className="min-w-0">
-                              {renderResidentIdentity(row.owner_2)}
+                              {renderResidentIdentity(
+                                row.owner_2,
+                                "No resident",
+                              )}
                               {renderReadingTypeToggles(row.owner_2)}
                             </div>
                           </td>
@@ -25690,7 +25764,7 @@ function ResidentsContent() {
                             </div>
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
-                            {renderResidentIdentity(row.tenant)}
+                            {renderResidentIdentity(row.tenant, "No resident")}
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
                             <div className="flex flex-col">
@@ -25701,7 +25775,7 @@ function ResidentsContent() {
                             </div>
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
-                            {renderResidentIdentity(row.agent)}
+                            {renderResidentIdentity(row.agent, "No resident")}
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
                             <div className="flex flex-col">
@@ -25962,6 +26036,186 @@ function ResidentsContent() {
   )
 }
 
+function AddFlatForm({ onBack }: { onBack: () => void }) {
+  const queryClient = useQueryClient()
+  const { showSuccessToast, showErrorToast } = useCustomToast()
+  const [formData, setFormData] = useState({
+    building_id: "",
+    numero: "",
+    label: "",
+  })
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const { data: buildingsData, isLoading } = useQuery<ApiListResponse<Building>>({
+    queryKey: ["buildings"],
+    queryFn: () => apiCall("/api/v1/buildings/condominio"),
+  })
+
+  const buildings = useMemo(
+    () => [...(buildingsData?.data || [])].sort(compareReadingBuildings),
+    [buildingsData],
+  )
+
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault()
+
+    const number = Number(formData.numero)
+    if (!formData.building_id || !Number.isInteger(number) || number < 0) {
+      showErrorToast("Choose a building and enter a valid flat number")
+      return
+    }
+
+    setIsSubmitting(true)
+    try {
+      await apiCall("/api/v1/flats/", {
+        method: "POST",
+        body: {
+          building_id: formData.building_id,
+          numero: number,
+          label: formData.label.trim() || null,
+          status: false,
+        },
+      })
+      await queryClient.invalidateQueries({ queryKey: ["buildings"] })
+      await queryClient.invalidateQueries({ queryKey: ["Residents"] })
+      showSuccessToast("Flat created. Its resident fields are ready to fill in.")
+      onBack()
+    } catch (error) {
+      showErrorToast(
+        error instanceof Error ? error.message : "Error creating flat",
+      )
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="mx-auto max-w-3xl">
+      <div className="rounded-lg bg-white p-8 shadow-md">
+        <div className="mb-6 flex items-center justify-between">
+          <div>
+            <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
+              New Flat
+            </h2>
+            <p className="mt-1 text-sm text-[rgba(85,49,28,0.75)]">
+              Create the flat first, then add its owner, tenant, or agent from
+              the residents table.
+            </p>
+          </div>
+          <button
+            onClick={onBack}
+            className="rounded-lg bg-gray-500 px-4 py-2 font-['Nunito',sans-serif] text-sm font-semibold text-white transition-all duration-300 hover:bg-gray-600"
+            type="button"
+          >
+            Back
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit}>
+          <div className="grid gap-6 md:grid-cols-2">
+            <div className="md:col-span-2">
+              <label
+                className="mb-2 block font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                htmlFor="new-flat-building"
+              >
+                Building *
+              </label>
+              <select
+                id="new-flat-building"
+                value={formData.building_id}
+                onChange={(event) =>
+                  setFormData((current) => ({
+                    ...current,
+                    building_id: event.target.value,
+                  }))
+                }
+                required
+                disabled={isLoading || isSubmitting}
+                className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none disabled:bg-gray-100"
+              >
+                <option value="">Select a building</option>
+                {buildings.map((building) => (
+                  <option key={building.id} value={building.id}>
+                    {building.nome}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label
+                className="mb-2 block font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                htmlFor="new-flat-number"
+              >
+                Flat number *
+              </label>
+              <input
+                id="new-flat-number"
+                type="number"
+                min="0"
+                max="999"
+                step="1"
+                value={formData.numero}
+                onChange={(event) =>
+                  setFormData((current) => ({
+                    ...current,
+                    numero: event.target.value,
+                  }))
+                }
+                required
+                disabled={isSubmitting}
+                className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none disabled:bg-gray-100"
+                placeholder="e.g. 12"
+              />
+            </div>
+
+            <div>
+              <label
+                className="mb-2 block font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                htmlFor="new-flat-label"
+              >
+                Flat label
+              </label>
+              <input
+                id="new-flat-label"
+                type="text"
+                maxLength={20}
+                value={formData.label}
+                onChange={(event) =>
+                  setFormData((current) => ({
+                    ...current,
+                    label: event.target.value,
+                  }))
+                }
+                disabled={isSubmitting}
+                className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none disabled:bg-gray-100"
+                placeholder="e.g. 12A"
+              />
+            </div>
+          </div>
+
+          <div className="mt-8 flex justify-end gap-4">
+            <button
+              type="button"
+              onClick={onBack}
+              disabled={isSubmitting}
+              className="rounded-lg bg-gray-500 px-6 py-3 font-['Nunito',sans-serif] text-white transition-all duration-300 hover:bg-gray-600 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isSubmitting || isLoading}
+              className="rounded-lg bg-[#8c7569] px-6 py-3 font-['Nunito',sans-serif] text-white transition-all duration-300 hover:bg-[#55311c] disabled:opacity-50"
+            >
+              {isSubmitting ? "Creating..." : "Create Flat"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
 function getDefaultResidentFormData() {
   return {
     nome: "",
@@ -26000,14 +26254,19 @@ function AddResidentForm({
     useState<FlatResidentsPreview>(editContext?.flatResidents ?? {})
   const [activeSlotKey, setActiveSlotKey] =
     useState<ResidentDetailSlotKey | null>(() => {
-      const slots: ResidentDetailSlotKey[] = ["owner_1", "owner_2", "tenant"]
-      return (
+      const slots: ResidentDetailSlotKey[] = [
+        "owner_1",
+        "owner_2",
+        "tenant",
+        "agent",
+      ]
+      const residentSlot =
         slots.find(
           (slot) =>
             String(editContext?.flatResidents?.[slot]?.id) ===
             String(editingId),
         ) ?? null
-      )
+      return residentSlot ?? (editContext?.flatId ? "owner_1" : null)
     })
   const fixedFlatId = editContext?.flatId ? String(editContext.flatId) : ""
   const flatResidentEntries = useMemo<FlatResidentPreviewEntry[]>(
@@ -26030,6 +26289,12 @@ function AddResidentForm({
           label: "Tenant",
           cargo: 2,
           resident: flatResidentsPreview.tenant,
+        },
+        {
+          key: "agent",
+          label: "Agent",
+          cargo: 3,
+          resident: flatResidentsPreview.agent,
         },
       ],
     [flatResidentsPreview],
@@ -26057,12 +26322,18 @@ function AddResidentForm({
   })
 
   useEffect(() => {
-    const slots: ResidentDetailSlotKey[] = ["owner_1", "owner_2", "tenant"]
-    const selectedSlot =
+    const slots: ResidentDetailSlotKey[] = [
+      "owner_1",
+      "owner_2",
+      "tenant",
+      "agent",
+    ]
+    const residentSlot =
       slots.find(
         (slot) =>
           String(editContext?.flatResidents?.[slot]?.id) === String(editingId),
       ) ?? null
+    const selectedSlot = residentSlot ?? (fixedFlatId ? "owner_1" : null)
 
     setFlatResidentsPreview(editContext?.flatResidents ?? {})
     setActiveSlotKey(selectedSlot)
@@ -26070,7 +26341,7 @@ function AddResidentForm({
     if (!editingId) {
       setFormData(getDefaultResidentFormData())
     }
-  }, [editingId, editContext])
+  }, [editingId, editContext, fixedFlatId])
 
   const { data: buildingsData } = useQuery<ApiListResponse<Building>>({
     queryKey: ["buildings"],
@@ -26328,7 +26599,7 @@ function AddResidentForm({
             <p className="mt-1 text-xs text-[rgba(85,49,28,0.75)]">
               Select a role to edit it or create its resident record.
             </p>
-            <div className="mt-3 grid gap-2 text-sm text-[#55311c] sm:grid-cols-3">
+            <div className="mt-3 grid gap-2 text-sm text-[#55311c] sm:grid-cols-4">
               {flatResidentEntries.map((entry) => {
                 const isActive = entry.key === activeSlotKey
                 return (

@@ -1517,10 +1517,11 @@ class ContractorMaintenanceRecordPublic(SQLModel):
     category_name: str
     tag: str
     report: str
-    contractor_visit_id: uuid.UUID
+    source: Literal["contractor_visit", "manual"]
+    contractor_visit_id: uuid.UUID | None
     contractor_name: str
     contractor_mobile: str
-    in_at: datetime
+    in_at: datetime | None
     out_at: datetime | None
 
 

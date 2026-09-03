@@ -842,11 +842,35 @@ def _contractor_maintenance_record_to_public(
         category_name=category.name,
         tag=maintenance.tag,
         report=maintenance.report,
+        source="contractor_visit",
         contractor_visit_id=visit.id,
         contractor_name=visit.name,
         contractor_mobile=visit.mobile,
         in_at=record.in_at,
         out_at=record.out_at,
+    )
+
+
+def _manual_contractor_maintenance_record_to_public(
+    maintenance: ContractorMaintenance,
+    category: ContractorMaintenanceCategory,
+) -> ContractorMaintenanceRecordPublic:
+    """Expose manually entered Last done dates in the maintenance history."""
+    assert maintenance.last_completed_at is not None
+    return ContractorMaintenanceRecordPublic(
+        # A manual entry cannot overlap a linked record because callers add it
+        # only for maintenance schedules without any contractor records.
+        id=maintenance.id,
+        maintenance_id=maintenance.id,
+        category_name=category.name,
+        tag=maintenance.tag,
+        report=maintenance.report,
+        source="manual",
+        contractor_visit_id=None,
+        contractor_name="Manual entry",
+        contractor_mobile="",
+        in_at=None,
+        out_at=maintenance.last_completed_at,
     )
 
 
@@ -1564,7 +1588,7 @@ def read_contractor_maintenance_history(
     ensure_contractor_visit_schema(session)
     ensure_contractor_maintenance_schema(session)
     condominio_id = _require_manager_condominio(session, current_user)
-    rows = session.exec(
+    record_rows = session.exec(
         select(
             ContractorMaintenanceRecord,
             ContractorMaintenance,
@@ -1585,16 +1609,38 @@ def read_contractor_maintenance_history(
         )
         .where(ContractorMaintenanceRecord.condominio_id == condominio_id)
         .order_by(ContractorMaintenanceRecord.in_at.desc())
-        .limit(min(max(limit, 1), 500))
     ).all()
+    recorded_maintenance_ids = {
+        maintenance.id for _, maintenance, _, _ in record_rows
+    }
+    manual_rows = session.exec(
+        select(ContractorMaintenance, ContractorMaintenanceCategory)
+        .join(
+            ContractorMaintenanceCategory,
+            ContractorMaintenanceCategory.id == ContractorMaintenance.category_id,
+        )
+        .where(
+            ContractorMaintenance.condominio_id == condominio_id,
+            ContractorMaintenance.last_completed_at.is_not(None),
+        )
+    ).all()
+    records = [
+        _contractor_maintenance_record_to_public(record, maintenance, category, visit)
+        for record, maintenance, category, visit in record_rows
+    ]
+    records.extend(
+        _manual_contractor_maintenance_record_to_public(maintenance, category)
+        for maintenance, category in manual_rows
+        if maintenance.id not in recorded_maintenance_ids
+    )
+    records.sort(
+        key=lambda item: _as_utc(item.out_at or item.in_at) if (item.out_at or item.in_at) else datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
+    records = records[: min(max(limit, 1), 500)]
     return ContractorMaintenanceRecordsPublic(
-        data=[
-            _contractor_maintenance_record_to_public(
-                record, maintenance, category, visit
-            )
-            for record, maintenance, category, visit in rows
-        ],
-        count=len(rows),
+        data=records,
+        count=len(records),
     )
 
 

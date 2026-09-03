@@ -80,6 +80,7 @@ class GoogleCalendarConnection(SQLModel, table=True):
         foreign_key="user.id", nullable=False, ondelete="CASCADE", unique=True, index=True
     )
     calendar_id: str | None = Field(default=None, max_length=512)
+    account_email: str | None = Field(default=None, max_length=320)
     refresh_token_encrypted: str | None = Field(default=None)
     status: str = Field(default="active", max_length=40, index=True)
     last_synced_at: datetime | None = Field(
@@ -158,6 +159,7 @@ class GoogleCalendarIntegrationStatusPublic(SQLModel):
     connected: bool
     status: str
     calendar_name: str | None = None
+    account_email: str | None = None
     last_synced_at: datetime | None = None
     pending_jobs: int = 0
     last_error: str | None = None

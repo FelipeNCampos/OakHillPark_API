@@ -107,6 +107,7 @@ def get_google_calendar_status(
         ),
         status=connection.status,
         calendar_name="Oak Hill Park" if connection.calendar_id else None,
+        account_email=connection.account_email,
         last_synced_at=connection.last_synced_at,
         pending_jobs=pending_jobs,
         last_error=connection.last_error,

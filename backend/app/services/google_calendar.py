@@ -35,8 +35,11 @@ from app.models import (
 
 GOOGLE_AUTHORIZATION_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+GOOGLE_USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo"
 GOOGLE_CALENDAR_API_URL = "https://www.googleapis.com/calendar/v3"
-GOOGLE_CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.app.created"
+GOOGLE_CALENDAR_SCOPE = (
+    "openid email https://www.googleapis.com/auth/calendar.app.created"
+)
 GOOGLE_CALENDAR_NAME = "Oak Hill Park"
 ONE_HOUR = timedelta(hours=1)
 
@@ -194,7 +197,7 @@ def _post_form(client: httpx.Client, url: str, data: dict[str, str]) -> dict[str
         ) from exc
 
 
-def exchange_google_authorization_code(code: str, verifier: str) -> str:
+def exchange_google_authorization_code(code: str, verifier: str) -> tuple[str, str]:
     _require_configuration()
     if not code:
         raise GoogleCalendarPermanentError(
@@ -218,7 +221,41 @@ def exchange_google_authorization_code(code: str, verifier: str) -> str:
         raise GoogleCalendarReconnectRequired(
             "Google did not issue a refresh token; reconnect and grant consent again"
         )
-    return refresh_token
+    access_token = payload.get("access_token")
+    if not isinstance(access_token, str) or not access_token:
+        raise GoogleCalendarReconnectRequired("Google authorization needs reconnecting")
+    return refresh_token, access_token
+
+
+def _get_google_account_email(access_token: str) -> str:
+    try:
+        with httpx.Client(timeout=20.0) as client:
+            response = client.get(
+                GOOGLE_USERINFO_URL,
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+    except httpx.TimeoutException as exc:
+        raise GoogleCalendarTransientError("Google request timed out") from exc
+    except httpx.HTTPError as exc:
+        raise GoogleCalendarTransientError(
+            "Google request could not be completed"
+        ) from exc
+
+    if response.status_code in {401, 403}:
+        raise GoogleCalendarReconnectRequired("Google authorization needs reconnecting")
+    if response.status_code == 429 or response.status_code >= 500:
+        raise GoogleCalendarTransientError("Google is temporarily unavailable")
+    if response.status_code >= 400:
+        raise GoogleCalendarPermanentError("Google could not identify the account")
+    try:
+        account_email = response.json().get("email")
+    except ValueError as exc:
+        raise GoogleCalendarPermanentError(
+            "Google returned an invalid account profile"
+        ) from exc
+    if not isinstance(account_email, str) or not account_email.strip():
+        raise GoogleCalendarPermanentError("Google did not return an account email")
+    return account_email.strip().lower()
 
 
 def _refresh_google_access_token(connection: GoogleCalendarConnection) -> str:
@@ -654,14 +691,10 @@ def finish_google_calendar_oauth(session: Session, *, code: str, state: str) -> 
     if not condominio_id:
         raise GoogleCalendarPermanentError("No condominio is configured for this user")
 
-    refresh_token = exchange_google_authorization_code(code, state_record.code_verifier)
-    # The code exchange also returns an access token, but storing only the refresh
-    # token is intentional. Refreshing here avoids persisting a short-lived secret.
-    temporary_connection = GoogleCalendarConnection(
-        user_id=user.id,
-        refresh_token_encrypted=encrypt_google_refresh_token(refresh_token),
+    refresh_token, access_token = exchange_google_authorization_code(
+        code, state_record.code_verifier
     )
-    access_token = _refresh_google_access_token(temporary_connection)
+    account_email = _get_google_account_email(access_token)
 
     connection = session.exec(
         select(GoogleCalendarConnection).where(
@@ -678,6 +711,7 @@ def finish_google_calendar_oauth(session: Session, *, code: str, state: str) -> 
     if not connection:
         connection = GoogleCalendarConnection(user_id=user.id)
     connection.calendar_id = calendar_id
+    connection.account_email = account_email
     connection.refresh_token_encrypted = encrypt_google_refresh_token(refresh_token)
     connection.status = "active"
     connection.last_error = None
@@ -721,6 +755,7 @@ def disconnect_google_calendar(session: Session, user_id: uuid.UUID) -> bool:
         return False
     connection.refresh_token_encrypted = None
     connection.calendar_id = None
+    connection.account_email = None
     connection.status = "disconnected"
     connection.last_error = None
     connection.updated_at = utc_now()

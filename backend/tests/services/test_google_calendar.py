@@ -34,6 +34,7 @@ from app.services.google_calendar import (
     consume_google_calendar_oauth_state,
     decrypt_google_refresh_token,
     encrypt_google_refresh_token,
+    finish_google_calendar_oauth,
     process_google_calendar_job,
     queue_full_google_calendar_resync,
 )
@@ -103,7 +104,13 @@ def test_google_oauth_state_is_pkce_bound_one_time_and_expires(
     user, _ = _create_manager(client, db, condominio.id)
 
     authorization_url = begin_google_calendar_oauth(db, user)
-    state = parse_qs(urlparse(authorization_url).query)["state"][0]
+    authorization_query = parse_qs(urlparse(authorization_url).query)
+    state = authorization_query["state"][0]
+    assert set(authorization_query["scope"][0].split()) == {
+        "openid",
+        "email",
+        "https://www.googleapis.com/auth/calendar.app.created",
+    }
     saved_state = db.exec(
         select(GoogleCalendarOAuthState).where(
             GoogleCalendarOAuthState.user_id == user.id
@@ -138,6 +145,42 @@ def test_google_refresh_tokens_are_encrypted(
     encrypted = encrypt_google_refresh_token("refresh-token-secret")
     assert encrypted != "refresh-token-secret"
     assert decrypt_google_refresh_token(encrypted) == "refresh-token-secret"
+
+
+def test_google_oauth_stores_connected_account_email(
+    db: Session,
+    client: TestClient,
+    google_calendar_settings: str,
+) -> None:
+    assert google_calendar_settings == "calendar-client-id"
+    condominio = _create_condominio(db)
+    user, _ = _create_manager(client, db, condominio.id)
+    authorization_url = begin_google_calendar_oauth(db, user)
+    state = parse_qs(urlparse(authorization_url).query)["state"][0]
+
+    with (
+        patch(
+            "app.services.google_calendar.exchange_google_authorization_code",
+            return_value=("refresh-token", "access-token"),
+        ),
+        patch(
+            "app.services.google_calendar._get_google_account_email",
+            return_value="calendar.account@gmail.com",
+        ),
+        patch(
+            "app.services.google_calendar._create_google_calendar",
+            return_value="oak-hill-private-calendar",
+        ),
+    ):
+        finish_google_calendar_oauth(db, code="authorization-code", state=state)
+
+    connection = db.exec(
+        select(GoogleCalendarConnection).where(
+            GoogleCalendarConnection.user_id == user.id
+        )
+    ).one()
+    assert connection.account_email == "calendar.account@gmail.com"
+    assert connection.status == "active"
 
 
 def test_google_event_mapping_uses_next_service_and_previous_visit_duration() -> None:
@@ -295,6 +338,7 @@ def test_google_calendar_disconnect_forgets_local_credentials(
     condominio = _create_condominio(db)
     user, headers = _create_manager(client, db, condominio.id)
     connection = _active_connection(user.id)
+    connection.account_email = "calendar.account@gmail.com"
     connection.refresh_token_encrypted = encrypt_google_refresh_token("refresh-token")
     db.add(connection)
     db.commit()
@@ -310,6 +354,28 @@ def test_google_calendar_disconnect_forgets_local_credentials(
     assert stored.status == "disconnected"
     assert stored.refresh_token_encrypted is None
     assert stored.calendar_id is None
+    assert stored.account_email is None
+
+
+def test_google_calendar_status_returns_connected_account_email(
+    db: Session,
+    client: TestClient,
+    google_calendar_settings: str,
+) -> None:
+    assert google_calendar_settings == "calendar-client-id"
+    condominio = _create_condominio(db)
+    user, headers = _create_manager(client, db, condominio.id)
+    connection = _active_connection(user.id)
+    connection.account_email = "calendar.account@gmail.com"
+    db.add(connection)
+    db.commit()
+
+    response = client.get(
+        "/api/v1/calendar-integrations/google/status", headers=headers
+    )
+
+    assert response.status_code == 200
+    assert response.json()["account_email"] == "calendar.account@gmail.com"
 
 
 def test_calendar_worker_completes_and_retries_persistent_jobs(

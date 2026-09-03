@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { RefreshCw } from "lucide-react"
 
 import { OpenAPI } from "@/client"
 import { enforceHttpsUrl, resolveApiBase } from "@/config/api"
@@ -8,6 +9,7 @@ interface GoogleCalendarStatus {
   connected: boolean
   status: "active" | "disconnected" | "reconnect_required" | string
   calendar_name?: string | null
+  account_email?: string | null
   last_synced_at?: string | null
   pending_jobs: number
   last_error?: string | null
@@ -199,9 +201,21 @@ export function GoogleCalendarIntegrationCard() {
                 type="button"
                 onClick={() => resyncMutation.mutate()}
                 disabled={isBusy}
-                className="rounded-lg border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition-all hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-60"
+                title="Resync Google Calendar"
+                aria-label="Resync Google Calendar"
+                className="flex max-w-full items-center gap-2 rounded-lg border border-[#8c7569] py-1 pl-3 pr-1 text-sm font-semibold text-[#55311c] transition-all hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {resyncMutation.isPending ? "Queuing..." : "Sync again"}
+                <span
+                  className="max-w-52 truncate sm:max-w-64"
+                  title={status.account_email || undefined}
+                >
+                  {status.account_email || "Reconnect to show Gmail"}
+                </span>
+                <span className="grid size-8 place-items-center rounded-md hover:bg-[#e9e1db]">
+                  <RefreshCw
+                    className={resyncMutation.isPending ? "size-4 animate-spin" : "size-4"}
+                  />
+                </span>
               </button>
               <button
                 type="button"

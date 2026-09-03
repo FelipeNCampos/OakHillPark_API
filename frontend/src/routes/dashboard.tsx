@@ -149,6 +149,8 @@ type ContractorMaintenanceStatusFilter =
   | "all"
   | ContractorMaintenanceSchedule["status"]
 
+type MaintenanceReportType = "maintenances" | "history"
+
 type ContractorMaintenanceSortField =
   | "report"
   | "category_name"
@@ -12866,6 +12868,8 @@ function ContractorMaintenanceContent() {
     })
   const [isMaintenanceReportOpen, setIsMaintenanceReportOpen] =
     useState(false)
+  const [maintenanceReportType, setMaintenanceReportType] =
+    useState<MaintenanceReportType>("maintenances")
   const [maintenanceReportSearch, setMaintenanceReportSearch] = useState("")
   const [maintenanceReportStatusFilter, setMaintenanceReportStatusFilter] =
     useState<ContractorMaintenanceStatusFilter>("all")
@@ -12876,6 +12880,14 @@ function ContractorMaintenanceContent() {
       field: "report",
       direction: "asc",
     })
+  const [maintenanceHistoryReportSearch, setMaintenanceHistoryReportSearch] =
+    useState("")
+  const [maintenanceHistoryReportCategoryFilter, setMaintenanceHistoryReportCategoryFilter] =
+    useState("all")
+  const [maintenanceHistoryReportDateFrom, setMaintenanceHistoryReportDateFrom] =
+    useState("")
+  const [maintenanceHistoryReportDateTo, setMaintenanceHistoryReportDateTo] =
+    useState("")
   const [maintenanceReportEmail, setMaintenanceReportEmail] = useState("")
   const [isSendingMaintenanceReport, setIsSendingMaintenanceReport] =
     useState(false)
@@ -13125,6 +13137,62 @@ function ContractorMaintenanceContent() {
       schedules,
     ],
   )
+  const maintenanceHistoryReportItems = useMemo(() => {
+    const searchTerm = maintenanceHistoryReportSearch.trim().toLocaleLowerCase()
+    const startsAt = maintenanceHistoryReportDateFrom
+      ? new Date(`${maintenanceHistoryReportDateFrom}T00:00:00`).getTime()
+      : null
+    const endsAt = maintenanceHistoryReportDateTo
+      ? new Date(`${maintenanceHistoryReportDateTo}T23:59:59.999`).getTime()
+      : null
+    const completedAt = (record: ContractorMaintenanceHistoryRecord) =>
+      record.out_at || record.in_at
+
+    return maintenanceHistory
+      .filter((record) => {
+        const matchesCategory =
+          maintenanceHistoryReportCategoryFilter === "all" ||
+          categories.some(
+            (category) =>
+              String(category.id) === maintenanceHistoryReportCategoryFilter &&
+              category.name === record.category_name,
+          )
+        if (!matchesCategory) return false
+
+        if (searchTerm) {
+          const matchesSearch = [
+            record.report,
+            record.category_name,
+            record.tag,
+            record.contractor_name,
+            record.contractor_mobile,
+          ].some((value) => value.toLocaleLowerCase().includes(searchTerm))
+          if (!matchesSearch) return false
+        }
+
+        if (startsAt === null && endsAt === null) return true
+        const recordCompletedAt = completedAt(record)
+        if (!recordCompletedAt) return false
+        const recordTimestamp = new Date(recordCompletedAt).getTime()
+        if (Number.isNaN(recordTimestamp)) return false
+        return (
+          (startsAt === null || recordTimestamp >= startsAt) &&
+          (endsAt === null || recordTimestamp <= endsAt)
+        )
+      })
+      .sort((first, second) => {
+        const firstTimestamp = new Date(completedAt(first) || 0).getTime()
+        const secondTimestamp = new Date(completedAt(second) || 0).getTime()
+        return secondTimestamp - firstTimestamp
+      })
+  }, [
+    categories,
+    maintenanceHistory,
+    maintenanceHistoryReportCategoryFilter,
+    maintenanceHistoryReportDateFrom,
+    maintenanceHistoryReportDateTo,
+    maintenanceHistoryReportSearch,
+  ])
   const toggleMaintenanceSort = (field: typeof maintenanceSort.field) => {
     setMaintenanceSort((current) => ({
       field,
@@ -13155,11 +13223,85 @@ function ContractorMaintenanceContent() {
     `Category: ${maintenanceReportCategoryLabel}`,
     `Order: ${contractorMaintenanceSortLabels[maintenanceReportSort.field]} (${maintenanceReportSort.direction})`,
   ].join(" | ")
-  const maintenanceReportFileName = `maintenance-list-report-${new Date()
-    .toISOString()
-    .slice(0, 10)}.pdf`
-  const createMaintenanceReportPdfBase64 = () =>
-    generatePdfTableReportBase64({
+  const maintenanceHistoryReportCategoryLabel =
+    maintenanceHistoryReportCategoryFilter === "all"
+      ? "All categories"
+      : categories.find(
+          (category) =>
+            String(category.id) === maintenanceHistoryReportCategoryFilter,
+        )?.name || "Selected category"
+  const maintenanceHistoryReportDateRangeLabel =
+    maintenanceHistoryReportDateFrom && maintenanceHistoryReportDateTo
+      ? `${maintenanceHistoryReportDateFrom} to ${maintenanceHistoryReportDateTo}`
+      : maintenanceHistoryReportDateFrom
+        ? `From ${maintenanceHistoryReportDateFrom}`
+        : maintenanceHistoryReportDateTo
+          ? `Up to ${maintenanceHistoryReportDateTo}`
+          : "All dates"
+  const maintenanceHistoryReportFilterSummary = [
+    `Search: ${maintenanceHistoryReportSearch.trim() || "All"}`,
+    `Category: ${maintenanceHistoryReportCategoryLabel}`,
+    `Completion date: ${maintenanceHistoryReportDateRangeLabel}`,
+    "Order: Completion date (descending)",
+  ].join(" | ")
+  const isMaintenanceHistoryReportDateRangeInvalid = Boolean(
+    maintenanceHistoryReportDateFrom &&
+      maintenanceHistoryReportDateTo &&
+      maintenanceHistoryReportDateFrom > maintenanceHistoryReportDateTo,
+  )
+  const isMaintenanceHistoryReport = maintenanceReportType === "history"
+  const activeMaintenanceReportFilterSummary = isMaintenanceHistoryReport
+    ? maintenanceHistoryReportFilterSummary
+    : maintenanceReportFilterSummary
+  const maintenanceReportFileName = `${
+    isMaintenanceHistoryReport ? "maintenance-history-report" : "maintenance-list-report"
+  }-${new Date().toISOString().slice(0, 10)}.pdf`
+  const maintenanceReportSubject = isMaintenanceHistoryReport
+    ? "Maintenance History Report"
+    : "Maintenance List Report"
+  const maintenanceReportItemsCount = isMaintenanceHistoryReport
+    ? maintenanceHistoryReportItems.length
+    : maintenanceReportItems.length
+  const createMaintenanceReportPdfBase64 = () => {
+    if (isMaintenanceHistoryReport) {
+      return generatePdfTableReportBase64({
+        title: "Maintenance History Report",
+        dateRange: maintenanceHistoryReportFilterSummary,
+        subtitleLabel: "Filters",
+        headers: [
+          "Maintenance",
+          "Category",
+          "Tag",
+          "Contractor",
+          "IN",
+          "Completion",
+        ],
+        rows:
+          maintenanceHistoryReportItems.length > 0
+            ? maintenanceHistoryReportItems.map((record) => [
+                record.report,
+                record.category_name,
+                record.tag || "-",
+                record.contractor_name || "-",
+                record.source === "contractor_visit"
+                  ? formatDateTime(record.in_at)
+                  : "-",
+                formatDateTime(record.out_at),
+              ])
+            : [
+                [
+                  "No maintenance history matches the selected filters.",
+                  "-",
+                  "-",
+                  "-",
+                  "-",
+                  "-",
+                ],
+              ],
+      })
+    }
+
+    return generatePdfTableReportBase64({
       title: "Maintenance List Report",
       dateRange: maintenanceReportFilterSummary,
       subtitleLabel: "Filters",
@@ -13195,15 +13337,25 @@ function ContractorMaintenanceContent() {
               ],
             ],
     })
+  }
   const openMaintenanceReport = () => {
+    setMaintenanceReportType("maintenances")
     setMaintenanceReportSearch(maintenanceSearch)
     setMaintenanceReportStatusFilter(maintenanceStatusFilter)
     setMaintenanceReportCategoryFilter(maintenanceCategoryFilter)
     setMaintenanceReportSort(maintenanceSort)
+    setMaintenanceHistoryReportSearch(maintenanceHistorySearch)
+    setMaintenanceHistoryReportCategoryFilter(maintenanceHistoryCategoryFilter)
+    setMaintenanceHistoryReportDateFrom("")
+    setMaintenanceHistoryReportDateTo("")
     setMaintenanceReportEmail("")
     setIsMaintenanceReportOpen(true)
   }
   const handleDownloadMaintenanceReport = () => {
+    if (isMaintenanceHistoryReportDateRangeInvalid) {
+      showErrorToast("The history start date must be before the end date")
+      return
+    }
     const fileDataBase64 = createMaintenanceReportPdfBase64()
     if (!fileDataBase64) {
       showErrorToast("Failed to prepare report file")
@@ -13215,6 +13367,10 @@ function ContractorMaintenanceContent() {
     link.click()
   }
   const handleSendMaintenanceReport = async () => {
+    if (isMaintenanceHistoryReportDateRangeInvalid) {
+      showErrorToast("The history start date must be before the end date")
+      return
+    }
     const recipients = maintenanceReportEmail
       .split(",")
       .map((email) => email.trim())
@@ -13243,10 +13399,12 @@ function ContractorMaintenanceContent() {
         method: "POST",
         body: {
           email_to: recipients.join(","),
-          subject: "Maintenance List Report",
+          subject: maintenanceReportSubject,
           html_content: buildScheduleReportEmailHtml({
-            scheduleName: "Maintenance list",
-            periodLabel: maintenanceReportFilterSummary,
+            scheduleName: isMaintenanceHistoryReport
+              ? "Maintenance history"
+              : "Maintenance list",
+            periodLabel: activeMaintenanceReportFilterSummary,
           }),
           file_name: maintenanceReportFileName,
           file_data_base64: fileDataBase64,
@@ -13983,17 +14141,111 @@ function ContractorMaintenanceContent() {
           <DialogHeader>
             <DialogTitle>Maintenance list report</DialogTitle>
             <DialogDescription>
-              Choose the filters and ordering to include in the PDF. You can
-              download it or send it by email.
+              Choose whether to report maintenance or history, then set the
+              filters to include in the PDF. You can download it or send it by
+              email.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-5">
             <div>
               <p className="text-sm font-semibold text-[#55311c]">
-                Report filters
+                Report type
               </p>
-              <div className="mt-2 grid gap-3 sm:grid-cols-3">
+              <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                <label className="grid gap-1 text-sm font-semibold text-[#55311c]">
+                  Include
+                  <select
+                    value={maintenanceReportType}
+                    onChange={(event) =>
+                      setMaintenanceReportType(
+                        event.target.value as MaintenanceReportType,
+                      )
+                    }
+                    className="rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm font-normal text-[#55311c]"
+                  >
+                    <option value="maintenances">Maintenances</option>
+                    <option value="history">History</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+
+            {isMaintenanceHistoryReport ? (
+              <div>
+                <p className="text-sm font-semibold text-[#55311c]">
+                  History filters
+                </p>
+                <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                  <label className="grid gap-1 text-sm font-semibold text-[#55311c]">
+                    Search
+                    <input
+                      type="search"
+                      value={maintenanceHistoryReportSearch}
+                      onChange={(event) =>
+                        setMaintenanceHistoryReportSearch(event.target.value)
+                      }
+                      placeholder="Maintenance, contractor, category or tag"
+                      className="w-full rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm font-normal text-[#55311c] placeholder:text-[#8c7569]"
+                    />
+                  </label>
+                  <label className="grid gap-1 text-sm font-semibold text-[#55311c]">
+                    Category
+                    <select
+                      value={maintenanceHistoryReportCategoryFilter}
+                      onChange={(event) =>
+                        setMaintenanceHistoryReportCategoryFilter(
+                          event.target.value,
+                        )
+                      }
+                      className="rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm font-normal text-[#55311c]"
+                    >
+                      <option value="all">All categories</option>
+                      {categories.map((category) => (
+                        <option key={category.id} value={String(category.id)}>
+                          {category.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="grid gap-1 text-sm font-semibold text-[#55311c]">
+                    Completion date from
+                    <input
+                      type="date"
+                      value={maintenanceHistoryReportDateFrom}
+                      max={maintenanceHistoryReportDateTo || undefined}
+                      onChange={(event) =>
+                        setMaintenanceHistoryReportDateFrom(event.target.value)
+                      }
+                      className="rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm font-normal text-[#55311c]"
+                    />
+                  </label>
+                  <label className="grid gap-1 text-sm font-semibold text-[#55311c]">
+                    Completion date to
+                    <input
+                      type="date"
+                      value={maintenanceHistoryReportDateTo}
+                      min={maintenanceHistoryReportDateFrom || undefined}
+                      onChange={(event) =>
+                        setMaintenanceHistoryReportDateTo(event.target.value)
+                      }
+                      className="rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm font-normal text-[#55311c]"
+                    />
+                  </label>
+                </div>
+                {isMaintenanceHistoryReportDateRangeInvalid && (
+                  <p className="mt-2 text-sm text-red-700" role="alert">
+                    The start date must be before the end date.
+                  </p>
+                )}
+              </div>
+            ) : (
+              <>
+                <div>
+                  <p className="text-sm font-semibold text-[#55311c]">
+                    Report filters
+                  </p>
+                  <div className="mt-2 grid gap-3 sm:grid-cols-3">
                 <label className="grid gap-1 text-sm font-semibold text-[#55311c]">
                   Search
                   <input
@@ -14040,54 +14292,56 @@ function ContractorMaintenanceContent() {
                     ))}
                   </select>
                 </label>
-              </div>
-            </div>
+                  </div>
+                </div>
 
-            <div>
-              <p className="text-sm font-semibold text-[#55311c]">
-                Report order
-              </p>
-              <div className="mt-2 grid gap-3 sm:grid-cols-2">
-                <label className="grid gap-1 text-sm font-semibold text-[#55311c]">
-                  Order by
-                  <select
-                    value={maintenanceReportSort.field}
-                    onChange={(event) =>
-                      setMaintenanceReportSort((current) => ({
-                        ...current,
-                        field: event.target
-                          .value as ContractorMaintenanceSortField,
-                      }))
-                    }
-                    className="rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm font-normal text-[#55311c]"
-                  >
-                    {Object.entries(contractorMaintenanceSortLabels).map(
-                      ([field, label]) => (
-                        <option key={field} value={field}>
-                          {label}
-                        </option>
-                      ),
-                    )}
-                  </select>
-                </label>
-                <label className="grid gap-1 text-sm font-semibold text-[#55311c]">
-                  Direction
-                  <select
-                    value={maintenanceReportSort.direction}
-                    onChange={(event) =>
-                      setMaintenanceReportSort((current) => ({
-                        ...current,
-                        direction: event.target.value as "asc" | "desc",
-                      }))
-                    }
-                    className="rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm font-normal text-[#55311c]"
-                  >
-                    <option value="asc">Ascending</option>
-                    <option value="desc">Descending</option>
-                  </select>
-                </label>
-              </div>
-            </div>
+                <div>
+                  <p className="text-sm font-semibold text-[#55311c]">
+                    Report order
+                  </p>
+                  <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                    <label className="grid gap-1 text-sm font-semibold text-[#55311c]">
+                      Order by
+                      <select
+                        value={maintenanceReportSort.field}
+                        onChange={(event) =>
+                          setMaintenanceReportSort((current) => ({
+                            ...current,
+                            field: event.target
+                              .value as ContractorMaintenanceSortField,
+                          }))
+                        }
+                        className="rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm font-normal text-[#55311c]"
+                      >
+                        {Object.entries(contractorMaintenanceSortLabels).map(
+                          ([field, label]) => (
+                            <option key={field} value={field}>
+                              {label}
+                            </option>
+                          ),
+                        )}
+                      </select>
+                    </label>
+                    <label className="grid gap-1 text-sm font-semibold text-[#55311c]">
+                      Direction
+                      <select
+                        value={maintenanceReportSort.direction}
+                        onChange={(event) =>
+                          setMaintenanceReportSort((current) => ({
+                            ...current,
+                            direction: event.target.value as "asc" | "desc",
+                          }))
+                        }
+                        className="rounded-lg border border-[#d9d0ca] bg-white px-3 py-2 text-sm font-normal text-[#55311c]"
+                      >
+                        <option value="asc">Ascending</option>
+                        <option value="desc">Descending</option>
+                      </select>
+                    </label>
+                  </div>
+                </div>
+              </>
+            )}
 
             <label className="grid gap-1 text-sm font-semibold text-[#55311c]">
               Send to email
@@ -14104,8 +14358,14 @@ function ContractorMaintenanceContent() {
             </label>
 
             <div className="rounded-lg bg-[#f5f1ee] px-4 py-3 text-sm text-[#55311c]">
-              <span className="font-semibold">{maintenanceReportItems.length}</span>{" "}
-              maintenance item{maintenanceReportItems.length === 1 ? "" : "s"}{" "}
+              <span className="font-semibold">{maintenanceReportItemsCount}</span>{" "}
+              {isMaintenanceHistoryReport
+                ? `maintenance history record${
+                    maintenanceReportItemsCount === 1 ? "" : "s"
+                  }`
+                : `maintenance item${
+                    maintenanceReportItemsCount === 1 ? "" : "s"
+                  }`} {" "}
               will be included in the report.
             </div>
           </div>
@@ -14122,7 +14382,10 @@ function ContractorMaintenanceContent() {
             <button
               type="button"
               onClick={handleDownloadMaintenanceReport}
-              disabled={isSendingMaintenanceReport}
+              disabled={
+                isSendingMaintenanceReport ||
+                isMaintenanceHistoryReportDateRangeInvalid
+              }
               className="rounded border border-[#8c7569] px-4 py-2 text-sm font-semibold text-[#55311c] transition hover:bg-[#f0ebe7] disabled:cursor-not-allowed disabled:opacity-60"
             >
               Download PDF
@@ -14130,7 +14393,10 @@ function ContractorMaintenanceContent() {
             <button
               type="button"
               onClick={handleSendMaintenanceReport}
-              disabled={isSendingMaintenanceReport}
+              disabled={
+                isSendingMaintenanceReport ||
+                isMaintenanceHistoryReportDateRangeInvalid
+              }
               className="rounded bg-[#8c7569] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isSendingMaintenanceReport ? "Sending..." : "Send by email"}

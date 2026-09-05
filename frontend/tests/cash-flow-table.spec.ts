@@ -86,6 +86,20 @@ test("cash flow rows keep the table compact and open the complete editor on row 
     tableDimensions.containerWidth,
   )
 
+  const viewNotesButton = recordRow.getByRole("button", {
+    name: "View notes for cash flow record #42",
+  })
+  await expect(viewNotesButton).toBeVisible()
+  await viewNotesButton.click()
+
+  const notesDialog = page.getByRole("dialog", {
+    name: "Notes for record #42",
+  })
+  await expect(notesDialog).toBeVisible()
+  await expect(notesDialog).toContainText(record.description)
+  await notesDialog.getByRole("button", { name: "Close notes" }).click()
+  await expect(notesDialog).toHaveCount(0)
+
   const summaryRow = table.getByRole("row", { name: /Total:/ })
   await expect(summaryRow.getByText("£900.00")).toBeVisible()
 

@@ -384,6 +384,12 @@ def test_generate_cash_flow_report_pdf(
         },
     )
     assert response.status_code == 201
+    record = db.get(CashFlowRecord, uuid.UUID(response.json()["id"]))
+    assert record is not None
+    record.payment_number = 26
+    record.invoice_media_name = "inv-0021.png"
+    db.add(record)
+    db.commit()
 
     report_response = client.get(
         f"{settings.API_V1_STR}/cash-flow/report/",
@@ -403,7 +409,7 @@ def test_generate_cash_flow_report_pdf(
     pdf = PdfReader(BytesIO(report_response.content))
     assert len(pdf.pages) >= 2
     extracted_text = "\n".join(page.extract_text() or "" for page in pdf.pages)
-    assert "Invoice #1" in extracted_text
+    assert "Invoice #26" in extracted_text
 
 
 def test_send_cash_flow_report(

@@ -52,6 +52,7 @@ def _create_test_morador(db: Session, flat_id: uuid.UUID) -> Morador:
         email=random_email(),
         tenant_nome_2=None,
         tenant_email_2=None,
+        tenant_mobile_2=None,
         mobile="1234567890",
         receives_flat_reading_sms=False,
         flat_id=flat_id
@@ -111,6 +112,7 @@ def test_read_morador_by_id(
     assert data["email"] == morador.email
     assert data["tenant_nome_2"] is None
     assert data["tenant_email_2"] is None
+    assert data["tenant_mobile_2"] is None
     assert data["flat_id"] == str(morador.flat_id)
     assert data["receives_flat_reading_sms"] is False
     assert data["receives_twilio_sms"] is False
@@ -143,6 +145,7 @@ def test_create_morador(
         "email": email,
         "tenant_nome_2": "Second Tenant",
         "tenant_email_2": random_email(),
+        "tenant_mobile_2": "987655",
         "mobile": "987654",
         "car1": "XYZ9999",
         "flat_id": str(flat.id)
@@ -159,6 +162,7 @@ def test_create_morador(
     assert created_morador["email"] == data["email"]
     assert created_morador["tenant_nome_2"] == data["tenant_nome_2"]
     assert created_morador["tenant_email_2"] == data["tenant_email_2"]
+    assert created_morador["tenant_mobile_2"] == data["tenant_mobile_2"]
     assert created_morador["receives_flat_reading_sms"] is False
     assert created_morador["receives_twilio_sms"] is False
     assert created_morador["car1"] == data["car1"]
@@ -201,6 +205,7 @@ def test_update_morador(
         "email": new_email,
         "tenant_nome_2": "Updated Tenant",
         "tenant_email_2": random_email(),
+        "tenant_mobile_2": "555555556",
         "mobile": "555555555",
         "car1": "UPD1111",
         "flat_id": str(flat.id)
@@ -217,6 +222,7 @@ def test_update_morador(
     assert updated_morador["email"] == update_data["email"]
     assert updated_morador["tenant_nome_2"] == update_data["tenant_nome_2"]
     assert updated_morador["tenant_email_2"] == update_data["tenant_email_2"]
+    assert updated_morador["tenant_mobile_2"] == update_data["tenant_mobile_2"]
     assert updated_morador["car1"] == update_data["car1"]
     db.refresh(flat)
     assert flat.car1 == update_data["car1"]

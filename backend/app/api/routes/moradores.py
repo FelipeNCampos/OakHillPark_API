@@ -69,6 +69,7 @@ def _build_morador_public(morador: Morador, flat: Flat | None = None) -> Morador
             if morador.tenant_email_2 and morador.tenant_email_2.strip()
             else None
         ),
+        tenant_mobile_2=_normalize_optional_text(morador.tenant_mobile_2),
         mobile=morador.mobile,
         receives_flat_reading_sms=morador.receives_flat_reading_sms,
         receives_twilio_sms=morador.receives_twilio_sms,
@@ -125,6 +126,7 @@ def read_moradores(
             col(Morador.email).ilike(search_term),
             col(Morador.tenant_nome_2).ilike(search_term),
             col(Morador.tenant_email_2).ilike(search_term),
+            col(Morador.tenant_mobile_2).ilike(search_term),
             col(Flat.label).ilike(search_term),
         ]
         if search.isdigit():
@@ -148,6 +150,7 @@ def read_moradores(
             col(Morador.email).ilike(search_term),
             col(Morador.tenant_nome_2).ilike(search_term),
             col(Morador.tenant_email_2).ilike(search_term),
+            col(Morador.tenant_mobile_2).ilike(search_term),
             col(Flat.label).ilike(search_term),
         ]
         if search.isdigit():
@@ -169,6 +172,7 @@ def read_moradores(
                 if morador.tenant_email_2 and morador.tenant_email_2.strip()
                 else None
             ),
+            tenant_mobile_2=_normalize_optional_text(morador.tenant_mobile_2),
             mobile=morador.mobile,
             receives_flat_reading_sms=morador.receives_flat_reading_sms,
             receives_twilio_sms=morador.receives_twilio_sms,
@@ -218,6 +222,9 @@ def create_morador(*, session: SessionDep, morador_in: MoradorCreate) -> Any:
     morador_data["tenant_nome_2"] = _normalize_optional_text(
         morador_data.get("tenant_nome_2")
     )
+    morador_data["tenant_mobile_2"] = _normalize_optional_text(
+        morador_data.get("tenant_mobile_2")
+    )
     morador = Morador.model_validate(morador_data)
     if {"car1", "car2", "car3"} & morador_in.model_fields_set:
         _sync_flat_cars(flat, morador_in.car1, morador_in.car2, morador_in.car3)
@@ -249,6 +256,10 @@ def update_morador(
     if "tenant_nome_2" in update_dict:
         update_dict["tenant_nome_2"] = _normalize_optional_text(
             update_dict["tenant_nome_2"]
+        )
+    if "tenant_mobile_2" in update_dict:
+        update_dict["tenant_mobile_2"] = _normalize_optional_text(
+            update_dict["tenant_mobile_2"]
         )
     morador.sqlmodel_update(update_dict)
 
@@ -317,6 +328,7 @@ def update_morador_reading_types(
             if morador.tenant_email_2 and morador.tenant_email_2.strip()
             else None
         ),
+        tenant_mobile_2=_normalize_optional_text(morador.tenant_mobile_2),
         mobile=morador.mobile,
         receives_flat_reading_sms=morador.receives_flat_reading_sms,
         receives_twilio_sms=morador.receives_twilio_sms,

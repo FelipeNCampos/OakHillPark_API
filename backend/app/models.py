@@ -271,6 +271,7 @@ class Morador(SQLModel, table=True):
     email: EmailStr | None = Field(default=None, max_length=255)
     tenant_nome_2: str | None = Field(default=None, max_length=255)
     tenant_email_2: EmailStr | None = Field(default=None, max_length=255)
+    tenant_mobile_2: str | None = Field(default=None, max_length=20)
     mobile: str = Field(default="", max_length=20)
     receives_flat_reading_sms: bool = Field(default=False)
     receives_twilio_sms: bool = Field(default=False)
@@ -1020,6 +1021,7 @@ class MoradorBase(SQLModel):
     email: EmailStr | None = Field(default=None, max_length=255)
     tenant_nome_2: str | None = Field(default=None, max_length=255)
     tenant_email_2: EmailStr | None = Field(default=None, max_length=255)
+    tenant_mobile_2: str | None = Field(default=None, max_length=20)
     mobile: str = Field(default="", max_length=20)  # Changed to str for phone numbers
     receives_flat_reading_sms: bool = Field(default=False)
     receives_twilio_sms: bool = Field(default=False)
@@ -1039,6 +1041,7 @@ class MoradorUpdate(SQLModel):
     email: EmailStr | None = Field(default=None, max_length=255)
     tenant_nome_2: str | None = Field(default=None, max_length=255)
     tenant_email_2: EmailStr | None = Field(default=None, max_length=255)
+    tenant_mobile_2: str | None = Field(default=None, max_length=20)
     mobile: str | None = Field(default=None, max_length=20)
     receives_flat_reading_sms: bool | None = None
     receives_twilio_sms: bool | None = None

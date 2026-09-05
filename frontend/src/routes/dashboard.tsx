@@ -15,6 +15,7 @@ import {
   ChevronRight,
   Copy,
   Download,
+  Eye,
   FileSpreadsheet,
   Link2,
   Pencil,
@@ -732,6 +733,7 @@ interface Morador {
   email?: string | null
   tenant_nome_2?: string | null
   tenant_email_2?: string | null
+  tenant_mobile_2?: string | null
   mobile?: string | number | null
   car1?: string | null
   car2?: string | null
@@ -893,6 +895,11 @@ type FlatResidentRow = {
   edit_target_id: EntityId | null
 }
 
+type BuildingDetailsSelection = {
+  buildingId: EntityId
+  focusFlatId: EntityId | null
+}
+
 type FlatResidentsPreview = {
   owner_1?: FlatResidentPreview
   owner_2?: FlatResidentPreview
@@ -926,6 +933,7 @@ interface MoradorDetail {
   email?: string | null
   tenant_nome_2?: string | null
   tenant_email_2?: string | null
+  tenant_mobile_2?: string | null
   mobile?: string | number | null
   cargo: number
   car1?: string | null
@@ -977,6 +985,7 @@ const matchesResidentSearch = (morador: Morador, normalizedSearch: string) =>
     morador.email,
     morador.tenant_nome_2,
     morador.tenant_email_2,
+    morador.tenant_mobile_2,
     morador.mobile?.toString(),
     morador.building_nome,
     formatFlatNumber(morador.flat_numero, morador.flat_label),
@@ -3214,6 +3223,7 @@ function CashFlowContent() {
   const [textEditor, setTextEditor] = useState<CashFlowTextEditorState | null>(
     null,
   )
+  const [notesViewer, setNotesViewer] = useState<CashFlowRecord | null>(null)
   const [createInvoicePreview, setCreateInvoicePreview] =
     useState<CashFlowPreviewState | null>(null)
   const [saving, setSaving] = useState(false)
@@ -3254,6 +3264,7 @@ function CashFlowContent() {
       setIsCustomPeriodOpen(false)
       setTextEditor(null)
       setInvoiceEditor(null)
+      setNotesViewer(null)
     }
 
     window.addEventListener("keydown", handleKeyDown)
@@ -4246,8 +4257,8 @@ function CashFlowContent() {
                 <th
                   className="truncate whitespace-nowrap px-2 py-3 font-extrabold"
                 >
-                  <span className="block truncate" title="Description">
-                    Description
+                  <span className="block truncate" title="Notes">
+                    Notes
                   </span>
                 </th>
                 <th
@@ -4355,13 +4366,23 @@ function CashFlowContent() {
                               {record.supplier || "-"}
                             </span>
                           </td>
-                          <td className="overflow-hidden px-2 py-3 text-xs font-semibold text-black/70 sm:text-sm">
-                            <span
-                              className="block truncate"
-                              title={record.description || undefined}
-                            >
-                              {record.description || "-"}
-                            </span>
+                          <td className="px-2 py-3 text-xs font-semibold text-black/70 sm:text-sm">
+                            {(record.description || "").trim() ? (
+                              <button
+                                aria-label={`View notes for cash flow record #${record.payment_number}`}
+                                className="inline-flex items-center gap-1 rounded-md border border-[#d9d0ca] bg-white px-2 py-1 font-extrabold text-[#55311c] transition hover:bg-[#f5f1ee]"
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  setNotesViewer(record)
+                                }}
+                              >
+                                <Eye aria-hidden="true" size={15} />
+                                View
+                              </button>
+                            ) : (
+                              "-"
+                            )}
                           </td>
                           <td className="overflow-hidden px-2 py-3 text-xs font-semibold text-black/70 sm:text-sm">
                             <span className="block truncate" title={record.location || undefined}>
@@ -4438,6 +4459,49 @@ function CashFlowContent() {
             </tbody>
         </table>
       </section>
+
+      {notesViewer ? (
+        <div className="fixed inset-0 z-40 grid place-items-center bg-black/40 p-4">
+          <article
+            aria-labelledby="cash-flow-notes-title"
+            aria-modal="true"
+            className="w-full max-w-lg rounded-2xl border border-[#e5e0dc] bg-white shadow-2xl"
+            role="dialog"
+          >
+            <header className="flex items-center justify-between border-b border-[#e5e0dc] px-6 py-4">
+              <div>
+                <p className={labelClass}>{title}</p>
+                <h2
+                  className="text-lg font-extrabold text-[#55311c]"
+                  id="cash-flow-notes-title"
+                >
+                  Notes for record #{notesViewer.payment_number}
+                </h2>
+              </div>
+              <button
+                aria-label="Close notes"
+                className="grid h-9 w-9 place-items-center rounded-lg border border-[#d9d0ca] text-black transition hover:bg-[#f5f1ee]"
+                type="button"
+                onClick={() => setNotesViewer(null)}
+              >
+                <X aria-hidden="true" size={17} />
+              </button>
+            </header>
+            <div className="max-h-[60vh] overflow-y-auto whitespace-pre-wrap break-words px-6 py-5 text-sm font-semibold leading-6 text-[#55311c]">
+              {notesViewer.description || "-"}
+            </div>
+            <footer className="flex justify-end border-t border-[#e5e0dc] px-6 py-4">
+              <button
+                className={secondaryButtonClass}
+                type="button"
+                onClick={() => setNotesViewer(null)}
+              >
+                Close
+              </button>
+            </footer>
+          </article>
+        </div>
+      ) : null}
 
       {isShareOpen ? (
         <div className="fixed inset-0 z-40 grid place-items-center bg-black/40 p-4">
@@ -25295,6 +25359,8 @@ function CaretakerRegister() {
 function ResidentsContent() {
   const [showForm, setShowForm] = useState(false)
   const [showFlatForm, setShowFlatForm] = useState(false)
+  const [buildingDetailsSelection, setBuildingDetailsSelection] =
+    useState<BuildingDetailsSelection | null>(null)
   const [editingId, setEditingId] = useState<EntityId | null>(null)
   const [editContext, setEditContext] = useState<ResidentEditContext | null>(
     null,
@@ -25354,6 +25420,12 @@ function ResidentsContent() {
 
   const Residents = ResidentsData?.data || []
   const buildings = buildingsData?.data || []
+  const selectedBuildingForDetails = buildingDetailsSelection
+    ? buildings.find(
+        (building) =>
+          String(building.id) === String(buildingDetailsSelection.buildingId),
+      )
+    : undefined
   const residentFilterBuildings = useMemo(
     () =>
       buildings
@@ -25813,6 +25885,28 @@ function ResidentsContent() {
     )
   }
 
+  const renderResidentPhones = (
+    morador?: Morador,
+    emptyLabel = "-",
+  ) => {
+    if (!morador) return emptyLabel
+
+    const primaryPhone = morador.mobile?.toString()
+    const secondaryPhone =
+      morador.cargo === 2 ? morador.tenant_mobile_2?.toString() : undefined
+
+    if (!primaryPhone && !secondaryPhone) return emptyLabel
+
+    if (morador.cargo !== 2) return primaryPhone || emptyLabel
+
+    return (
+      <div className="flex flex-col">
+        <span>Tenant 1: {primaryPhone || "-"}</span>
+        {secondaryPhone && <span>Tenant 2: {secondaryPhone}</span>}
+      </div>
+    )
+  }
+
   const renderFlatPlates = (row: FlatResidentRow) => {
     const plates = [row.car1, row.car2, row.car3].filter(
       (plate): plate is string => Boolean(plate?.trim()),
@@ -25874,6 +25968,21 @@ function ResidentsContent() {
       flatId,
     })
     setShowForm(true)
+  }
+
+  const openBuildingDetailsForFlat = (
+    flatId: EntityId,
+    focusFlat = false,
+  ) => {
+    const building = buildings.find((candidate) =>
+      candidate.flats?.some((flat) => String(flat.id) === String(flatId)),
+    )
+    if (!building) return
+
+    setBuildingDetailsSelection({
+      buildingId: building.id,
+      focusFlatId: focusFlat ? flatId : null,
+    })
   }
 
   if (isLoading && Residents.length === 0) {
@@ -26040,7 +26149,7 @@ function ResidentsContent() {
                           Tenant
                         </th>
                         <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
-                          Phone
+                          Tenant phones
                         </th>
                         <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
                           Agent
@@ -26075,10 +26184,28 @@ function ResidentsContent() {
                           }}
                         >
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
-                            {row.building_nome}
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                openBuildingDetailsForFlat(row.flat_id)
+                              }}
+                              className="text-left font-semibold underline decoration-[#8c7569]/60 underline-offset-2 transition-colors hover:text-[#8c7569]"
+                            >
+                              {row.building_nome}
+                            </button>
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
-                            {formatFlatNumber(row.flat_numero, row.flat_label)}
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                openBuildingDetailsForFlat(row.flat_id, true)
+                              }}
+                              className="text-left font-semibold underline decoration-[#8c7569]/60 underline-offset-2 transition-colors hover:text-[#8c7569]"
+                            >
+                              {formatFlatNumber(row.flat_numero, row.flat_label)}
+                            </button>
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
                             {renderFlatPlates(row)}
@@ -26106,7 +26233,6 @@ function ResidentsContent() {
                                 row.owner_2,
                                 "No resident",
                               )}
-                              {renderReadingTypeToggles(row.owner_2)}
                             </div>
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
@@ -26122,7 +26248,7 @@ function ResidentsContent() {
                           </td>
                           <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
                             <div className="flex flex-col">
-                              <span>{row.tenant?.mobile || "-"}</span>
+                              {renderResidentPhones(row.tenant)}
                               {renderReadingSmsToggle(row.tenant)}
                               {renderTwilioSmsToggle(row.tenant)}
                               {renderTwilioEmailToggle(row.tenant)}
@@ -26197,19 +26323,40 @@ function ResidentsContent() {
                             }
                           >
                             <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
-                              {morador.building_nome}
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  openBuildingDetailsForFlat(morador.flat_id)
+                                }}
+                                className="text-left font-semibold underline decoration-[#8c7569]/60 underline-offset-2 transition-colors hover:text-[#8c7569]"
+                              >
+                                {morador.building_nome}
+                              </button>
                             </td>
                             <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
-                              {formatFlatNumber(
-                                morador.flat_numero,
-                                morador.flat_label,
-                              )}
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  openBuildingDetailsForFlat(
+                                    morador.flat_id,
+                                    true,
+                                  )
+                                }}
+                                className="text-left font-semibold underline decoration-[#8c7569]/60 underline-offset-2 transition-colors hover:text-[#8c7569]"
+                              >
+                                {formatFlatNumber(
+                                  morador.flat_numero,
+                                  morador.flat_label,
+                                )}
+                              </button>
                             </td>
                             <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
                               {renderResidentIdentity(morador)}
                             </td>
                             <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
-                              {morador.mobile || "-"}
+                              {renderResidentPhones(morador)}
                             </td>
                             <td className="border border-gray-400 px-4 py-3 text-center">
                               <input
@@ -26386,7 +26533,130 @@ function ResidentsContent() {
           </>
         )}
       </div>
+      <BuildingDetailsDialog
+        open={Boolean(selectedBuildingForDetails)}
+        building={selectedBuildingForDetails}
+        focusFlatId={buildingDetailsSelection?.focusFlatId ?? null}
+        onOpenChange={(open) => {
+          if (!open) setBuildingDetailsSelection(null)
+        }}
+      />
     </div>
+  )
+}
+
+function BuildingDetailsDialog({
+  open,
+  building,
+  focusFlatId,
+  onOpenChange,
+}: {
+  open: boolean
+  building?: Building
+  focusFlatId: EntityId | null
+  onOpenChange: (open: boolean) => void
+}) {
+  const queryClient = useQueryClient()
+  const { showSuccessToast, showErrorToast } = useCustomToast()
+  const flats = useMemo(
+    () => [...(building?.flats || [])].sort(compareReadingFlats),
+    [building],
+  )
+  const focusedFlat = flats.find(
+    (flat) => String(flat.id) === String(focusFlatId),
+  )
+  const deleteFlatMutation = useMutation({
+    mutationFn: (flatId: EntityId) =>
+      apiCall(`/api/v1/flats/${flatId}`, { method: "DELETE" }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["buildings"] }),
+        queryClient.invalidateQueries({ queryKey: ["Residents"] }),
+      ])
+      showSuccessToast("Flat deleted successfully!")
+    },
+    onError: (error) => {
+      showErrorToast(
+        error instanceof Error ? error.message : "Error deleting flat",
+      )
+    },
+  })
+
+  const handleDeleteFlat = (flat: Flat) => {
+    if (deleteFlatMutation.isPending) return
+
+    const confirmed =
+      typeof window === "undefined"
+        ? true
+        : window.confirm(
+            `Delete ${formatFlatLabel(flat.numero, flat.label)}? This also deletes its residents and readings.`,
+          )
+
+    if (confirmed) deleteFlatMutation.mutate(flat.id)
+  }
+
+  if (!building) return null
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen && !deleteFlatMutation.isPending) onOpenChange(false)
+      }}
+    >
+      <DialogContent
+        showCloseButton={!deleteFlatMutation.isPending}
+        className="border-[#e5e0dc] bg-white text-[#55311c] sm:max-w-xl"
+      >
+        <DialogHeader>
+          <DialogTitle className="text-[#55311c]">{building.nome}</DialogTitle>
+          <DialogDescription className="text-[rgba(85,49,28,0.72)]">
+            Flats registered in this building.
+          </DialogDescription>
+        </DialogHeader>
+
+        {focusedFlat && (
+          <p className="rounded-md bg-[#f5f1ee] px-3 py-2 text-sm font-semibold text-[#55311c]">
+            Selected: {formatFlatLabel(focusedFlat.numero, focusedFlat.label)}
+          </p>
+        )}
+
+        {flats.length > 0 ? (
+          <ul className="max-h-[55vh] space-y-2 overflow-y-auto pr-1">
+            {flats.map((flat) => {
+              const isFocused = String(flat.id) === String(focusFlatId)
+              return (
+                <li
+                  key={flat.id}
+                  className={`flex items-center justify-between gap-4 rounded-lg border p-3 ${
+                    isFocused
+                      ? "border-[#8c7569] bg-[#f5f1ee]"
+                      : "border-[#e5e0dc] bg-white"
+                  }`}
+                >
+                  <span className="font-semibold text-[#55311c]">
+                    {formatFlatLabel(flat.numero, flat.label)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteFlat(flat)}
+                    disabled={deleteFlatMutation.isPending}
+                    className="inline-flex shrink-0 items-center gap-1 rounded-md border border-red-200 px-3 py-1.5 text-sm font-semibold text-red-700 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <Trash2 className="h-4 w-4" aria-hidden="true" />
+                    {deleteFlatMutation.isPending ? "Deleting..." : "Delete"}
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        ) : (
+          <p className="rounded-lg bg-[#f5f1ee] p-4 text-sm text-[#55311c]">
+            No flats registered in this building.
+          </p>
+        )}
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -26576,6 +26846,7 @@ function getDefaultResidentFormData() {
     email: "",
     tenant_nome_2: "",
     tenant_email_2: "",
+    tenant_mobile_2: "",
     mobile: "",
     cargo: 0,
     receives_flat_reading_sms: false,
@@ -26764,6 +27035,7 @@ function AddResidentForm({
             email: morador.email || "",
             tenant_nome_2: morador.tenant_nome_2 || "",
             tenant_email_2: morador.tenant_email_2 || "",
+            tenant_mobile_2: morador.tenant_mobile_2 || "",
             mobile: morador.mobile?.toString() || "",
             cargo: morador.cargo,
             receives_flat_reading_sms: morador.receives_flat_reading_sms,
@@ -26863,6 +27135,7 @@ function AddResidentForm({
           ? {
               tenant_nome_2: formData.tenant_nome_2 || null,
               tenant_email_2: formData.tenant_email_2 || null,
+              tenant_mobile_2: formData.tenant_mobile_2 || null,
             }
           : {}),
         mobile: formData.mobile || "",
@@ -26988,100 +27261,189 @@ function AddResidentForm({
 
         <form onSubmit={handleSubmit}>
           <div className="grid gap-6 md:grid-cols-2">
-            <div>
-              <label
-                className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
-                htmlFor="resident-nome"
-              >
-                Name *
-              </label>
-              <input
-                type="text"
-                id="resident-nome"
-                name="nome"
-                value={formData.nome}
-                onChange={handleInputChange}
-                required
-                className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
-                placeholder="Resident name"
-              />
-            </div>
+            {shouldShowTenantSecondaryFields ? (
+              <>
+                <fieldset className="rounded-lg border-2 border-[#ddd] bg-[#faf8f6] p-4 md:col-span-2">
+                  <legend className="px-2 font-['Nunito',sans-serif] text-sm font-bold text-[#55311c]">
+                    Tenant 1
+                  </legend>
+                  <div className="grid gap-6 md:grid-cols-2">
+                    <div>
+                      <label
+                        className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                        htmlFor="resident-tenant-nome-1"
+                      >
+                        Name *
+                      </label>
+                      <input
+                        type="text"
+                        id="resident-tenant-nome-1"
+                        name="nome"
+                        value={formData.nome}
+                        onChange={handleInputChange}
+                        required
+                        className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+                        placeholder="First tenant name"
+                      />
+                    </div>
 
-            <div>
-              <label
-                className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
-                htmlFor="resident-email"
-              >
-                Email
-              </label>
-              <input
-                type="email"
-                id="resident-email"
-                name="email"
-                value={formData.email}
-                onChange={handleInputChange}
-                className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
-                placeholder="email@example.com"
-              />
-            </div>
+                    <div>
+                      <label
+                        className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                        htmlFor="resident-tenant-email-1"
+                      >
+                        Email
+                      </label>
+                      <input
+                        type="email"
+                        id="resident-tenant-email-1"
+                        name="email"
+                        value={formData.email}
+                        onChange={handleInputChange}
+                        className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+                        placeholder="tenant@example.com"
+                      />
+                    </div>
 
-            {shouldShowTenantSecondaryFields && (
+                    <div>
+                      <label
+                        className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                        htmlFor="resident-tenant-mobile-1"
+                      >
+                        Phone
+                      </label>
+                      <input
+                        type="tel"
+                        id="resident-tenant-mobile-1"
+                        name="mobile"
+                        value={formData.mobile}
+                        onChange={handleInputChange}
+                        className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+                        placeholder="Phone number"
+                      />
+                    </div>
+                  </div>
+                </fieldset>
+
+                <fieldset className="rounded-lg border-2 border-[#ddd] bg-[#faf8f6] p-4 md:col-span-2">
+                  <legend className="px-2 font-['Nunito',sans-serif] text-sm font-bold text-[#55311c]">
+                    Tenant 2
+                  </legend>
+                  <div className="grid gap-6 md:grid-cols-2">
+                    <div>
+                      <label
+                        className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                        htmlFor="resident-tenant-nome-2"
+                      >
+                        Name
+                      </label>
+                      <input
+                        type="text"
+                        id="resident-tenant-nome-2"
+                        name="tenant_nome_2"
+                        value={formData.tenant_nome_2}
+                        onChange={handleInputChange}
+                        className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+                        placeholder="Second tenant name"
+                      />
+                    </div>
+
+                    <div>
+                      <label
+                        className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                        htmlFor="resident-tenant-email-2"
+                      >
+                        Email
+                      </label>
+                      <input
+                        type="email"
+                        id="resident-tenant-email-2"
+                        name="tenant_email_2"
+                        value={formData.tenant_email_2}
+                        onChange={handleInputChange}
+                        className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+                        placeholder="second.tenant@example.com"
+                      />
+                    </div>
+
+                    <div>
+                      <label
+                        className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                        htmlFor="resident-tenant-mobile-2"
+                      >
+                        Phone
+                      </label>
+                      <input
+                        type="tel"
+                        id="resident-tenant-mobile-2"
+                        name="tenant_mobile_2"
+                        value={formData.tenant_mobile_2}
+                        onChange={handleInputChange}
+                        className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+                        placeholder="Phone number"
+                      />
+                    </div>
+                  </div>
+                </fieldset>
+              </>
+            ) : (
               <>
                 <div>
                   <label
                     className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
-                    htmlFor="resident-tenant-nome-2"
+                    htmlFor="resident-nome"
                   >
-                    Tenant Name 2
+                    Name *
                   </label>
                   <input
                     type="text"
-                    id="resident-tenant-nome-2"
-                    name="tenant_nome_2"
-                    value={formData.tenant_nome_2}
+                    id="resident-nome"
+                    name="nome"
+                    value={formData.nome}
                     onChange={handleInputChange}
+                    required
                     className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
-                    placeholder="Second tenant name"
+                    placeholder="Resident name"
                   />
                 </div>
 
                 <div>
                   <label
                     className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
-                    htmlFor="resident-tenant-email-2"
+                    htmlFor="resident-email"
                   >
-                    Tenant Email 2
+                    Email
                   </label>
                   <input
                     type="email"
-                    id="resident-tenant-email-2"
-                    name="tenant_email_2"
-                    value={formData.tenant_email_2}
+                    id="resident-email"
+                    name="email"
+                    value={formData.email}
                     onChange={handleInputChange}
                     className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
-                    placeholder="second.tenant@example.com"
+                    placeholder="email@example.com"
+                  />
+                </div>
+
+                <div>
+                  <label
+                    className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                    htmlFor="resident-mobile"
+                  >
+                    Phone
+                  </label>
+                  <input
+                    type="tel"
+                    id="resident-mobile"
+                    name="mobile"
+                    value={formData.mobile}
+                    onChange={handleInputChange}
+                    className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+                    placeholder="Phone number"
                   />
                 </div>
               </>
             )}
-
-            <div>
-              <label
-                className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
-                htmlFor="resident-mobile"
-              >
-                Phone
-              </label>
-              <input
-                type="tel"
-                id="resident-mobile"
-                name="mobile"
-                value={formData.mobile}
-                onChange={handleInputChange}
-                className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
-                placeholder="Phone number"
-              />
-            </div>
 
             <div className="flex items-center gap-3 rounded-lg border-2 border-[#ddd] bg-[#faf8f6] px-4 py-3 md:col-span-2">
               <input

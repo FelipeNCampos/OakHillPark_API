@@ -91,7 +91,7 @@ class CashFlowService:
         period_total = Decimal("0")
         items: list[CashFlowReportRow] = []
 
-        for dynamic_payment_number, record in enumerate(records, start=1):
+        for record in records:
             amount = Decimal(str(record.amount))
             period_total += amount
             running_balance += amount
@@ -104,7 +104,10 @@ class CashFlowService:
             items.append(
                 CashFlowReportRow(
                     id=record.id,
-                    payment_number=dynamic_payment_number,
+                    # The invoice label must match the number assigned to the
+                    # record in the cashflow table, never the media filename
+                    # or its position in this report.
+                    payment_number=record.payment_number,
                     has_invoice=record.has_invoice,
                     invoice_media_name=record.invoice_media_name,
                     record_date=record.record_date,

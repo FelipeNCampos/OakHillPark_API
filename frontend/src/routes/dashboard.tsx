@@ -909,17 +909,49 @@ type FlatResidentsPreview = {
 
 type FlatResidentPreview = Pick<
   Morador,
-  "id" | "cargo" | "flat_id" | "nome" | "mobile"
+  | "id"
+  | "cargo"
+  | "flat_id"
+  | "nome"
+  | "email"
+  | "mobile"
+  | "tenant_nome_2"
+  | "tenant_email_2"
+  | "tenant_mobile_2"
 >
 
-type ResidentDetailSlotKey = "owner_1" | "owner_2" | "tenant" | "agent"
+type ResidentDetailSlotKey =
+  | "owner_1"
+  | "owner_2"
+  | "tenant_1"
+  | "tenant_2"
+  | "agent"
 
 type FlatResidentPreviewEntry = {
   key: ResidentDetailSlotKey
   label: string
   cargo: number
   resident?: FlatResidentPreview
+  displayName?: string | null
+  displayMobile?: string | number | null
+  isOccupied?: boolean
 }
+
+const residentDetailSlotKeys: ResidentDetailSlotKey[] = [
+  "owner_1",
+  "owner_2",
+  "tenant_1",
+  "tenant_2",
+  "agent",
+]
+
+const getFlatResidentPreviewForSlot = (
+  flatResidents: FlatResidentsPreview | undefined,
+  slot: ResidentDetailSlotKey,
+) =>
+  flatResidents?.[
+    slot === "tenant_1" || slot === "tenant_2" ? "tenant" : slot
+  ]
 
 type ResidentEditContext = {
   editTitle: string
@@ -26879,16 +26911,13 @@ function AddResidentForm({
     useState<FlatResidentsPreview>(editContext?.flatResidents ?? {})
   const [activeSlotKey, setActiveSlotKey] =
     useState<ResidentDetailSlotKey | null>(() => {
-      const slots: ResidentDetailSlotKey[] = [
-        "owner_1",
-        "owner_2",
-        "tenant",
-        "agent",
-      ]
       const residentSlot =
-        slots.find(
+        residentDetailSlotKeys.find(
           (slot) =>
-            String(editContext?.flatResidents?.[slot]?.id) ===
+            String(
+              getFlatResidentPreviewForSlot(editContext?.flatResidents, slot)
+                ?.id,
+            ) ===
             String(editingId),
         ) ?? null
       return residentSlot ?? (editContext?.flatId ? "owner_1" : null)
@@ -26910,10 +26939,26 @@ function AddResidentForm({
           resident: flatResidentsPreview.owner_2,
         },
         {
-          key: "tenant",
-          label: "Tenant",
+          key: "tenant_1",
+          label: "Tenant 1",
           cargo: 2,
           resident: flatResidentsPreview.tenant,
+          displayName: flatResidentsPreview.tenant?.nome,
+          displayMobile: flatResidentsPreview.tenant?.mobile,
+          isOccupied: Boolean(flatResidentsPreview.tenant?.nome?.trim()),
+        },
+        {
+          key: "tenant_2",
+          label: "Tenant 2",
+          cargo: 2,
+          resident: flatResidentsPreview.tenant,
+          displayName: flatResidentsPreview.tenant?.tenant_nome_2,
+          displayMobile: flatResidentsPreview.tenant?.tenant_mobile_2,
+          isOccupied: Boolean(
+            flatResidentsPreview.tenant?.tenant_nome_2?.trim() ||
+              flatResidentsPreview.tenant?.tenant_email_2?.trim() ||
+              flatResidentsPreview.tenant?.tenant_mobile_2?.trim(),
+          ),
         },
         {
           key: "agent",
@@ -26931,11 +26976,14 @@ function AddResidentForm({
     activeSlot?.resident ?? null
   const activeResidentRole =
     activePreviewResident?.cargo ?? activeSlot?.cargo ?? formData.cargo
+  const isTenantResident = activeResidentRole === 2
+  const isTenantDetailTab =
+    activeSlotKey === "tenant_1" || activeSlotKey === "tenant_2"
+  const isSecondaryTenantTab = activeSlotKey === "tenant_2"
   const shouldShowCarFields = activeResidentRole === 0
-  const shouldShowTenantSecondaryFields = activeResidentRole === 2
   const isFixedResidentDetails = Boolean(activeSlot && fixedFlatId)
   const activeEditTitle = activeSlot
-    ? `${activePreviewResident ? "Edit" : "Create"} ${activeSlot.label}`
+    ? `${activeSlot.isOccupied ?? Boolean(activePreviewResident) ? "Edit" : "Create"} ${activeSlot.label}`
     : activePreviewResident
       ? `Edit ${getResidentRoleEditToken(activePreviewResident.cargo)}`
       : (editContext?.editTitle ?? "Edit resident")
@@ -26947,16 +26995,12 @@ function AddResidentForm({
   })
 
   useEffect(() => {
-    const slots: ResidentDetailSlotKey[] = [
-      "owner_1",
-      "owner_2",
-      "tenant",
-      "agent",
-    ]
     const residentSlot =
-      slots.find(
+      residentDetailSlotKeys.find(
         (slot) =>
-          String(editContext?.flatResidents?.[slot]?.id) === String(editingId),
+          String(
+            getFlatResidentPreviewForSlot(editContext?.flatResidents, slot)?.id,
+          ) === String(editingId),
       ) ?? null
     const selectedSlot = residentSlot ?? (fixedFlatId ? "owner_1" : null)
 
@@ -27131,7 +27175,7 @@ function AddResidentForm({
       const payload = {
         nome: formData.nome,
         email: formData.email || null,
-        ...(shouldShowTenantSecondaryFields
+        ...(isTenantResident
           ? {
               tenant_nome_2: formData.tenant_nome_2 || null,
               tenant_email_2: formData.tenant_email_2 || null,
@@ -27181,11 +27225,19 @@ function AddResidentForm({
           cargo: savedResident.cargo,
           flat_id: savedResident.flat_id,
           nome: savedResident.nome,
+          email: savedResident.email,
           mobile: savedResident.mobile,
+          tenant_nome_2: savedResident.tenant_nome_2,
+          tenant_email_2: savedResident.tenant_email_2,
+          tenant_mobile_2: savedResident.tenant_mobile_2,
         }
         setFlatResidentsPreview((current) => ({
           ...current,
-          [activeSlot.key]: residentPreview,
+          [
+            activeSlot.key === "tenant_1" || activeSlot.key === "tenant_2"
+              ? "tenant"
+              : activeSlot.key
+          ]: residentPreview,
         }))
         setActiveEditingId(savedResident.id)
         return
@@ -27226,7 +27278,7 @@ function AddResidentForm({
             <p className="mt-1 text-xs text-[rgba(85,49,28,0.75)]">
               Select a role to edit it or create its resident record.
             </p>
-            <div className="mt-3 grid gap-2 text-sm text-[#55311c] sm:grid-cols-4">
+            <div className="mt-3 grid gap-2 text-sm text-[#55311c] sm:grid-cols-5">
               {flatResidentEntries.map((entry) => {
                 const isActive = entry.key === activeSlotKey
                 return (
@@ -27247,10 +27299,18 @@ function AddResidentForm({
                       {entry.label}
                     </div>
                     <div className="font-semibold">
-                      {entry.resident?.nome || "No resident"}
+                      {entry.key === "tenant_2"
+                        ? entry.displayName || "No resident"
+                        : entry.displayName ||
+                          entry.resident?.nome ||
+                          "No resident"}
                     </div>
                     <div className="text-xs opacity-80">
-                      {entry.resident?.mobile || "Empty fields"}
+                      {entry.key === "tenant_2"
+                        ? entry.displayMobile || "Empty fields"
+                        : entry.displayMobile ||
+                          entry.resident?.mobile ||
+                          "Empty fields"}
                     </div>
                   </button>
                 )
@@ -27261,7 +27321,7 @@ function AddResidentForm({
 
         <form onSubmit={handleSubmit}>
           <div className="grid gap-6 md:grid-cols-2">
-            {shouldShowTenantSecondaryFields ? (
+            {isTenantResident && !isTenantDetailTab ? (
               <>
                 <fieldset className="rounded-lg border-2 border-[#ddd] bg-[#faf8f6] p-4 md:col-span-2">
                   <legend className="px-2 font-['Nunito',sans-serif] text-sm font-bold text-[#55311c]">
@@ -27386,6 +27446,114 @@ function AddResidentForm({
                   </div>
                 </fieldset>
               </>
+            ) : isTenantResident ? (
+              <fieldset className="rounded-lg border-2 border-[#ddd] bg-[#faf8f6] p-4 md:col-span-2">
+                <legend className="px-2 font-['Nunito',sans-serif] text-sm font-bold text-[#55311c]">
+                  {isSecondaryTenantTab ? "Tenant 2" : "Tenant 1"}
+                </legend>
+                <div className="grid gap-6 md:grid-cols-2">
+                  <div>
+                    <label
+                      className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                      htmlFor={
+                        isSecondaryTenantTab
+                          ? "resident-tenant-nome-2"
+                          : "resident-tenant-nome-1"
+                      }
+                    >
+                      Name {isSecondaryTenantTab ? "" : "*"}
+                    </label>
+                    <input
+                      type="text"
+                      id={
+                        isSecondaryTenantTab
+                          ? "resident-tenant-nome-2"
+                          : "resident-tenant-nome-1"
+                      }
+                      name={isSecondaryTenantTab ? "tenant_nome_2" : "nome"}
+                      value={
+                        isSecondaryTenantTab
+                          ? formData.tenant_nome_2
+                          : formData.nome
+                      }
+                      onChange={handleInputChange}
+                      required={!isSecondaryTenantTab}
+                      className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+                      placeholder={
+                        isSecondaryTenantTab
+                          ? "Second tenant name"
+                          : "First tenant name"
+                      }
+                    />
+                  </div>
+
+                  <div>
+                    <label
+                      className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                      htmlFor={
+                        isSecondaryTenantTab
+                          ? "resident-tenant-email-2"
+                          : "resident-tenant-email-1"
+                      }
+                    >
+                      Email
+                    </label>
+                    <input
+                      type="email"
+                      id={
+                        isSecondaryTenantTab
+                          ? "resident-tenant-email-2"
+                          : "resident-tenant-email-1"
+                      }
+                      name={isSecondaryTenantTab ? "tenant_email_2" : "email"}
+                      value={
+                        isSecondaryTenantTab
+                          ? formData.tenant_email_2
+                          : formData.email
+                      }
+                      onChange={handleInputChange}
+                      className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+                      placeholder={
+                        isSecondaryTenantTab
+                          ? "second.tenant@example.com"
+                          : "tenant@example.com"
+                      }
+                    />
+                  </div>
+
+                  <div>
+                    <label
+                      className="block mb-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c]"
+                      htmlFor={
+                        isSecondaryTenantTab
+                          ? "resident-tenant-mobile-2"
+                          : "resident-tenant-mobile-1"
+                      }
+                    >
+                      Phone
+                    </label>
+                    <input
+                      type="tel"
+                      id={
+                        isSecondaryTenantTab
+                          ? "resident-tenant-mobile-2"
+                          : "resident-tenant-mobile-1"
+                      }
+                      name={
+                        isSecondaryTenantTab ? "tenant_mobile_2" : "mobile"
+                      }
+                      value={
+                        isSecondaryTenantTab
+                          ? formData.tenant_mobile_2
+                          : formData.mobile
+                      }
+                      onChange={handleInputChange}
+                      className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
+                      placeholder="Phone number"
+                    />
+                  </div>
+                </div>
+              </fieldset>
             ) : (
               <>
                 <div>

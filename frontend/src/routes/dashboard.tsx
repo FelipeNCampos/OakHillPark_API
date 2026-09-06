@@ -25939,6 +25939,42 @@ function ResidentsContent() {
     )
   }
 
+  const renderTenantContacts = (morador?: Morador) => {
+    const tenants = [
+      {
+        label: "Tenant 1",
+        name: morador?.nome,
+        phone: morador?.mobile?.toString(),
+      },
+      {
+        label: "Tenant 2",
+        name: morador?.tenant_nome_2,
+        phone: morador?.tenant_mobile_2?.toString(),
+      },
+    ]
+
+    return (
+      <div className="grid grid-rows-2 gap-1">
+        {tenants.map((tenant) => (
+          <div
+            key={tenant.label}
+            className="grid min-h-12 grid-cols-[4.5rem_minmax(0,1fr)] grid-rows-2 rounded-md border border-[#d9cec7] bg-[#faf8f6] px-2 py-1 text-[10px] leading-tight"
+          >
+            <span className="row-span-2 self-center font-semibold text-[#55311c]">
+              {tenant.label}
+            </span>
+            <span className="min-w-0 break-words font-semibold text-[#55311c]">
+              {tenant.name?.trim() || "No resident"}
+            </span>
+            <span className="min-w-0 break-words text-[rgba(85,49,28,0.72)]">
+              {tenant.phone?.trim() || "-"}
+            </span>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
   const renderFlatPlates = (row: FlatResidentRow) => {
     const plates = [row.car1, row.car2, row.car3].filter(
       (plate): plate is string => Boolean(plate?.trim()),
@@ -26177,11 +26213,11 @@ function ResidentsContent() {
                         <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
                           Phone 2
                         </th>
-                        <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
+                        <th
+                          colSpan={2}
+                          className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white"
+                        >
                           Tenant
-                        </th>
-                        <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
-                          Tenant phones
                         </th>
                         <th className="border border-gray-400 px-4 py-3 text-left font-['Nunito',sans-serif] font-semibold text-white">
                           Agent
@@ -26275,12 +26311,12 @@ function ResidentsContent() {
                               {renderTwilioEmailToggle(row.owner_2)}
                             </div>
                           </td>
-                          <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
-                            {renderResidentIdentity(row.tenant, "No resident")}
-                          </td>
-                          <td className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]">
+                          <td
+                            colSpan={2}
+                            className="border border-gray-400 px-4 py-3 font-['Nunito',sans-serif] text-[#55311c]"
+                          >
+                            {renderTenantContacts(row.tenant)}
                             <div className="flex flex-col">
-                              {renderResidentPhones(row.tenant)}
                               {renderReadingSmsToggle(row.tenant)}
                               {renderTwilioSmsToggle(row.tenant)}
                               {renderTwilioEmailToggle(row.tenant)}

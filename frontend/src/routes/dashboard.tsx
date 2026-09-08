@@ -3201,6 +3201,7 @@ function CashFlowContent() {
     () => getMonthDateRange(getCurrentMonthInputValue()).dateTo,
   )
   const [search, setSearch] = useState("")
+  const [isAllSearchEnabled, setIsAllSearchEnabled] = useState(false)
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [form, setForm] = useState<CashFlowFormState>(getEmptyCashFlowForm)
   const [formError, setFormError] = useState<string | null>(null)
@@ -3265,6 +3266,9 @@ function CashFlowContent() {
   const dateFrom = customPeriod?.dateFrom ?? selectedMonthRange.dateFrom
   const dateTo = customPeriod?.dateTo ?? selectedMonthRange.dateTo
   const deferredSearch = useDeferredValue(search.trim())
+  const isSearchingAllRecords = isAllSearchEnabled && Boolean(deferredSearch)
+  const searchDateFrom = isSearchingAllRecords ? undefined : dateFrom
+  const searchDateTo = isSearchingAllRecords ? undefined : dateTo
   const labelClass =
     "text-[11px] font-extrabold uppercase tracking-[0.08em] text-[rgba(85,49,28,0.72)]"
   const inputClass =
@@ -3304,13 +3308,19 @@ function CashFlowContent() {
   }, [])
 
   const recordsQuery = useQuery<CashFlowRecordsResponse>({
-    queryKey: ["cash-flow", dateFrom, dateTo, deferredSearch],
+    queryKey: [
+      "cash-flow",
+      searchDateFrom,
+      searchDateTo,
+      deferredSearch,
+      isSearchingAllRecords,
+    ],
     queryFn: () =>
       apiCall("/api/v1/cash-flow/", {
         skip: 0,
         limit: 500,
-        date_from: dateFrom,
-        date_to: dateTo,
+        date_from: searchDateFrom,
+        date_to: searchDateTo,
         search: deferredSearch || undefined,
       }),
     placeholderData: keepPreviousData,
@@ -3323,12 +3333,12 @@ function CashFlowContent() {
   })
 
   const cumulativeBalanceQuery = useQuery<CashFlowRecordsResponse>({
-    queryKey: ["cash-flow-summary", dateFrom, dateTo, deferredSearch],
+    queryKey: ["cash-flow-summary", searchDateTo, deferredSearch],
     queryFn: () =>
       apiCall("/api/v1/cash-flow/", {
         skip: 0,
         limit: 1,
-        date_to: dateTo,
+        date_to: searchDateTo,
         search: deferredSearch || undefined,
       }),
     placeholderData: keepPreviousData,
@@ -4090,18 +4100,31 @@ function CashFlowContent() {
               }}
             />
           </div>
-          <label className="grid min-w-0 gap-2 sm:flex-1 sm:min-w-72">
+          <div className="grid min-w-0 gap-2 sm:flex-1 sm:min-w-72">
             <span className={`${labelClass} invisible`}>Search</span>
-            <span className="relative block">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#8c7569]" />
-              <input
-                className={`${inputClass} pl-9`}
-                placeholder="Search by Supplier or Comments"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-              />
+            <span className="flex items-center gap-3">
+              <span className="relative block min-w-0 flex-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#8c7569]" />
+                <input
+                  aria-label="Search cash flow"
+                  className={`${inputClass} pl-9`}
+                  placeholder="Search by Supplier or Comments"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                />
+              </span>
+              <label className="inline-flex shrink-0 items-center gap-2 text-sm font-bold text-[#55311c]">
+                <input
+                  aria-label="Search all records"
+                  checked={isAllSearchEnabled}
+                  className="h-4 w-4 rounded border-[#d9d0ca] accent-[#8c7569]"
+                  type="checkbox"
+                  onChange={(event) => setIsAllSearchEnabled(event.target.checked)}
+                />
+                All
+              </label>
             </span>
-          </label>
+          </div>
         </div>
       </section>
 
@@ -4176,7 +4199,11 @@ function CashFlowContent() {
           <div className="grid overflow-hidden rounded-xl border border-[#e5e0dc] bg-[#faf8f6] sm:grid-cols-2">
             <div className="p-4 text-center sm:border-r sm:border-[#e5e0dc]">
               <p className={labelClass}>
-                {customPeriod ? "Opening balance" : "Last Month"}
+                {isSearchingAllRecords
+                  ? "Opening balance"
+                  : customPeriod
+                    ? "Opening balance"
+                    : "Last Month"}
               </p>
               <p className="mt-2 text-2xl font-extrabold text-[#55311c]">
                 {openingBalance}
@@ -4184,7 +4211,11 @@ function CashFlowContent() {
             </div>
             <div className="p-4 text-center">
               <p className={labelClass}>
-                {customPeriod ? "This period" : "This Month"}
+                {isSearchingAllRecords
+                  ? "Search total"
+                  : customPeriod
+                    ? "This period"
+                    : "This Month"}
               </p>
               <p
                 className={`mt-2 text-2xl font-extrabold ${
@@ -4484,7 +4515,11 @@ function CashFlowContent() {
                     className="px-4 py-8 text-sm font-semibold text-black/60"
                     colSpan={tableColumnCount}
                   >
-                    No records for this month.
+                    {isSearchingAllRecords
+                      ? "No matching records."
+                      : customPeriod
+                        ? "No records for this period."
+                        : "No records for this month."}
                   </td>
                 </tr>
               )}

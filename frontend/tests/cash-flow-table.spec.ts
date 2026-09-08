@@ -111,7 +111,7 @@ test("cash flow rows keep the table compact and open the complete editor on row 
   await expect(editor.getByLabel("Date")).toHaveValue("2026-08-05")
   await expect(editor.getByLabel("Value")).toHaveValue("-1234.56")
   await expect(editor.getByLabel("Supplier")).toHaveValue(record.supplier)
-  await expect(editor.getByLabel("Comments")).toHaveValue(record.description)
+  await expect(editor.getByLabel("Notes")).toHaveValue(record.description)
   await expect(editor.getByLabel("Location")).toHaveValue(record.location)
   await expect(editor.getByLabel("Reason")).toHaveValue(record.reason)
   await expect(editor.getByText("Invoice media", { exact: true })).toBeVisible()

@@ -5196,7 +5196,7 @@ function CashFlowContent() {
                 </label>
 
                 <label className="grid gap-2">
-                  <span className={labelClass}>Comments</span>
+                  <span className={labelClass}>Notes</span>
                   <textarea
                     className="min-h-28 w-full resize-y rounded-lg border border-[#d9d0ca] bg-white px-3.5 py-3 text-sm font-semibold text-[#55311c] outline-none transition focus:ring-2 focus:ring-[#8c7569]"
                     maxLength={500}

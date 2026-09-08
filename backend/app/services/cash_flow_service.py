@@ -28,6 +28,7 @@ DATA_URL_PATTERN = re.compile(
 )
 NEGATIVE_MONEY_COLOR = colors.HexColor("#cf0e0e")
 POSITIVE_MONEY_COLOR = colors.HexColor("#217a4b")
+INVOICE_BATCH_SIZE = 50
 
 
 @dataclass
@@ -48,6 +49,7 @@ class CashFlowReportListResponse:
     month: str
     monthly_total: Decimal
     items: list[CashFlowReportRow]
+    opening_balance: Decimal = Decimal("0")
 
 
 class CashFlowService:
@@ -71,7 +73,18 @@ class CashFlowService:
         search: str | None = None,
     ) -> CashFlowReportListResponse:
         records = self.session.exec(
-            select(CashFlowRecord)
+            # Invoice payloads can be large. Load only summary columns here,
+            # then fetch the matching attachments once, in bounded batches.
+            select(
+                CashFlowRecord.id,
+                CashFlowRecord.payment_number,
+                CashFlowRecord.has_invoice,
+                CashFlowRecord.invoice_media_name,
+                CashFlowRecord.record_date,
+                CashFlowRecord.amount,
+                CashFlowRecord.supplier,
+                CashFlowRecord.description,
+            )
             .where(
                 CashFlowRecord.condominio_id == self.condominio_id,
                 CashFlowRecord.record_date >= start_date,
@@ -122,6 +135,7 @@ class CashFlowService:
             month=period_label,
             monthly_total=period_total,
             items=items,
+            opening_balance=opening_balance,
         )
 
     def get_balance_before(self, start_date: date) -> Decimal:
@@ -174,7 +188,7 @@ class CashFlowService:
             end_month=end_month,
         )
         listing = self.list_range(period_label, period_start, period_end, search)
-        opening_balance = self.get_balance_before(period_start)
+        opening_balance = listing.opening_balance
         closing_balance = opening_balance + listing.monthly_total
         report_data = self._build_report_pdf(
             listing,
@@ -203,7 +217,6 @@ class CashFlowService:
         search: str | None,
         include_invoice_table: bool,
     ) -> bytes:
-        writer = PdfWriter()
         summary_pdf = self._build_report_summary_pdf(
             listing,
             opening_balance,
@@ -212,26 +225,42 @@ class CashFlowService:
             search,
             include_invoice_table,
         )
+        invoice_items = [item for item in listing.items if item.has_invoice]
+        if not invoice_items:
+            return summary_pdf
+
+        writer = PdfWriter()
         for page in PdfReader(BytesIO(summary_pdf)).pages:
             writer.add_page(page)
 
-        for item in listing.items:
-            record = self.session.get(CashFlowRecord, item.id)
-            if not record or not record.has_invoice or not record.invoice_media_data:
-                continue
-
-            try:
-                mime_type, media_bytes = self._decode_media_data(record.invoice_media_data)
-                self._append_media_pages(
-                    writer,
-                    media_bytes,
-                    mime_type,
-                    invoice_label=f"Invoice #{item.payment_number}",
-                )
-            except HTTPException:
-                fallback_pdf = self._placeholder_pdf_page("Unable to render invoice media")
-                for page in PdfReader(BytesIO(fallback_pdf)).pages:
-                    writer.add_page(page)
+        for offset in range(0, len(invoice_items), INVOICE_BATCH_SIZE):
+            batch = invoice_items[offset : offset + INVOICE_BATCH_SIZE]
+            media_by_id = dict(
+                self.session.exec(
+                    select(CashFlowRecord.id, CashFlowRecord.invoice_media_data).where(
+                        CashFlowRecord.condominio_id == self.condominio_id,
+                        CashFlowRecord.id.in_([item.id for item in batch]),
+                        CashFlowRecord.has_invoice == True,  # noqa: E712
+                    )
+                ).all()
+            )
+            # SQL IN does not preserve order; use the listing's payment order.
+            for item in batch:
+                media_data = media_by_id.pop(item.id, None)
+                if not media_data:
+                    continue
+                try:
+                    mime_type, media_bytes = self._decode_media_data(media_data)
+                    self._append_media_pages(
+                        writer,
+                        media_bytes,
+                        mime_type,
+                        invoice_label=f"Invoice #{item.payment_number}",
+                    )
+                except HTTPException:
+                    fallback_pdf = self._placeholder_pdf_page("Unable to render invoice media")
+                    for page in PdfReader(BytesIO(fallback_pdf)).pages:
+                        writer.add_page(page)
 
         output = BytesIO()
         writer.write(output)

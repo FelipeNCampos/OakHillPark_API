@@ -1,13 +1,22 @@
+import base64
 import uuid
+from collections.abc import Iterator
 from datetime import date
 from decimal import Decimal
+from io import BytesIO
+from typing import Any
 from unittest.mock import patch
 
 import pytest
+from pypdf import PdfReader
 from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph
+from sqlalchemy import event
+from sqlmodel import Session, create_engine
 
+from app.models import CashFlowRecord
 from app.services.cash_flow_service import (
+    INVOICE_BATCH_SIZE,
     CashFlowReportListResponse,
     CashFlowReportRow,
     CashFlowService,
@@ -17,6 +26,129 @@ from app.services.cash_flow_service import (
 @pytest.fixture(scope="session")
 def db() -> None:
     """Keep pure PDF layout tests independent from the database fixture."""
+
+
+@pytest.fixture
+def report_session() -> Iterator[Session]:
+    engine = create_engine("sqlite://")
+    CashFlowRecord.__table__.create(engine)
+    with Session(engine) as session:
+        yield session
+    engine.dispose()
+
+
+def _record(condominio_id: uuid.UUID, number: int, **values: Any) -> CashFlowRecord:
+    return CashFlowRecord(
+        condominio_id=condominio_id,
+        created_by_user_id=uuid.uuid4(),
+        payment_number=number,
+        **{"record_date": date(2026, 3, 12), "amount": -1, **values},
+    )
+
+
+@pytest.mark.parametrize("invoice_count", [0, 1, INVOICE_BATCH_SIZE + 1])
+def test_report_batches_queries_and_preserves_invoice_order(
+    report_session: Session, invoice_count: int
+) -> None:
+    condominio_id = uuid.uuid4()
+    invoice_pdf = CashFlowService._placeholder_pdf_page("Original invoice")
+    media = "data:application/pdf;base64," + base64.b64encode(invoice_pdf).decode()
+    report_session.add_all(
+        [
+            _record(condominio_id, number, has_invoice=True, invoice_media_data=media)
+            for number in reversed(range(1, invoice_count + 1))
+        ]
+        + [_record(condominio_id, invoice_count + 1)]
+    )
+    report_session.commit()
+    statements: list[str] = []
+
+    def capture_sql(_conn: Any, _cursor: Any, statement: str, *_args: Any) -> None:
+        statements.append(statement)
+
+    event.listen(report_session.get_bind(), "before_cursor_execute", capture_sql)
+    _, data = CashFlowService(report_session, condominio_id).build_range_report_pdf(
+        "2026-03", "2026-03", include_invoice_table=True
+    )
+
+    assert (
+        len(statements)
+        == 2 + (invoice_count + INVOICE_BATCH_SIZE - 1) // INVOICE_BATCH_SIZE
+    )
+    assert "invoice_media_data" not in statements[0]
+    invoice_pages = [
+        page.extract_text()
+        for page in PdfReader(BytesIO(data)).pages
+        if "Original invoice" in page.extract_text()
+    ]
+    assert len(invoice_pages) == invoice_count
+    for number, text in enumerate(invoice_pages, start=1):
+        assert f"Invoice #{number}\n" in text
+
+
+def test_report_search_keeps_balances_and_excludes_other_invoices(
+    report_session: Session,
+) -> None:
+    condominio_id = uuid.uuid4()
+    report_session.add_all(
+        [
+            _record(condominio_id, 1, record_date=date(2026, 2, 1), amount=100),
+            _record(
+                condominio_id,
+                1,
+                amount=-10,
+                supplier="Hidden",
+                has_invoice=True,
+                invoice_media_data="invalid excluded attachment",
+            ),
+            _record(
+                condominio_id,
+                2,
+                amount=-20,
+                supplier="Selected",
+                has_invoice=True,
+                invoice_media_data="invalid included attachment",
+            ),
+            _record(
+                uuid.uuid4(),
+                1,
+                amount=9000,
+                supplier="Selected",
+                has_invoice=True,
+                invoice_media_data="invalid other tenant attachment",
+            ),
+            _record(condominio_id, 1, record_date=date(2026, 4, 1), amount=500),
+        ]
+    )
+    report_session.commit()
+    service = CashFlowService(report_session, condominio_id)
+    listing = service.list_month("2026-03", "selected")
+    assert listing.opening_balance == Decimal("100")
+    assert listing.monthly_total == Decimal("-30")
+    assert len(listing.items) == 1
+    assert listing.items[0].balance == Decimal("70")
+
+    _, data = service.build_range_report_pdf("2026-03", "2026-03", "selected")
+    pages = PdfReader(BytesIO(data)).pages
+    assert len(pages) == 2
+    assert "Selected" in pages[0].extract_text()
+    assert "Hidden" not in pages[0].extract_text()
+    assert "70.00" in pages[0].extract_text()
+    assert "Unable to render invoice media" in pages[1].extract_text()
+
+
+def test_report_empty_month_carries_opening_balance(report_session: Session) -> None:
+    condominio_id = uuid.uuid4()
+    report_session.add(
+        _record(condominio_id, 1, record_date=date(2026, 2, 1), amount=1000)
+    )
+    report_session.commit()
+    _, data = CashFlowService(report_session, condominio_id).build_range_report_pdf(
+        "2026-03", "2026-03"
+    )
+    text = PdfReader(BytesIO(data)).pages[0].extract_text()
+    assert "Balance carried forward" in text
+    assert "1,000.00" in text
 
 
 def test_cash_flow_report_wraps_long_supplier_inside_its_own_cell() -> None:

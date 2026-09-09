@@ -18,7 +18,7 @@ from reportlab.lib.units import mm
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
-from sqlmodel import Session, func, select
+from sqlmodel import Session, col, func, or_, select
 
 from app.models import CashFlowRecord
 from app.utils import send_email_with_attachment
@@ -78,7 +78,12 @@ class CashFlowService:
             select(
                 CashFlowRecord.id,
                 CashFlowRecord.payment_number,
-                CashFlowRecord.has_invoice,
+                # Imported records may have media despite a stale invoice flag.
+                # Return only this boolean, not the attachment payload.
+                or_(
+                    CashFlowRecord.has_invoice,
+                    func.coalesce(CashFlowRecord.invoice_media_data != "", False),
+                ).label("has_invoice"),
                 CashFlowRecord.invoice_media_name,
                 CashFlowRecord.record_date,
                 CashFlowRecord.amount,
@@ -225,6 +230,8 @@ class CashFlowService:
             search,
             include_invoice_table,
         )
+        # include_invoice_table controls only the optional index table.
+        # Invoice media always follows the summary in the preview and email.
         invoice_items = [item for item in listing.items if item.has_invoice]
         if not invoice_items:
             return summary_pdf
@@ -240,7 +247,7 @@ class CashFlowService:
                     select(CashFlowRecord.id, CashFlowRecord.invoice_media_data).where(
                         CashFlowRecord.condominio_id == self.condominio_id,
                         CashFlowRecord.id.in_([item.id for item in batch]),
-                        CashFlowRecord.has_invoice == True,  # noqa: E712
+                        col(CashFlowRecord.invoice_media_data).is_not(None),
                     )
                 ).all()
             )

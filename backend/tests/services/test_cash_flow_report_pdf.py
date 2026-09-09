@@ -8,13 +8,16 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+from PIL import Image
 from pypdf import PdfReader
 from reportlab.lib.units import mm
+from reportlab.pdfgen import canvas
 from reportlab.platypus import Paragraph
 from sqlalchemy import event
 from sqlmodel import Session, create_engine
 
-from app.models import CashFlowRecord
+from app.api.routes.cash_flow import generate_cash_flow_report
+from app.models import CashFlowRecord, User
 from app.services.cash_flow_service import (
     INVOICE_BATCH_SIZE,
     CashFlowReportListResponse,
@@ -75,7 +78,9 @@ def test_report_batches_queries_and_preserves_invoice_order(
         len(statements)
         == 2 + (invoice_count + INVOICE_BATCH_SIZE - 1) // INVOICE_BATCH_SIZE
     )
-    assert "invoice_media_data" not in statements[0]
+    # The summary may inspect whether media exists, but must not transfer it.
+    assert "cash_flow_record.invoice_media_data," not in statements[0]
+    assert "cash_flow_record.invoice_media_data \n" not in statements[0]
     invoice_pages = [
         page.extract_text()
         for page in PdfReader(BytesIO(data)).pages
@@ -149,6 +154,54 @@ def test_report_empty_month_carries_opening_balance(report_session: Session) -> 
     text = PdfReader(BytesIO(data)).pages[0].extract_text()
     assert "Balance carried forward" in text
     assert "1,000.00" in text
+
+
+@pytest.mark.parametrize("include_invoice_table", [False, True])
+@pytest.mark.parametrize("has_invoice", [False, True])
+def test_preview_always_embeds_images_and_every_pdf_page(
+    report_session: Session, include_invoice_table: bool, has_invoice: bool
+) -> None:
+    tenant = uuid.uuid4()
+    image_data = BytesIO()
+    Image.new("RGB", (24, 16), (12, 120, 220)).save(image_data, format="PNG")
+    pdf_data = BytesIO()
+    pdf = canvas.Canvas(pdf_data)
+    for text in ("Invoice first page", "Invoice second page"):
+        pdf.drawString(50, 500, text)
+        pdf.showPage()
+    pdf.save()
+    for number, mime, data in (
+        (26, "image/png", image_data.getvalue()),
+        (27, "application/pdf", pdf_data.getvalue()),
+    ):
+        report_session.add(
+            _record(
+                tenant,
+                number,
+                has_invoice=has_invoice,
+                invoice_media_data=f"data:{mime};base64,"
+                + base64.b64encode(data).decode(),
+            )
+        )
+    report_session.commit()
+    response = generate_cash_flow_report(
+        session=report_session,
+        current_user=User(condominio_id=tenant, is_superuser=True),
+        start_month="2026-03",
+        end_month="2026-03",
+        include_invoice_table=include_invoice_table,
+    )
+    assert response.media_type == "application/pdf"
+    assert response.headers["content-disposition"].startswith("inline;")
+    pages = PdfReader(BytesIO(response.body)).pages
+    assert len(pages) == 4
+    assert "Invoice #26" in pages[1].extract_text()
+    assert len(pages[1].images) == 1
+    assert pages[1].images[0].image.convert("RGB").getpixel((0, 0)) == (12, 120, 220)
+    assert "Invoice #27" in pages[2].extract_text()
+    assert "Invoice first page" in pages[2].extract_text()
+    assert "Invoice #27" in pages[3].extract_text()
+    assert "Invoice second page" in pages[3].extract_text()
 
 
 def test_cash_flow_report_wraps_long_supplier_inside_its_own_cell() -> None:

@@ -14,6 +14,7 @@ from app.api.routes import (
     flat_readings,
     flats,
     funcionarios,
+    key_access,
     login,
     moradores,
     private,
@@ -45,6 +46,7 @@ api_router.include_router(cleaner_invoices.router)
 api_router.include_router(caretaker_invoices.router)
 api_router.include_router(readings.router)
 api_router.include_router(flat_readings.router)
+api_router.include_router(key_access.router)
 api_router.include_router(tasks.router)
 
 

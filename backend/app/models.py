@@ -259,6 +259,9 @@ class Flat(FlatBase, table=True):
     readings: list["FlatReading"] = Relationship(
         back_populates="flat", cascade_delete=True
     )
+    key_handovers: list["KeyHandover"] = Relationship(
+        back_populates="flat", cascade_delete=True
+    )
     car1: str | None = Field(default=None, max_length=50)
     car2: str | None = Field(default=None, max_length=50)
     car3: str | None = Field(default=None, max_length=50)
@@ -810,6 +813,27 @@ class FlatReading(SQLModel, table=True):
     flat: Flat | None = Relationship(back_populates="readings")
 
 
+class KeyHandover(SQLModel, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    flat_id: uuid.UUID = Field(
+        foreign_key="flat.id", nullable=False, ondelete="CASCADE", index=True
+    )
+    key_code: str = Field(max_length=40, index=True)
+    holder_name: str = Field(max_length=255)
+    holder_mobile: str = Field(max_length=30)
+    checked_out_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    checked_in_at: datetime | None = Field(
+        default=None,
+        sa_type=SQLAlchemyDateTime(timezone=True),  # type: ignore
+    )
+    returned_by_name: str | None = Field(default=None, max_length=255)
+    returned_by_mobile: str | None = Field(default=None, max_length=30)
+    flat: Flat | None = Relationship(back_populates="key_handovers")
+
+
 class NotificationHistory(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     created_at: datetime = Field(
@@ -1012,6 +1036,62 @@ class FlatReadingPublic(FlatReadingBase):
 
 class FlatReadingsPublic(SQLModel):
     data: list[FlatReadingPublic]
+    count: int
+
+
+class KeyHandoverCheckoutCreate(SQLModel):
+    holder_name: str = Field(min_length=1, max_length=255)
+    holder_mobile: str = Field(min_length=5, max_length=30)
+
+
+class KeyHandoverCheckinCreate(SQLModel):
+    returned_by_name: str = Field(min_length=1, max_length=255)
+    returned_by_mobile: str = Field(min_length=5, max_length=30)
+
+
+class KeyPublic(SQLModel):
+    flat_id: uuid.UUID
+    building_name: str
+    flat_numero: int
+    flat_label: str | None
+    key_code: str
+    is_checked_out: bool
+    holder_name: str | None = None
+    holder_mobile: str | None = None
+    checked_out_at: datetime | None = None
+
+
+class PublicKeyAccess(SQLModel):
+    flat_id: uuid.UUID
+    building_name: str
+    flat_numero: int
+    flat_label: str | None
+    key_code: str
+    is_checked_out: bool
+
+
+class KeyHandoverPublic(SQLModel):
+    id: uuid.UUID
+    flat_id: uuid.UUID
+    building_name: str
+    flat_numero: int
+    flat_label: str | None
+    key_code: str
+    holder_name: str
+    holder_mobile: str
+    checked_out_at: datetime
+    checked_in_at: datetime | None
+    returned_by_name: str | None
+    returned_by_mobile: str | None
+
+
+class KeysPublic(SQLModel):
+    data: list[KeyPublic]
+    count: int
+
+
+class KeyHandoversPublic(SQLModel):
+    data: list[KeyHandoverPublic]
     count: int
 
 

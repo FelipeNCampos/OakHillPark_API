@@ -757,6 +757,44 @@ def ensure_cash_flow_record_schema(session: Session) -> None:
     session.commit()
 
 
+def ensure_key_handover_schema(session: Session) -> None:
+    bind = session.get_bind()
+    inspector = inspect(bind)
+    if inspector.has_table("keyhandover"):
+        return
+
+    session.execute(
+        text(
+            """
+            CREATE TABLE keyhandover (
+                id UUID PRIMARY KEY,
+                flat_id UUID NOT NULL REFERENCES flat (id) ON DELETE CASCADE,
+                key_code VARCHAR(40) NOT NULL,
+                holder_name VARCHAR(255) NOT NULL,
+                holder_mobile VARCHAR(30) NOT NULL,
+                checked_out_at TIMESTAMPTZ NOT NULL,
+                checked_in_at TIMESTAMPTZ,
+                returned_by_name VARCHAR(255),
+                returned_by_mobile VARCHAR(30)
+            )
+            """
+        )
+    )
+    session.execute(
+        text("CREATE INDEX IF NOT EXISTS ix_keyhandover_flat_id ON keyhandover (flat_id)")
+    )
+    session.execute(
+        text("CREATE INDEX IF NOT EXISTS ix_keyhandover_key_code ON keyhandover (key_code)")
+    )
+    session.execute(
+        text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_keyhandover_open_flat "
+            "ON keyhandover (flat_id) WHERE checked_in_at IS NULL"
+        )
+    )
+    session.commit()
+
+
 # make sure all SQLModel models are imported (app.models) before initializing DB
 # otherwise, SQLModel might fail to initialize relationships properly
 # for more details: https://github.com/fastapi/full-stack-fastapi-template/issues/28
@@ -780,6 +818,7 @@ def init_db(session: Session) -> None:
     ensure_contractor_maintenance_schema(session)
     ensure_caretaker_monthly_goal_schema(session)
     ensure_cash_flow_record_schema(session)
+    ensure_key_handover_schema(session)
 
     user = session.exec(
         select(User).where(User.email == settings.FIRST_SUPERUSER)

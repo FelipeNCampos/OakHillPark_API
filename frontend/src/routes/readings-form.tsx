@@ -357,6 +357,7 @@ function ReadingInput({
         step="1"
         value={value}
         onChange={(event) => onChange(event.target.value)}
+        onWheel={(event) => event.currentTarget.blur()}
         className="mt-2 w-full rounded-lg border border-[#ddd] px-4 py-2 text-[#55311c] focus:border-[#8c7569] focus:outline-none"
       />
     </label>

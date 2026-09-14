@@ -25,7 +25,7 @@ import {
   X,
 } from "lucide-react"
 import QRCode from "qrcode"
-import type { ChangeEvent, KeyboardEvent } from "react"
+import type { ChangeEvent, KeyboardEvent, WheelEvent } from "react"
 import {
   useDeferredValue,
   useEffect,
@@ -72,6 +72,10 @@ GlobalWorkerOptions.workerSrc = pdfjsWorker
 
 type EntityId = string | number
 
+const blurNumberInputOnWheel = (event: WheelEvent<HTMLInputElement>) => {
+  event.currentTarget.blur()
+}
+
 interface ApiListResponse<T> {
   data: T[]
   count?: number
@@ -91,6 +95,26 @@ interface Building {
   electricity_sn?: string | null
   gas_sn?: string | null
   flats?: Flat[]
+}
+
+interface KeyRecord {
+  flat_id: EntityId
+  building_name: string
+  flat_numero: number
+  flat_label?: string | null
+  key_code: string
+  is_checked_out: boolean
+  holder_name?: string | null
+  holder_mobile?: string | null
+  checked_out_at?: string | null
+}
+
+interface KeyHandoverRecord extends KeyRecord {
+  id: EntityId
+  checked_out_at: string
+  checked_in_at?: string | null
+  returned_by_name?: string | null
+  returned_by_mobile?: string | null
 }
 
 interface ContractorAccessBuilding {
@@ -2780,6 +2804,7 @@ function ClientDashboard() {
       id: "qrCodes",
       items: [
         { label: "Readings", id: "qr-readings" },
+        { label: "Keys", id: "qr-keys" },
         { label: QR_TASKS_LABEL, id: "qr-task" },
         { label: "Cleaner", id: "qr-cleaner" },
         { label: "Contractor", id: "qr-contractor" },
@@ -2808,6 +2833,7 @@ function ClientDashboard() {
     { label: "Cleaner", id: "cleaner" },
     { label: "Caretaker", id: "caretaker" },
     { label: "Bins", id: "bins" },
+    { label: "Keys", id: "keys" },
     { label: "Petty Cash", id: "cash-flow" },
     { label: "Twilio", id: "twillio" },
   ]
@@ -2828,6 +2854,8 @@ function ClientDashboard() {
         return <FlatsReadingsContent initialShowForm />
       case "qr-readings":
         return <ReadingsQrCodesContent />
+      case "qr-keys":
+        return <KeysQrCodesContent />
       case "qr-task":
         return <TaskQrCodesContent />
       case "qr-cleaner":
@@ -2871,6 +2899,8 @@ function ClientDashboard() {
         return <CaretakerContent />
       case "bins":
         return <BinsContent />
+      case "keys":
+        return <KeysContent />
       case "cash-flow":
         return <CashFlowContent />
       case "twillio":
@@ -3086,6 +3116,7 @@ function OverviewContent({
       title: "QR Codes",
       items: [
         { label: "Readings", tabId: "qr-readings" },
+        { label: "Keys", tabId: "qr-keys" },
         { label: QR_TASKS_LABEL, tabId: "qr-task" },
         { label: "Cleaner", tabId: "qr-cleaner" },
         { label: "Contractor", tabId: "qr-contractor" },
@@ -3113,6 +3144,7 @@ function OverviewContent({
     { label: "Cleaner", tabId: "cleaner" },
     { label: "Caretaker", tabId: "caretaker" },
     { label: "Bins", tabId: "bins" },
+    { label: "Keys", tabId: "keys" },
     { label: "Petty Cash", tabId: "cash-flow" },
     { label: "Twilio", tabId: "twillio" },
   ]
@@ -6567,6 +6599,7 @@ function BuildingReadingsTable({
                         low: e.target.value,
                       }))
                     }
+                    onWheel={blurNumberInputOnWheel}
                     className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
                   />
                 </div>
@@ -6590,6 +6623,7 @@ function BuildingReadingsTable({
                         normal: e.target.value,
                       }))
                     }
+                    onWheel={blurNumberInputOnWheel}
                     className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
                   />
                 </div>
@@ -6613,6 +6647,7 @@ function BuildingReadingsTable({
                         gas: e.target.value,
                       }))
                     }
+                    onWheel={blurNumberInputOnWheel}
                     className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
                   />
                 </div>
@@ -6927,6 +6962,7 @@ function AddAllReadingsForm({ buildings }: { buildings: Building[] }) {
         id={id}
         value={value}
         onChange={(event) => onChange(event.target.value)}
+        onWheel={blurNumberInputOnWheel}
         className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
         placeholder={`Valor ${label}`}
       />
@@ -7254,6 +7290,7 @@ function AddReadingsForm({
                               e.target.value,
                             )
                           }
+                          onWheel={blurNumberInputOnWheel}
                           className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
                           placeholder="Valor Low"
                         />
@@ -7279,6 +7316,7 @@ function AddReadingsForm({
                               e.target.value,
                             )
                           }
+                          onWheel={blurNumberInputOnWheel}
                           className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
                           placeholder="Valor Normal"
                         />
@@ -7304,6 +7342,7 @@ function AddReadingsForm({
                               e.target.value,
                             )
                           }
+                          onWheel={blurNumberInputOnWheel}
                           className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
                           placeholder="Valor Gas"
                         />
@@ -7543,6 +7582,7 @@ function AddFlatReadingsForm({
                                     e.target.value,
                                   )
                                 }
+                                onWheel={blurNumberInputOnWheel}
                                 className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
                                 placeholder="Valor Low"
                               />
@@ -7568,6 +7608,7 @@ function AddFlatReadingsForm({
                                     e.target.value,
                                   )
                                 }
+                                onWheel={blurNumberInputOnWheel}
                                 className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
                                 placeholder="Valor Normal"
                               />
@@ -7593,6 +7634,7 @@ function AddFlatReadingsForm({
                                     e.target.value,
                                   )
                                 }
+                                onWheel={blurNumberInputOnWheel}
                                 className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
                                 placeholder="Valor Gas"
                               />
@@ -7618,6 +7660,7 @@ function AddFlatReadingsForm({
                                     e.target.value,
                                   )
                                 }
+                                onWheel={blurNumberInputOnWheel}
                                 className="w-full rounded-lg border-2 border-[#ddd] bg-white px-4 py-2 font-['Nunito',sans-serif] text-[#55311c] transition-all duration-200 focus:border-[#8c7569] focus:outline-none"
                                 placeholder="Valor Garage"
                               />
@@ -8658,6 +8701,7 @@ function FlatReadingsTable({
                         low: e.target.value,
                       }))
                     }
+                    onWheel={blurNumberInputOnWheel}
                     className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
                   />
                 </div>
@@ -8681,6 +8725,7 @@ function FlatReadingsTable({
                         normal: e.target.value,
                       }))
                     }
+                    onWheel={blurNumberInputOnWheel}
                     className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
                   />
                 </div>
@@ -8704,6 +8749,7 @@ function FlatReadingsTable({
                         gas: e.target.value,
                       }))
                     }
+                    onWheel={blurNumberInputOnWheel}
                     className="mt-1 w-full rounded-lg border border-[#ddd] px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#8c7569]"
                   />
                 </div>
@@ -12151,6 +12197,353 @@ function ReadingsQrCodesContent() {
                       className="block rounded-lg border border-[#8c7569] px-4 py-2 text-center text-sm font-semibold text-[#55311c] transition-all duration-300 hover:bg-[#f3eeea]"
                     >
                       Open link
+                    </a>
+                  )}
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function KeysContent() {
+  const { data: keysData, isLoading: keysLoading } = useQuery<
+    ApiListResponse<KeyRecord>
+  >({
+    queryKey: ["keys"],
+    queryFn: () => apiCall("/api/v1/key-access/keys"),
+  })
+  const { data: handoversData, isLoading: handoversLoading } = useQuery<
+    ApiListResponse<KeyHandoverRecord>
+  >({
+    queryKey: ["key-handovers"],
+    queryFn: () => apiCall("/api/v1/key-access/handovers?limit=200"),
+  })
+
+  const keys = keysData?.data || []
+  const handovers = handoversData?.data || []
+  const checkedOutCount = keys.filter((key) => key.is_checked_out).length
+  const formatFlat = (key: KeyRecord) =>
+    key.flat_label?.trim() || String(key.flat_numero)
+  const formatDate = (value?: string | null) =>
+    value
+      ? new Date(value).toLocaleString("pt-BR", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        })
+      : "-"
+
+  return (
+    <div className="mx-auto max-w-7xl">
+      <div className="mb-6 rounded-lg bg-white p-6 shadow-md">
+        <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
+          Controle de chaves
+        </h2>
+        <p className="mt-2 text-[rgba(0,0,0,0.7)]">
+          Acompanhe todas as chaves dos flats e o histórico de retirada e devolução.
+        </p>
+      </div>
+
+      <div className="mb-6 grid gap-4 sm:grid-cols-3">
+        <SummaryCard label="Total de chaves" value={keys.length} />
+        <SummaryCard
+          label="Chaves fora"
+          value={checkedOutCount}
+          tone="warning"
+        />
+        <SummaryCard
+          label="Chaves disponíveis"
+          value={keys.length - checkedOutCount}
+          tone="success"
+        />
+      </div>
+
+      <section className="mb-8 rounded-lg bg-white p-6 shadow-md">
+        <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+          <h3 className="text-xl font-bold text-[#55311c]">Status das chaves</h3>
+          <span className="text-sm text-[rgba(0,0,0,0.65)]">
+            Um QR code está disponível para cada flat em QR Codes → Keys.
+          </span>
+        </div>
+
+        {keysLoading ? (
+          <p className="py-6 text-center text-sm text-[#55311c]">Carregando chaves...</p>
+        ) : keys.length === 0 ? (
+          <p className="py-6 text-center text-sm text-[rgba(0,0,0,0.7)]">
+            Nenhum flat cadastrado.
+          </p>
+        ) : (
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {keys.map((key) => (
+              <article
+                key={String(key.flat_id)}
+                className="rounded-xl border border-[#e5e0dc] bg-[#faf8f6] p-4"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-lg font-bold text-[#55311c]">{key.key_code}</p>
+                    <p className="mt-1 text-sm text-[rgba(0,0,0,0.7)]">
+                      {key.building_name} · Flat {formatFlat(key)}
+                    </p>
+                  </div>
+                  <span
+                    className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-bold ${
+                      key.is_checked_out
+                        ? "bg-amber-100 text-amber-800"
+                        : "bg-emerald-100 text-emerald-800"
+                    }`}
+                  >
+                    {key.is_checked_out ? "Fora" : "Disponível"}
+                  </span>
+                </div>
+                {key.is_checked_out ? (
+                  <div className="mt-4 border-t border-[#e5e0dc] pt-3 text-sm text-[rgba(0,0,0,0.75)]">
+                    <p>
+                      <span className="font-semibold text-[#55311c]">Com:</span>{" "}
+                      {key.holder_name}
+                    </p>
+                    <p>
+                      <span className="font-semibold text-[#55311c]">Telefone:</span>{" "}
+                      {key.holder_mobile}
+                    </p>
+                    <p className="mt-1 text-xs text-[rgba(0,0,0,0.6)]">
+                      Retirada: {formatDate(key.checked_out_at)}
+                    </p>
+                  </div>
+                ) : (
+                  <p className="mt-4 border-t border-[#e5e0dc] pt-3 text-sm text-emerald-700">
+                    A chave está guardada e disponível para retirada.
+                  </p>
+                )}
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="rounded-lg bg-white p-6 shadow-md">
+        <h3 className="text-xl font-bold text-[#55311c]">Histórico de movimentações</h3>
+        {handoversLoading ? (
+          <p className="py-6 text-center text-sm text-[#55311c]">Carregando histórico...</p>
+        ) : handovers.length === 0 ? (
+          <p className="py-6 text-center text-sm text-[rgba(0,0,0,0.7)]">
+            Ainda não há movimentações registradas.
+          </p>
+        ) : (
+          <div className="mt-4 overflow-x-auto">
+            <table className="min-w-full border-collapse text-left text-sm">
+              <thead>
+                <tr className="border-b border-[#ddd] text-[#55311c]">
+                  <th className="px-3 py-3 font-bold">Chave</th>
+                  <th className="px-3 py-3 font-bold">Retirada por</th>
+                  <th className="px-3 py-3 font-bold">Saída</th>
+                  <th className="px-3 py-3 font-bold">Devolução por</th>
+                  <th className="px-3 py-3 font-bold">Entrada</th>
+                  <th className="px-3 py-3 font-bold">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {handovers.map((handover) => (
+                  <tr key={String(handover.id)} className="border-b border-[#eee]">
+                    <td className="px-3 py-3">
+                      <p className="font-bold text-[#55311c]">{handover.key_code}</p>
+                      <p className="text-xs text-[rgba(0,0,0,0.65)]">
+                        {handover.building_name} · Flat {formatFlat(handover)}
+                      </p>
+                    </td>
+                    <td className="px-3 py-3 text-[rgba(0,0,0,0.75)]">
+                      <p>{handover.holder_name}</p>
+                      <p className="text-xs">{handover.holder_mobile}</p>
+                    </td>
+                    <td className="px-3 py-3 text-[rgba(0,0,0,0.75)]">
+                      {formatDate(handover.checked_out_at)}
+                    </td>
+                    <td className="px-3 py-3 text-[rgba(0,0,0,0.75)]">
+                      {handover.returned_by_name ? (
+                        <>
+                          <p>{handover.returned_by_name}</p>
+                          <p className="text-xs">{handover.returned_by_mobile}</p>
+                        </>
+                      ) : (
+                        "-"
+                      )}
+                    </td>
+                    <td className="px-3 py-3 text-[rgba(0,0,0,0.75)]">
+                      {formatDate(handover.checked_in_at)}
+                    </td>
+                    <td className="px-3 py-3">
+                      <span
+                        className={`rounded-full px-2.5 py-1 text-xs font-bold ${
+                          handover.checked_in_at
+                            ? "bg-emerald-100 text-emerald-800"
+                            : "bg-amber-100 text-amber-800"
+                        }`}
+                      >
+                        {handover.checked_in_at ? "Devolvida" : "Fora"}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </div>
+  )
+}
+
+function SummaryCard({
+  label,
+  value,
+  tone = "default",
+}: {
+  label: string
+  value: number
+  tone?: "default" | "warning" | "success"
+}) {
+  const toneClass = {
+    default: "border-[#e5e0dc] bg-white text-[#55311c]",
+    warning: "border-amber-200 bg-amber-50 text-amber-800",
+    success: "border-emerald-200 bg-emerald-50 text-emerald-800",
+  }[tone]
+
+  return (
+    <div className={`rounded-xl border p-5 shadow-sm ${toneClass}`}>
+      <p className="text-sm font-semibold">{label}</p>
+      <p className="mt-1 text-3xl font-bold">{value}</p>
+    </div>
+  )
+}
+
+function KeysQrCodesContent() {
+  const { data: keysData, isLoading } = useQuery<ApiListResponse<KeyRecord>>({
+    queryKey: ["keys", "qr"],
+    queryFn: () => apiCall("/api/v1/key-access/keys"),
+  })
+  const keys = useMemo(() => keysData?.data || [], [keysData?.data])
+  const baseUrl = useMemo(
+    () => (typeof window === "undefined" ? "" : window.location.origin),
+    [],
+  )
+  const [qrMap, setQrMap] = useState<
+    Record<string, { dataUrl: string; link: string }>
+  >({})
+  const [isGenerating, setIsGenerating] = useState(false)
+
+  useEffect(() => {
+    let isActive = true
+
+    const generateQRCodes = async () => {
+      if (!baseUrl || keys.length === 0) {
+        setQrMap({})
+        return
+      }
+      setIsGenerating(true)
+      const entries = await Promise.all(
+        keys.map(async (key) => {
+          const params = new URLSearchParams({ flatId: String(key.flat_id) })
+          const link = `${baseUrl}/key-access?${params.toString()}`
+          const dataUrl = await QRCode.toDataURL(link, { width: 240, margin: 1 })
+          return [String(key.flat_id), { dataUrl, link }] as const
+        }),
+      )
+      if (!isActive) return
+      setQrMap(Object.fromEntries(entries))
+      setIsGenerating(false)
+    }
+
+    generateQRCodes().catch(() => {
+      if (!isActive) return
+      setQrMap({})
+      setIsGenerating(false)
+    })
+    return () => {
+      isActive = false
+    }
+  }, [baseUrl, keys])
+
+  const formatFlat = (key: KeyRecord) =>
+    key.flat_label?.trim() || String(key.flat_numero)
+
+  return (
+    <div className="mx-auto max-w-7xl">
+      <div className="mb-6 rounded-lg bg-white p-6 shadow-md">
+        <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
+          QR Codes - Chaves
+        </h2>
+        <p className="mt-2 text-[rgba(0,0,0,0.7)]">
+          Um QR code por chave. A pessoa escaneia o código para registrar retirada e devolução.
+        </p>
+      </div>
+
+      {(isLoading || isGenerating) && (
+        <div className="rounded-lg bg-white p-6 text-center text-sm text-[#55311c] shadow-md">
+          Gerando QR codes...
+        </div>
+      )}
+      {!isLoading && keys.length === 0 && (
+        <div className="rounded-lg bg-white p-6 text-center text-sm text-[rgba(0,0,0,0.7)] shadow-md">
+          Nenhum flat cadastrado.
+        </div>
+      )}
+
+      <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+        {keys.map((key) => {
+          const qrItem = qrMap[String(key.flat_id)]
+          const slug = key.key_code.toLowerCase().replace(/[^a-z0-9]+/g, "-")
+          return (
+            <div
+              key={String(key.flat_id)}
+              className="flex h-full flex-col justify-between rounded-lg bg-white p-6 shadow-md"
+            >
+              <div>
+                <h3 className="text-lg font-bold text-[#55311c]">{key.key_code}</h3>
+                <p className="mt-1 text-sm text-[rgba(0,0,0,0.7)]">
+                  {key.building_name} · Flat {formatFlat(key)}
+                </p>
+              </div>
+              <div className="mt-4 flex flex-col items-center justify-center gap-4">
+                {qrItem?.dataUrl ? (
+                  <img
+                    src={qrItem.dataUrl}
+                    alt={`QR Code da chave ${key.key_code}`}
+                    className="h-48 w-48 rounded-lg border border-[#e5e0dc] bg-white p-2"
+                  />
+                ) : (
+                  <div className="flex h-48 w-48 items-center justify-center rounded-lg border border-dashed border-[#e5e0dc] text-xs text-[rgba(0,0,0,0.6)]">
+                    QR Code indisponível
+                  </div>
+                )}
+                <div className="flex w-full flex-col gap-2">
+                  <a
+                    href={qrItem?.dataUrl || "#"}
+                    download={`qr-chave-${slug || "flat"}.png`}
+                    className={`w-full rounded-lg px-4 py-2 text-center text-sm font-semibold transition-all duration-200 ${
+                      qrItem?.dataUrl
+                        ? "bg-[#8c7569] text-white hover:bg-[#55311c]"
+                        : "cursor-not-allowed bg-[#e5e0dc] text-[#8c7569]"
+                    }`}
+                    onClick={(event) => {
+                      if (!qrItem?.dataUrl) event.preventDefault()
+                    }}
+                  >
+                    Baixar QR Code
+                  </a>
+                  {qrItem?.link && (
+                    <a
+                      href={qrItem.link}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block rounded-lg border border-[#8c7569] px-4 py-2 text-center text-sm font-semibold text-[#55311c] transition-all duration-300 hover:bg-[#f3eeea]"
+                    >
+                      Abrir link
                     </a>
                   )}
                 </div>

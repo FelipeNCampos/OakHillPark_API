@@ -15,6 +15,7 @@ import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as RecoverPasswordRouteImport } from './routes/recover-password'
 import { Route as ReadingsFormRouteImport } from './routes/readings-form'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as KeyAccessRouteImport } from './routes/key-access'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as ContractorAccessRouteImport } from './routes/contractor-access'
 import { Route as CleanerAccessRouteImport } from './routes/cleaner-access'
@@ -56,6 +57,11 @@ const ReadingsFormRoute = ReadingsFormRouteImport.update({
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const KeyAccessRoute = KeyAccessRouteImport.update({
+  id: '/key-access',
+  path: '/key-access',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DashboardRoute = DashboardRouteImport.update({
@@ -127,6 +133,7 @@ export interface FileRoutesByFullPath {
   '/cleaner-access': typeof CleanerAccessRoute
   '/contractor-access': typeof ContractorAccessRoute
   '/dashboard': typeof DashboardRoute
+  '/key-access': typeof KeyAccessRoute
   '/login': typeof LoginRoute
   '/readings-form': typeof ReadingsFormRoute
   '/recover-password': typeof RecoverPasswordRoute
@@ -145,6 +152,7 @@ export interface FileRoutesByTo {
   '/cleaner-access': typeof CleanerAccessRoute
   '/contractor-access': typeof ContractorAccessRoute
   '/dashboard': typeof DashboardRoute
+  '/key-access': typeof KeyAccessRoute
   '/login': typeof LoginRoute
   '/readings-form': typeof ReadingsFormRoute
   '/recover-password': typeof RecoverPasswordRoute
@@ -166,6 +174,7 @@ export interface FileRoutesById {
   '/cleaner-access': typeof CleanerAccessRoute
   '/contractor-access': typeof ContractorAccessRoute
   '/dashboard': typeof DashboardRoute
+  '/key-access': typeof KeyAccessRoute
   '/login': typeof LoginRoute
   '/readings-form': typeof ReadingsFormRoute
   '/recover-password': typeof RecoverPasswordRoute
@@ -188,6 +197,7 @@ export interface FileRouteTypes {
     | '/cleaner-access'
     | '/contractor-access'
     | '/dashboard'
+    | '/key-access'
     | '/login'
     | '/readings-form'
     | '/recover-password'
@@ -206,6 +216,7 @@ export interface FileRouteTypes {
     | '/cleaner-access'
     | '/contractor-access'
     | '/dashboard'
+    | '/key-access'
     | '/login'
     | '/readings-form'
     | '/recover-password'
@@ -226,6 +237,7 @@ export interface FileRouteTypes {
     | '/cleaner-access'
     | '/contractor-access'
     | '/dashboard'
+    | '/key-access'
     | '/login'
     | '/readings-form'
     | '/recover-password'
@@ -247,6 +259,7 @@ export interface RootRouteChildren {
   CleanerAccessRoute: typeof CleanerAccessRoute
   ContractorAccessRoute: typeof ContractorAccessRoute
   DashboardRoute: typeof DashboardRoute
+  KeyAccessRoute: typeof KeyAccessRoute
   LoginRoute: typeof LoginRoute
   ReadingsFormRoute: typeof ReadingsFormRoute
   RecoverPasswordRoute: typeof RecoverPasswordRoute
@@ -298,6 +311,13 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/key-access': {
+      id: '/key-access'
+      path: '/key-access'
+      fullPath: '/key-access'
+      preLoaderRoute: typeof KeyAccessRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/dashboard': {
@@ -411,6 +431,7 @@ const rootRouteChildren: RootRouteChildren = {
   CleanerAccessRoute: CleanerAccessRoute,
   ContractorAccessRoute: ContractorAccessRoute,
   DashboardRoute: DashboardRoute,
+  KeyAccessRoute: KeyAccessRoute,
   LoginRoute: LoginRoute,
   ReadingsFormRoute: ReadingsFormRoute,
   RecoverPasswordRoute: RecoverPasswordRoute,

@@ -2695,11 +2695,7 @@ function ClientDashboard() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [activeTab, setActiveTab] = useState("overview")
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(
-    {
-      readings: true,
-      qrCodes: true,
-      schedule: true,
-    },
+    {},
   )
 
   useEffect(() => {
@@ -2950,6 +2946,7 @@ function ClientDashboard() {
                 <button
                   onClick={() => toggleGroup(group.id)}
                   type="button"
+                  aria-expanded={Boolean(expandedGroups[group.id])}
                   className="flex w-full items-center justify-between rounded-lg px-4 py-2 font-['Nunito',sans-serif] text-sm font-semibold text-[#55311c] hover:bg-[#f9f7f5]"
                 >
                   <span>{group.name}</span>
@@ -12223,14 +12220,48 @@ function KeysContent() {
     queryFn: () => apiCall("/api/v1/key-access/handovers?limit=200"),
   })
 
+  const [selectedBuilding, setSelectedBuilding] = useState("all")
+  const [historyPage, setHistoryPage] = useState(0)
   const keys = keysData?.data || []
   const handovers = handoversData?.data || []
-  const checkedOutCount = keys.filter((key) => key.is_checked_out).length
+  const buildings = useMemo(
+    () => [...new Set(keys.map((key) => key.building_name))].sort(),
+    [keys],
+  )
+  const filteredKeys = useMemo(
+    () =>
+      selectedBuilding === "all"
+        ? keys
+        : keys.filter((key) => key.building_name === selectedBuilding),
+    [keys, selectedBuilding],
+  )
+  const filteredHandovers = useMemo(
+    () =>
+      selectedBuilding === "all"
+        ? handovers
+        : handovers.filter(
+            (handover) => handover.building_name === selectedBuilding,
+          ),
+    [handovers, selectedBuilding],
+  )
+  const historyPageCount = Math.max(
+    1,
+    Math.ceil(filteredHandovers.length / 4),
+  )
+  const currentHistoryPage = Math.min(historyPage, historyPageCount - 1)
+  const visibleHandovers =
+    selectedBuilding === "all"
+      ? filteredHandovers.slice(
+          currentHistoryPage * 4,
+          currentHistoryPage * 4 + 4,
+        )
+      : filteredHandovers
+  const checkedOutCount = filteredKeys.filter((key) => key.is_checked_out).length
   const formatFlat = (key: KeyRecord) =>
     key.flat_label?.trim() || String(key.flat_numero)
   const formatDate = (value?: string | null) =>
     value
-      ? new Date(value).toLocaleString("pt-BR", {
+      ? new Date(value).toLocaleString("en-GB", {
           day: "2-digit",
           month: "2-digit",
           year: "numeric",
@@ -12243,44 +12274,65 @@ function KeysContent() {
     <div className="mx-auto max-w-7xl">
       <div className="mb-6 rounded-lg bg-white p-6 shadow-md">
         <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
-          Controle de chaves
+          Key control
         </h2>
         <p className="mt-2 text-[rgba(0,0,0,0.7)]">
-          Acompanhe todas as chaves dos flats e o histórico de retirada e devolução.
+          View all flat keys and their check-out and check-in history.
         </p>
       </div>
 
+      <div className="mb-6 rounded-lg bg-white p-5 shadow-md">
+        <label className="block max-w-sm text-sm font-semibold text-[#55311c]">
+          Building
+          <select
+            value={selectedBuilding}
+            onChange={(event) => {
+              setSelectedBuilding(event.target.value)
+              setHistoryPage(0)
+            }}
+            className="mt-2 w-full rounded-lg border border-[#ddd] bg-white px-3 py-2 text-[#55311c] focus:border-[#8c7569] focus:outline-none"
+          >
+            <option value="all">All</option>
+            {buildings.map((building) => (
+              <option key={building} value={building}>
+                {building}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
       <div className="mb-6 grid gap-4 sm:grid-cols-3">
-        <SummaryCard label="Total de chaves" value={keys.length} />
+        <SummaryCard label="Total keys" value={filteredKeys.length} />
         <SummaryCard
-          label="Chaves fora"
+          label="Keys checked out"
           value={checkedOutCount}
           tone="warning"
         />
         <SummaryCard
-          label="Chaves disponíveis"
-          value={keys.length - checkedOutCount}
+          label="Keys available"
+          value={filteredKeys.length - checkedOutCount}
           tone="success"
         />
       </div>
 
       <section className="mb-8 rounded-lg bg-white p-6 shadow-md">
         <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-          <h3 className="text-xl font-bold text-[#55311c]">Status das chaves</h3>
+          <h3 className="text-xl font-bold text-[#55311c]">Key status</h3>
           <span className="text-sm text-[rgba(0,0,0,0.65)]">
-            Um QR code está disponível para cada flat em QR Codes → Keys.
+            A QR code is available for each flat in QR Codes → Keys.
           </span>
         </div>
 
         {keysLoading ? (
-          <p className="py-6 text-center text-sm text-[#55311c]">Carregando chaves...</p>
-        ) : keys.length === 0 ? (
+          <p className="py-6 text-center text-sm text-[#55311c]">Loading keys...</p>
+        ) : filteredKeys.length === 0 ? (
           <p className="py-6 text-center text-sm text-[rgba(0,0,0,0.7)]">
-            Nenhum flat cadastrado.
+            No keys found for this building.
           </p>
         ) : (
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {keys.map((key) => (
+            {filteredKeys.map((key) => (
               <article
                 key={String(key.flat_id)}
                 className="rounded-xl border border-[#e5e0dc] bg-[#faf8f6] p-4"
@@ -12299,26 +12351,26 @@ function KeysContent() {
                         : "bg-emerald-100 text-emerald-800"
                     }`}
                   >
-                    {key.is_checked_out ? "Fora" : "Disponível"}
+                    {key.is_checked_out ? "Checked out" : "Available"}
                   </span>
                 </div>
                 {key.is_checked_out ? (
                   <div className="mt-4 border-t border-[#e5e0dc] pt-3 text-sm text-[rgba(0,0,0,0.75)]">
                     <p>
-                      <span className="font-semibold text-[#55311c]">Com:</span>{" "}
+                      <span className="font-semibold text-[#55311c]">Holder:</span>{" "}
                       {key.holder_name}
                     </p>
                     <p>
-                      <span className="font-semibold text-[#55311c]">Telefone:</span>{" "}
+                      <span className="font-semibold text-[#55311c]">Mobile:</span>{" "}
                       {key.holder_mobile}
                     </p>
                     <p className="mt-1 text-xs text-[rgba(0,0,0,0.6)]">
-                      Retirada: {formatDate(key.checked_out_at)}
+                      Checked out: {formatDate(key.checked_out_at)}
                     </p>
                   </div>
                 ) : (
                   <p className="mt-4 border-t border-[#e5e0dc] pt-3 text-sm text-emerald-700">
-                    A chave está guardada e disponível para retirada.
+                    The key is stored and available to be checked out.
                   </p>
                 )}
               </article>
@@ -12328,28 +12380,29 @@ function KeysContent() {
       </section>
 
       <section className="rounded-lg bg-white p-6 shadow-md">
-        <h3 className="text-xl font-bold text-[#55311c]">Histórico de movimentações</h3>
+        <h3 className="text-xl font-bold text-[#55311c]">Key movement history</h3>
         {handoversLoading ? (
-          <p className="py-6 text-center text-sm text-[#55311c]">Carregando histórico...</p>
-        ) : handovers.length === 0 ? (
+          <p className="py-6 text-center text-sm text-[#55311c]">Loading history...</p>
+        ) : filteredHandovers.length === 0 ? (
           <p className="py-6 text-center text-sm text-[rgba(0,0,0,0.7)]">
-            Ainda não há movimentações registradas.
+            There are no recorded movements for this building yet.
           </p>
         ) : (
-          <div className="mt-4 overflow-x-auto">
+          <>
+            <div className="mt-4 overflow-x-auto">
             <table className="min-w-full border-collapse text-left text-sm">
               <thead>
                 <tr className="border-b border-[#ddd] text-[#55311c]">
-                  <th className="px-3 py-3 font-bold">Chave</th>
-                  <th className="px-3 py-3 font-bold">Retirada por</th>
-                  <th className="px-3 py-3 font-bold">Saída</th>
-                  <th className="px-3 py-3 font-bold">Devolução por</th>
-                  <th className="px-3 py-3 font-bold">Entrada</th>
+                  <th className="px-3 py-3 font-bold">Key</th>
+                  <th className="px-3 py-3 font-bold">Checked out by</th>
+                  <th className="px-3 py-3 font-bold">Checked out</th>
+                  <th className="px-3 py-3 font-bold">Checked in by</th>
+                  <th className="px-3 py-3 font-bold">Checked in</th>
                   <th className="px-3 py-3 font-bold">Status</th>
                 </tr>
               </thead>
               <tbody>
-                {handovers.map((handover) => (
+                {visibleHandovers.map((handover) => (
                   <tr key={String(handover.id)} className="border-b border-[#eee]">
                     <td className="px-3 py-3">
                       <p className="font-bold text-[#55311c]">{handover.key_code}</p>
@@ -12385,14 +12438,44 @@ function KeysContent() {
                             : "bg-amber-100 text-amber-800"
                         }`}
                       >
-                        {handover.checked_in_at ? "Devolvida" : "Fora"}
+                        {handover.checked_in_at ? "Checked in" : "Checked out"}
                       </span>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          </div>
+            </div>
+            {selectedBuilding === "all" && historyPageCount > 1 && (
+              <div className="mt-4 flex items-center justify-end gap-3 text-sm">
+              <button
+                type="button"
+                onClick={() =>
+                  setHistoryPage((current) => Math.max(0, current - 1))
+                }
+                disabled={currentHistoryPage === 0}
+                className="rounded-lg border border-[#8c7569] px-3 py-2 font-semibold text-[#55311c] transition hover:bg-[#f3eeea] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Previous
+              </button>
+              <span className="font-semibold text-[#55311c]">
+                Page {currentHistoryPage + 1} of {historyPageCount}
+              </span>
+              <button
+                type="button"
+                onClick={() =>
+                  setHistoryPage((current) =>
+                    Math.min(historyPageCount - 1, current + 1),
+                  )
+                }
+                disabled={currentHistoryPage === historyPageCount - 1}
+                className="rounded-lg border border-[#8c7569] px-3 py-2 font-semibold text-[#55311c] transition hover:bg-[#f3eeea] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Next
+              </button>
+              </div>
+            )}
+          </>
         )}
       </section>
     </div>
@@ -12476,21 +12559,21 @@ function KeysQrCodesContent() {
     <div className="mx-auto max-w-7xl">
       <div className="mb-6 rounded-lg bg-white p-6 shadow-md">
         <h2 className="font-['Nunito',sans-serif] text-3xl font-bold text-[#55311c]">
-          QR Codes - Chaves
+          QR Codes - Keys
         </h2>
         <p className="mt-2 text-[rgba(0,0,0,0.7)]">
-          Um QR code por chave. A pessoa escaneia o código para registrar retirada e devolução.
+          One QR code per key. Scan it to register a key check-out or check-in.
         </p>
       </div>
 
       {(isLoading || isGenerating) && (
         <div className="rounded-lg bg-white p-6 text-center text-sm text-[#55311c] shadow-md">
-          Gerando QR codes...
+          Generating QR codes...
         </div>
       )}
       {!isLoading && keys.length === 0 && (
         <div className="rounded-lg bg-white p-6 text-center text-sm text-[rgba(0,0,0,0.7)] shadow-md">
-          Nenhum flat cadastrado.
+          No flats found.
         </div>
       )}
 
@@ -12513,18 +12596,18 @@ function KeysQrCodesContent() {
                 {qrItem?.dataUrl ? (
                   <img
                     src={qrItem.dataUrl}
-                    alt={`QR Code da chave ${key.key_code}`}
+                    alt={`QR code for key ${key.key_code}`}
                     className="h-48 w-48 rounded-lg border border-[#e5e0dc] bg-white p-2"
                   />
                 ) : (
                   <div className="flex h-48 w-48 items-center justify-center rounded-lg border border-dashed border-[#e5e0dc] text-xs text-[rgba(0,0,0,0.6)]">
-                    QR Code indisponível
+                    QR code unavailable
                   </div>
                 )}
                 <div className="flex w-full flex-col gap-2">
                   <a
                     href={qrItem?.dataUrl || "#"}
-                    download={`qr-chave-${slug || "flat"}.png`}
+                    download={`qr-key-${slug || "flat"}.png`}
                     className={`w-full rounded-lg px-4 py-2 text-center text-sm font-semibold transition-all duration-200 ${
                       qrItem?.dataUrl
                         ? "bg-[#8c7569] text-white hover:bg-[#55311c]"
@@ -12534,7 +12617,7 @@ function KeysQrCodesContent() {
                       if (!qrItem?.dataUrl) event.preventDefault()
                     }}
                   >
-                    Baixar QR Code
+                    Download QR code
                   </a>
                   {qrItem?.link && (
                     <a
@@ -12543,7 +12626,7 @@ function KeysQrCodesContent() {
                       rel="noreferrer"
                       className="block rounded-lg border border-[#8c7569] px-4 py-2 text-center text-sm font-semibold text-[#55311c] transition-all duration-300 hover:bg-[#f3eeea]"
                     >
-                      Abrir link
+                      Open link
                     </a>
                   )}
                 </div>

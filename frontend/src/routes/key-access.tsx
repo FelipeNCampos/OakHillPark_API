@@ -35,7 +35,7 @@ const publicApiCall = async (endpoint: string, options?: RequestOptions) => {
 
   if (!response.ok) {
     const payload = await response.json().catch(() => null)
-    throw new Error(payload?.detail || "Não foi possível registrar a chave")
+    throw new Error(payload?.detail || "Unable to record the key movement")
   }
   return response.json()
 }
@@ -43,7 +43,7 @@ const publicApiCall = async (endpoint: string, options?: RequestOptions) => {
 export const Route = createFileRoute("/key-access" as any)({
   component: KeyAccess,
   validateSearch: searchSchema,
-  head: () => ({ meta: [{ title: "Controle de chaves - OakHill Park" }] }),
+  head: () => ({ meta: [{ title: "Key control - OakHill Park" }] }),
 })
 
 function KeyAccess() {
@@ -62,7 +62,7 @@ function KeyAccess() {
   const key = keyQuery.data
   const mutation = useMutation({
     mutationFn: () => {
-      if (!flatId || !key) throw new Error("QR code inválido")
+      if (!flatId || !key) throw new Error("Invalid QR code")
       const operation = key.is_checked_out ? "checkin" : "checkout"
       return publicApiCall(`/api/v1/key-access/public/${flatId}/${operation}`, {
         method: "POST",
@@ -72,18 +72,18 @@ function KeyAccess() {
       })
     },
     onSuccess: () => {
-      const action = key?.is_checked_out ? "devolvida" : "retirada"
+      const action = key?.is_checked_out ? "checked in" : "checked out"
       setName("")
       setMobile("")
-      setConfirmation(`Chave ${action} com sucesso.`)
-      showSuccessToast(`Chave ${action} com sucesso`)
+      setConfirmation(`Key ${action} successfully.`)
+      showSuccessToast(`Key ${action} successfully`)
       void keyQuery.refetch()
     },
     onError: (error: unknown) => {
       showErrorToast(
         error instanceof Error
           ? error.message
-          : "Não foi possível registrar a chave",
+          : "Unable to record the key movement",
       )
       void keyQuery.refetch()
     },
@@ -104,22 +104,20 @@ function KeyAccess() {
       <div className="mx-auto w-full max-w-xl">
         <div className="mobile-page-panel rounded-2xl bg-white p-5 shadow-lg sm:p-8">
           <h1 className="text-center text-2xl font-bold text-[#55311c]">
-            Controle de chaves
+            Key control
           </h1>
           <p className="mt-2 text-center text-sm text-[rgba(0,0,0,0.7)]">
-            Registre a retirada ou devolução desta chave.
+            Register this key's check-out or check-in.
           </p>
 
-          {!flatId && <Message text="QR code inválido." isError />}
-          {flatId && keyQuery.isLoading && (
-            <Message text="Carregando chave..." />
-          )}
+          {!flatId && <Message text="Invalid QR code." isError />}
+          {flatId && keyQuery.isLoading && <Message text="Loading key..." />}
           {flatId && keyQuery.isError && (
             <Message
               text={
                 keyQuery.error instanceof Error
                   ? keyQuery.error.message
-                  : "Não foi possível carregar a chave."
+                  : "Unable to load the key."
               }
               isError
             />
@@ -129,7 +127,7 @@ function KeyAccess() {
             <>
               <div className="mt-6 rounded-2xl border border-[#e5e0dc] bg-[#faf8f6] p-5 text-center">
                 <p className="text-sm font-semibold uppercase tracking-wide text-[rgba(85,49,28,0.7)]">
-                  Código da chave
+                  Key code
                 </p>
                 <p className="mt-1 text-3xl font-bold text-[#55311c]">
                   {key.key_code}
@@ -144,7 +142,7 @@ function KeyAccess() {
                       : "bg-emerald-100 text-emerald-800"
                   }`}
                 >
-                  {key.is_checked_out ? "Chave fora" : "Chave disponível"}
+                  {key.is_checked_out ? "Checked out" : "Available"}
                 </span>
               </div>
 
@@ -156,15 +154,15 @@ function KeyAccess() {
                 }}
               >
                 <h2 className="text-lg font-bold text-[#55311c]">
-                  {isReturning ? "Registrar devolução" : "Registrar retirada"}
+                  {isReturning ? "Check in key" : "Check out key"}
                 </h2>
                 <p className="mt-1 text-sm text-[rgba(0,0,0,0.7)]">
-                  Informe os dados de quem está{" "}
-                  {isReturning ? "devolvendo" : "retirando"} a chave.
+                  Enter the details of the person{" "}
+                  {isReturning ? "returning" : "checking out"} the key.
                 </p>
 
                 <label className="mt-5 block text-sm font-semibold text-[#55311c]">
-                  Nome completo
+                  Full name
                   <input
                     type="text"
                     value={name}
@@ -174,14 +172,14 @@ function KeyAccess() {
                     className="mt-2 w-full rounded-lg border border-[#ddd] px-4 py-3 text-[#55311c] focus:border-[#8c7569] focus:outline-none"
                     placeholder={
                       isReturning
-                        ? "Nome de quem devolve a chave"
-                        : "Nome de quem pega a chave"
+                        ? "Name of the person returning the key"
+                        : "Name of the person checking out the key"
                     }
                   />
                 </label>
 
                 <label className="mt-4 block text-sm font-semibold text-[#55311c]">
-                  Número de telefone
+                  Mobile number
                   <input
                     type="tel"
                     value={mobile}
@@ -189,7 +187,7 @@ function KeyAccess() {
                     autoComplete="tel"
                     required
                     className="mt-2 w-full rounded-lg border border-[#ddd] px-4 py-3 text-[#55311c] focus:border-[#8c7569] focus:outline-none"
-                    placeholder="Número de telefone"
+                    placeholder="Mobile number"
                   />
                 </label>
 
@@ -199,10 +197,10 @@ function KeyAccess() {
                   className="mt-6 w-full rounded-lg bg-[#8c7569] px-6 py-3 text-lg font-semibold text-white transition-all duration-300 hover:bg-[#55311c] disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {mutation.isPending
-                    ? "Registrando..."
+                    ? "Saving..."
                     : isReturning
-                      ? "Confirmar devolução"
-                      : "Confirmar retirada"}
+                      ? "Confirm check in"
+                      : "Confirm check out"}
                 </button>
               </form>
             </>

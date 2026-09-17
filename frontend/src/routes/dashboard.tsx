@@ -12281,27 +12281,6 @@ function KeysContent() {
         </p>
       </div>
 
-      <div className="mb-6 rounded-lg bg-white p-5 shadow-md">
-        <label className="block max-w-sm text-sm font-semibold text-[#55311c]">
-          Building
-          <select
-            value={selectedBuilding}
-            onChange={(event) => {
-              setSelectedBuilding(event.target.value)
-              setHistoryPage(0)
-            }}
-            className="mt-2 w-full rounded-lg border border-[#ddd] bg-white px-3 py-2 text-[#55311c] focus:border-[#8c7569] focus:outline-none"
-          >
-            <option value="all">All</option>
-            {buildings.map((building) => (
-              <option key={building} value={building}>
-                {building}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-
       <div className="mb-6 grid gap-4 sm:grid-cols-3">
         <SummaryCard label="Total keys" value={filteredKeys.length} />
         <SummaryCard
@@ -12315,6 +12294,15 @@ function KeysContent() {
           tone="success"
         />
       </div>
+
+      <BuildingFilterButtons
+        buildings={buildings}
+        selectedBuilding={selectedBuilding}
+        onSelect={(building) => {
+          setSelectedBuilding(building)
+          setHistoryPage(0)
+        }}
+      />
 
       <section className="mb-8 rounded-lg bg-white p-6 shadow-md">
         <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
@@ -12505,12 +12493,60 @@ function SummaryCard({
   )
 }
 
+function BuildingFilterButtons({
+  buildings,
+  selectedBuilding,
+  onSelect,
+}: {
+  buildings: string[]
+  selectedBuilding: string
+  onSelect: (building: string) => void
+}) {
+  return (
+    <div className="mb-6 rounded-lg bg-white p-5 shadow-md">
+      <p className="mb-3 text-sm font-semibold text-[#55311c]">Building</p>
+      <div className="flex flex-wrap gap-2">
+        {["all", ...buildings].map((building) => {
+          const isSelected = selectedBuilding === building
+          return (
+            <button
+              key={building}
+              type="button"
+              aria-pressed={isSelected}
+              onClick={() => onSelect(building)}
+              className={`rounded-full px-4 py-2 text-sm font-semibold transition-all duration-200 ${
+                isSelected
+                  ? "bg-[#8c7569] text-white shadow"
+                  : "border border-[#d9d0ca] bg-white text-[#55311c] hover:bg-[#f5f1ee]"
+              }`}
+            >
+              {building === "all" ? "All" : building}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function KeysQrCodesContent() {
   const { data: keysData, isLoading } = useQuery<ApiListResponse<KeyRecord>>({
     queryKey: ["keys", "qr"],
     queryFn: () => apiCall("/api/v1/key-access/keys"),
   })
   const keys = useMemo(() => keysData?.data || [], [keysData?.data])
+  const [selectedBuilding, setSelectedBuilding] = useState("all")
+  const buildings = useMemo(
+    () => [...new Set(keys.map((key) => key.building_name))].sort(),
+    [keys],
+  )
+  const filteredKeys = useMemo(
+    () =>
+      selectedBuilding === "all"
+        ? keys
+        : keys.filter((key) => key.building_name === selectedBuilding),
+    [keys, selectedBuilding],
+  )
   const baseUrl = useMemo(
     () => (typeof window === "undefined" ? "" : window.location.origin),
     [],
@@ -12524,13 +12560,13 @@ function KeysQrCodesContent() {
     let isActive = true
 
     const generateQRCodes = async () => {
-      if (!baseUrl || keys.length === 0) {
+      if (!baseUrl || filteredKeys.length === 0) {
         setQrMap({})
         return
       }
       setIsGenerating(true)
       const entries = await Promise.all(
-        keys.map(async (key) => {
+        filteredKeys.map(async (key) => {
           const params = new URLSearchParams({ flatId: String(key.flat_id) })
           const link = `${baseUrl}/key-access?${params.toString()}`
           const dataUrl = await QRCode.toDataURL(link, { width: 240, margin: 1 })
@@ -12550,7 +12586,7 @@ function KeysQrCodesContent() {
     return () => {
       isActive = false
     }
-  }, [baseUrl, keys])
+  }, [baseUrl, filteredKeys])
 
   const formatFlat = (key: KeyRecord) =>
     key.flat_label?.trim() || String(key.flat_numero)
@@ -12566,19 +12602,25 @@ function KeysQrCodesContent() {
         </p>
       </div>
 
+      <BuildingFilterButtons
+        buildings={buildings}
+        selectedBuilding={selectedBuilding}
+        onSelect={setSelectedBuilding}
+      />
+
       {(isLoading || isGenerating) && (
         <div className="rounded-lg bg-white p-6 text-center text-sm text-[#55311c] shadow-md">
           Generating QR codes...
         </div>
       )}
-      {!isLoading && keys.length === 0 && (
+      {!isLoading && filteredKeys.length === 0 && (
         <div className="rounded-lg bg-white p-6 text-center text-sm text-[rgba(0,0,0,0.7)] shadow-md">
-          No flats found.
+          No keys found for this building.
         </div>
       )}
 
       <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-        {keys.map((key) => {
+        {filteredKeys.map((key) => {
           const qrItem = qrMap[String(key.flat_id)]
           const slug = key.key_code.toLowerCase().replace(/[^a-z0-9]+/g, "-")
           return (

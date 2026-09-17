@@ -4882,7 +4882,7 @@ function CashFlowContent() {
 
               <div className="grid gap-4">
                 <label className="grid gap-2">
-                  <span className={labelClass}>Description</span>
+                  <span className={labelClass}>Notes</span>
                   <input
                     className={inputClass}
                     value={form.description}
